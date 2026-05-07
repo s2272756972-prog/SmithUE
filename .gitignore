@@ -1,0 +1,28 @@
+# UE Plugin build artifacts
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# IDE files
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+.vs/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Sample plugins (reference only, not part of UEAgent)
+Sample/
+
+# Sisyphus work state
+.sisyphus/
+.claude/
+.agents/
+skills-lock.json
