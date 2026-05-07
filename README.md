@@ -214,28 +214,36 @@ The `generate_texture` command bridges the editor with modern generative AI. It 
 
 ## Roadmap / 路线图
 
-We are committed to expanding UEAgent into a comprehensive AI-first development toolkit.
+We are committed to expanding UEAgent into a comprehensive AI-first development toolkit, with a focus on digital twin and simulation workflows.
 
-我们致力于将 UEAgent 扩展为全面的 AI 优先开发工具包.
+我们致力于将 UEAgent 扩展为全面的 AI 优先开发工具包, 聚焦数字孪生与仿真工作流.
 
 *   **v1.1**
     *   MCP (Model Context Protocol) support for direct LLM integration.
         支持 MCP (模型上下文协议), 实现与大语言模型的直接集成.
-    *   Animation Blueprint analysis + nomnoml output.
-        动画蓝图分析 + nomnoml 输出.
+    *   Blueprint logic generation - AI-driven EventGraph / FunctionGraph construction from natural language.
+        蓝图逻辑生成 - 从自然语言驱动 AI 自动构建事件图 / 函数图.
+    *   Material Blueprint generation - programmatic material node network assembly.
+        材质蓝图生成 - 程序化材质节点网络组装.
 *   **v1.2**
-    *   Live collaboration mode (multi-client support).
-        实时协作模式 (多客户端支持).
+    *   Digital twin scene construction - procedural environment generation from data sources (GIS, point cloud, CAD).
+        数字孪生场景构建 - 从数据源 (GIS, 点云, CAD) 程序化生成环境.
+    *   Sensor simulation commands - LiDAR, camera, radar actor spawning and configuration.
+        传感器仿真命令 - LiDAR, 摄像头, 雷达 Actor 的生成与配置.
     *   Python binding / REST SDK.
         Python 绑定 / REST SDK.
 *   **v1.3**
     *   Runtime game state observation (PIE mode commands).
         运行时游戏状态观察 (PIE 模式命令).
-    *   Auto-documentation generation from Blueprint graphs.
-        从蓝图图表自动生成文档.
+    *   Live data streaming - real-time external data injection into simulation actors.
+        实时数据流 - 将外部实时数据注入仿真 Actor.
+    *   Multi-client collaboration mode.
+        多客户端协作模式.
 *   **v2.0**
     *   Full AI copilot mode - natural language → Blueprint compilation pipeline.
         全 AI 辅助驾驶模式 - 自然语言 → 蓝图编译流水线.
+    *   Scenario orchestration - programmatic traffic / pedestrian / weather control for simulation.
+        场景编排 - 程序化交通 / 行人 / 天气控制用于仿真.
 
 ---
 
