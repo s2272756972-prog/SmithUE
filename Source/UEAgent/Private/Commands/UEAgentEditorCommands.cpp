@@ -7,6 +7,7 @@
 #include "UEAgentModule.h"
 #include "Editor.h"
 #include "Engine/World.h"
+#include "Engine/PostProcessVolume.h"
 #include "GameFramework/Actor.h"
 #include "EngineUtils.h"
 #include "LevelEditor.h"
@@ -19,6 +20,8 @@
 #include "JsonObjectConverter.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Editor/TransBuffer.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInterface.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -165,6 +168,19 @@ void FUEAgentEditorCommands::RegisterTools(FUEAgentToolRegistry& Registry)
             TEXT("Get the active editor viewport camera location, rotation and FOV"),
             {}),
         &HandleGetViewportInfo);
+
+    // add_postprocess_material
+    Registry.Register(
+        FUEAgentToolSchema(
+            TEXT("add_postprocess_material"),
+            TEXT("Editor"),
+            TEXT("Add a material to a PostProcessVolume's blendable list"),
+            {
+                FUEAgentToolParam(TEXT("actor_label"),   TEXT("string"), TEXT("PostProcessVolume actor label"), true),
+                FUEAgentToolParam(TEXT("material_path"), TEXT("string"), TEXT("Material asset path (e.g. /Game/Materials/M_PP_ThermalVision)"), true),
+                FUEAgentToolParam(TEXT("weight"),        TEXT("number"), TEXT("Blend weight (0.0-1.0, default 1.0)"))
+            }),
+        &HandleAddPostProcessMaterial);
 }
 
 // ---------------------------------------------------------------------------
@@ -514,5 +530,77 @@ TSharedPtr<FJsonObject> FUEAgentEditorCommands::HandleGetViewportInfo(const TSha
     Data->SetObjectField(TEXT("location"), LocObj);
     Data->SetObjectField(TEXT("rotation"), RotObj);
     Data->SetNumberField(TEXT("fov"), FOV);
+    return FUEAgentCommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command 6: add_postprocess_material
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FUEAgentEditorCommands::HandleAddPostProcessMaterial(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorLabel;
+    if (!Params->TryGetStringField(TEXT("actor_label"), ActorLabel) || ActorLabel.IsEmpty())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Missing required param: 'actor_label'"));
+    }
+
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Missing required param: 'material_path'"));
+    }
+
+    double Weight = 1.0;
+    Params->TryGetNumberField(TEXT("weight"), Weight);
+
+    // Find actor
+    AActor* Actor = FindActorByLabel(ActorLabel);
+    if (!Actor)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Actor not found: '%s'"), *ActorLabel));
+    }
+
+    APostProcessVolume* PPV = Cast<APostProcessVolume>(Actor);
+    if (!PPV)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Actor '%s' is not a PostProcessVolume (class: %s)"),
+                *ActorLabel, *Actor->GetClass()->GetName()));
+    }
+
+    // Load material
+    UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+    if (!Material)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Material not found at path: '%s'"), *MaterialPath));
+    }
+
+    // Add to blendables
+    const FScopedTransaction Transaction(FText::FromString(TEXT("UEAgent: Add PostProcess Material")));
+    PPV->Modify();
+
+    FWeightedBlendable Entry;
+    Entry.Weight = (float)Weight;
+    Entry.Object = Material;
+    PPV->Settings.WeightedBlendables.Array.Add(Entry);
+
+    // Mark dirty + force viewport redraw
+    PPV->MarkPackageDirty();
+    if (GEditor)
+    {
+        GEditor->RedrawLevelEditingViewports();
+    }
+
+    UE_LOG(LogUEAgent, Log, TEXT("add_postprocess_material: added '%s' to '%s' (weight=%.2f)"),
+        *MaterialPath, *ActorLabel, Weight);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("actor_label"), ActorLabel);
+    Data->SetStringField(TEXT("material_path"), MaterialPath);
+    Data->SetNumberField(TEXT("weight"), Weight);
+    Data->SetNumberField(TEXT("blendable_count"), PPV->Settings.WeightedBlendables.Array.Num());
     return FUEAgentCommonUtils::CreateSuccessResponse(Data);
 }

@@ -14,4 +14,5 @@ private:
     static TSharedPtr<FJsonObject> HandleSetActorProperty(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleDeleteActor(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleGetViewportInfo(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleAddPostProcessMaterial(const TSharedPtr<FJsonObject>& Params);
 };

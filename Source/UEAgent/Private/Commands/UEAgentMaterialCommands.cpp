@@ -9,6 +9,7 @@
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionTextureSample.h"
 #include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionCustom.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
@@ -29,25 +30,24 @@ namespace
     /** Resolve a short or full expression class name to a UClass. */
     UClass* ResolveExpressionClass(const FString& ClassName)
     {
-        // Try exact name first (e.g. "UMaterialExpressionConstant3Vector")
-        UClass* Found = FindObject<UClass>(nullptr, *ClassName, true);
-        if (Found)
+        // Build candidate names
+        TArray<FString> Candidates;
+        Candidates.Add(ClassName);
+        Candidates.Add(TEXT("U") + ClassName);
+        Candidates.Add(TEXT("UMaterialExpression") + ClassName);
+        Candidates.Add(TEXT("MaterialExpression") + ClassName);
+
+        for (const FString& Name : Candidates)
         {
-            return Found;
+            // Use FindFirstObject which searches all packages (UE5.2 compatible)
+            UClass* Found = FindFirstObject<UClass>(*Name, EFindFirstObjectOptions::NativeFirst);
+            if (Found && Found->IsChildOf(UMaterialExpression::StaticClass()))
+            {
+                return Found;
+            }
         }
 
-        // Try with "U" prefix
-        const FString WithU = TEXT("U") + ClassName;
-        Found = FindObject<UClass>(nullptr, *WithU, true);
-        if (Found)
-        {
-            return Found;
-        }
-
-        // Try with full "UMaterialExpression" prefix
-        const FString WithFull = TEXT("UMaterialExpression") + ClassName;
-        Found = FindObject<UClass>(nullptr, *WithFull, true);
-        return Found;
+        return nullptr;
     }
 
     /** Map dest_input_index to a material base input. Returns nullptr if out of range. */
@@ -152,6 +152,41 @@ void FUEAgentMaterialCommands::RegisterTools(FUEAgentToolRegistry& Registry)
         [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
         {
             return FUEAgentMaterialCommands::HandleCompileMaterial(Params);
+        });
+
+    // set_material_property
+    Registry.Register(
+        FUEAgentToolSchema(
+            TEXT("set_material_property"),
+            TEXT("Material"),
+            TEXT("Set material properties (domain, blend_mode, shading_model, two_sided, blendable_location)"),
+            {
+                FUEAgentToolParam(TEXT("material_path"), TEXT("string"), TEXT("Full asset path"), true),
+                FUEAgentToolParam(TEXT("domain"), TEXT("string"), TEXT("Material domain: surface, deferred_decal, light_function, volume, post_process, ui")),
+                FUEAgentToolParam(TEXT("blend_mode"), TEXT("string"), TEXT("Blend mode: opaque, masked, translucent, additive, modulate, alpha_composite, alpha_holdout")),
+                FUEAgentToolParam(TEXT("shading_model"), TEXT("string"), TEXT("Shading model: unlit, default_lit, subsurface, clear_coat, etc.")),
+                FUEAgentToolParam(TEXT("two_sided"), TEXT("bool"), TEXT("Enable two-sided rendering")),
+                FUEAgentToolParam(TEXT("blendable_location"), TEXT("string"), TEXT("For PostProcess: before_tonemapping, after_tonemapping, before_translucency, replacing_tonemapper, ssr_input"))
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FUEAgentMaterialCommands::HandleSetMaterialProperty(Params);
+        });
+
+    // set_expression_property
+    Registry.Register(
+        FUEAgentToolSchema(
+            TEXT("set_expression_property"),
+            TEXT("Material"),
+            TEXT("Set properties on a material expression node (e.g. Custom HLSL code, constant values, texture)"),
+            {
+                FUEAgentToolParam(TEXT("material_path"), TEXT("string"), TEXT("Full asset path"), true),
+                FUEAgentToolParam(TEXT("expression_index"), TEXT("number"), TEXT("Index of expression in Expressions array"), true),
+                FUEAgentToolParam(TEXT("properties"), TEXT("object"), TEXT("Key-value pairs to set. For Custom: code, output_type(float/float2/float3/float4), description, inputs(array of {name,type})"), true)
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FUEAgentMaterialCommands::HandleSetExpressionProperty(Params);
         });
 }
 
@@ -464,5 +499,306 @@ TSharedPtr<FJsonObject> FUEAgentMaterialCommands::HandleCompileMaterial(const TS
     Data->SetBoolField(TEXT("compiled"), true);
     Data->SetBoolField(TEXT("has_errors"), bHasErrors);
     Data->SetStringField(TEXT("material_path"), MaterialPath);
+    return FUEAgentCommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// set_material_property
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FUEAgentMaterialCommands::HandleSetMaterialProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+    }
+
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
+    }
+
+    UMaterial* Material = LoadMaterial(MaterialPath);
+    if (!Material)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    TArray<FString> Changed;
+
+    // Material Domain
+    FString Domain;
+    if (Params->TryGetStringField(TEXT("domain"), Domain) && !Domain.IsEmpty())
+    {
+        if (Domain == TEXT("surface"))             { Material->MaterialDomain = MD_Surface; }
+        else if (Domain == TEXT("deferred_decal")) { Material->MaterialDomain = MD_DeferredDecal; }
+        else if (Domain == TEXT("light_function")) { Material->MaterialDomain = MD_LightFunction; }
+        else if (Domain == TEXT("volume"))         { Material->MaterialDomain = MD_Volume; }
+        else if (Domain == TEXT("post_process"))   { Material->MaterialDomain = MD_PostProcess; }
+        else if (Domain == TEXT("ui"))             { Material->MaterialDomain = MD_UI; }
+        else
+        {
+            return FUEAgentCommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Unknown domain: %s"), *Domain));
+        }
+        Changed.Add(TEXT("domain"));
+    }
+
+    // Blend Mode
+    FString BlendMode;
+    if (Params->TryGetStringField(TEXT("blend_mode"), BlendMode) && !BlendMode.IsEmpty())
+    {
+        if (BlendMode == TEXT("opaque"))              { Material->BlendMode = BLEND_Opaque; }
+        else if (BlendMode == TEXT("masked"))         { Material->BlendMode = BLEND_Masked; }
+        else if (BlendMode == TEXT("translucent"))    { Material->BlendMode = BLEND_Translucent; }
+        else if (BlendMode == TEXT("additive"))       { Material->BlendMode = BLEND_Additive; }
+        else if (BlendMode == TEXT("modulate"))       { Material->BlendMode = BLEND_Modulate; }
+        else if (BlendMode == TEXT("alpha_composite")) { Material->BlendMode = BLEND_AlphaComposite; }
+        else if (BlendMode == TEXT("alpha_holdout"))  { Material->BlendMode = BLEND_AlphaHoldout; }
+        else
+        {
+            return FUEAgentCommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Unknown blend_mode: %s"), *BlendMode));
+        }
+        Changed.Add(TEXT("blend_mode"));
+    }
+
+    // Shading Model
+    FString ShadingModel;
+    if (Params->TryGetStringField(TEXT("shading_model"), ShadingModel) && !ShadingModel.IsEmpty())
+    {
+        if (ShadingModel == TEXT("unlit"))           { Material->SetShadingModel(MSM_Unlit); }
+        else if (ShadingModel == TEXT("default_lit")) { Material->SetShadingModel(MSM_DefaultLit); }
+        else if (ShadingModel == TEXT("subsurface")) { Material->SetShadingModel(MSM_Subsurface); }
+        else if (ShadingModel == TEXT("clear_coat")) { Material->SetShadingModel(MSM_ClearCoat); }
+        else
+        {
+            return FUEAgentCommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Unknown shading_model: %s"), *ShadingModel));
+        }
+        Changed.Add(TEXT("shading_model"));
+    }
+
+    // Two-Sided
+    bool bTwoSided = false;
+    if (Params->TryGetBoolField(TEXT("two_sided"), bTwoSided))
+    {
+        Material->TwoSided = bTwoSided;
+        Changed.Add(TEXT("two_sided"));
+    }
+
+    // Blendable Location (PostProcess only)
+    FString BlendableLoc;
+    if (Params->TryGetStringField(TEXT("blendable_location"), BlendableLoc) && !BlendableLoc.IsEmpty())
+    {
+        if (BlendableLoc == TEXT("before_tonemapping"))      { Material->BlendableLocation = BL_BeforeTonemapping; }
+        else if (BlendableLoc == TEXT("after_tonemapping"))  { Material->BlendableLocation = BL_AfterTonemapping; }
+        else if (BlendableLoc == TEXT("before_translucency")) { Material->BlendableLocation = BL_BeforeTranslucency; }
+        else if (BlendableLoc == TEXT("replacing_tonemapper")) { Material->BlendableLocation = BL_ReplacingTonemapper; }
+        else if (BlendableLoc == TEXT("ssr_input"))          { Material->BlendableLocation = BL_SSRInput; }
+        else
+        {
+            return FUEAgentCommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Unknown blendable_location: %s"), *BlendableLoc));
+        }
+        Changed.Add(TEXT("blendable_location"));
+    }
+
+    if (Changed.Num() == 0)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("No properties specified to set"));
+    }
+
+    Material->PostEditChange();
+    Material->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("material_path"), MaterialPath);
+    TArray<TSharedPtr<FJsonValue>> ChangedArr;
+    for (const FString& Prop : Changed)
+    {
+        ChangedArr.Add(MakeShared<FJsonValueString>(Prop));
+    }
+    Data->SetArrayField(TEXT("changed"), ChangedArr);
+    return FUEAgentCommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// set_expression_property
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FUEAgentMaterialCommands::HandleSetExpressionProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+    }
+
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
+    }
+
+    double ExprIndexD = -1.0;
+    if (!Params->TryGetNumberField(TEXT("expression_index"), ExprIndexD))
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Missing required parameter: expression_index"));
+    }
+    const int32 ExprIndex = static_cast<int32>(ExprIndexD);
+
+    const TSharedPtr<FJsonObject>* PropsPtr = nullptr;
+    if (!Params->TryGetObjectField(TEXT("properties"), PropsPtr) || !PropsPtr || !PropsPtr->IsValid())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Missing required parameter: properties"));
+    }
+    const TSharedPtr<FJsonObject>& Props = *PropsPtr;
+
+    UMaterial* Material = LoadMaterial(MaterialPath);
+    if (!Material)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    if (ExprIndex < 0 || ExprIndex >= Material->GetExpressions().Num())
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("expression_index %d out of range (0..%d)"),
+                ExprIndex, Material->GetExpressions().Num() - 1));
+    }
+
+    UMaterialExpression* Expr = Material->GetExpressions()[ExprIndex];
+    if (!Expr)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Expression is null"));
+    }
+
+    TArray<FString> Changed;
+
+    // Description (all expressions)
+    FString Desc;
+    if (Props->TryGetStringField(TEXT("description"), Desc))
+    {
+        Expr->Desc = Desc;
+        Changed.Add(TEXT("description"));
+    }
+
+    // Handle UMaterialExpressionCustom specific properties
+    UMaterialExpressionCustom* CustomExpr = Cast<UMaterialExpressionCustom>(Expr);
+    if (CustomExpr)
+    {
+        // HLSL Code
+        FString Code;
+        if (Props->TryGetStringField(TEXT("code"), Code))
+        {
+            CustomExpr->Code = Code;
+            Changed.Add(TEXT("code"));
+        }
+
+        // Output Type
+        FString OutputType;
+        if (Props->TryGetStringField(TEXT("output_type"), OutputType))
+        {
+            if (OutputType == TEXT("float") || OutputType == TEXT("float1"))       { CustomExpr->OutputType = CMOT_Float1; }
+            else if (OutputType == TEXT("float2"))                                  { CustomExpr->OutputType = CMOT_Float2; }
+            else if (OutputType == TEXT("float3"))                                  { CustomExpr->OutputType = CMOT_Float3; }
+            else if (OutputType == TEXT("float4"))                                  { CustomExpr->OutputType = CMOT_Float4; }
+            else
+            {
+                return FUEAgentCommonUtils::CreateErrorResponse(
+                    FString::Printf(TEXT("Unknown output_type: %s (use float/float1/float2/float3/float4)"), *OutputType));
+            }
+            Changed.Add(TEXT("output_type"));
+        }
+
+        // Custom Inputs
+        const TArray<TSharedPtr<FJsonValue>>* InputsArr = nullptr;
+        if (Props->TryGetArrayField(TEXT("inputs"), InputsArr) && InputsArr)
+        {
+            CustomExpr->Inputs.Empty();
+            for (const TSharedPtr<FJsonValue>& InputVal : *InputsArr)
+            {
+                const TSharedPtr<FJsonObject> InputObj = InputVal.IsValid() ? InputVal->AsObject() : nullptr;
+                if (!InputObj.IsValid())
+                {
+                    continue;
+                }
+                FCustomInput NewInput;
+                FString InputName;
+                if (InputObj->TryGetStringField(TEXT("name"), InputName))
+                {
+                    NewInput.InputName = FName(*InputName);
+                }
+                CustomExpr->Inputs.Add(NewInput);
+            }
+            Changed.Add(TEXT("inputs"));
+        }
+    }
+
+    // Handle UMaterialExpressionConstant
+    UMaterialExpressionConstant* ConstExpr = Cast<UMaterialExpressionConstant>(Expr);
+    if (ConstExpr)
+    {
+        double R = 0.0;
+        if (Props->TryGetNumberField(TEXT("value"), R))
+        {
+            ConstExpr->R = static_cast<float>(R);
+            Changed.Add(TEXT("value"));
+        }
+    }
+
+    // Handle UMaterialExpressionConstant3Vector
+    UMaterialExpressionConstant3Vector* Const3Expr = Cast<UMaterialExpressionConstant3Vector>(Expr);
+    if (Const3Expr)
+    {
+        double R = 0, G = 0, B = 0;
+        if (Props->TryGetNumberField(TEXT("r"), R)) { Const3Expr->Constant.R = static_cast<float>(R); Changed.Add(TEXT("r")); }
+        if (Props->TryGetNumberField(TEXT("g"), G)) { Const3Expr->Constant.G = static_cast<float>(G); Changed.Add(TEXT("g")); }
+        if (Props->TryGetNumberField(TEXT("b"), B)) { Const3Expr->Constant.B = static_cast<float>(B); Changed.Add(TEXT("b")); }
+    }
+
+    // Handle SceneTexture ID via reflection (avoids linking to unexported class)
+    FString SceneTexId;
+    if (Props->TryGetStringField(TEXT("scene_texture_id"), SceneTexId))
+    {
+        FProperty* Prop = Expr->GetClass()->FindPropertyByName(TEXT("SceneTextureId"));
+        if (Prop)
+        {
+            // ESceneTextureId enum values
+            uint8 TexId = 14; // PPI_PostProcessInput0 default
+            if (SceneTexId == TEXT("post_process_input_0") || SceneTexId == TEXT("scene_color")) { TexId = 14; }
+            else if (SceneTexId == TEXT("scene_depth")) { TexId = 1; }
+            else if (SceneTexId == TEXT("custom_depth")) { TexId = 12; }
+
+            void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Expr);
+            if (ValuePtr)
+            {
+                *static_cast<uint8*>(ValuePtr) = TexId;
+                Changed.Add(TEXT("scene_texture_id"));
+            }
+        }
+    }
+
+    if (Changed.Num() == 0)
+    {
+        return FUEAgentCommonUtils::CreateErrorResponse(TEXT("No recognized properties were set. Check expression type and property names."));
+    }
+
+    Material->PostEditChange();
+    Material->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("material_path"), MaterialPath);
+    Data->SetNumberField(TEXT("expression_index"), ExprIndex);
+    Data->SetStringField(TEXT("expression_class"), Expr->GetClass()->GetName());
+    TArray<TSharedPtr<FJsonValue>> ChangedArr;
+    for (const FString& Prop : Changed)
+    {
+        ChangedArr.Add(MakeShared<FJsonValueString>(Prop));
+    }
+    Data->SetArrayField(TEXT("changed"), ChangedArr);
     return FUEAgentCommonUtils::CreateSuccessResponse(Data);
 }
