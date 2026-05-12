@@ -76,9 +76,9 @@ UEAgent 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-UEAgent provides 64 specialized commands organized across 7 functional domains.
+UEAgent provides 64 specialized commands organized across 8 functional domains.
 
-UEAgent 提供了分布在 7 个功能领域的 64 个专业命令.
+UEAgent 提供了分布在 8 个功能领域的 64 个专业命令.
 
 ### System / 系统 (8 commands)
 Commands for managing project state, settings, and filesystem.
@@ -95,9 +95,9 @@ Commands for managing project state, settings, and filesystem.
 | `create_folder` | Create a new directory in Content Browser / 在内容浏览器中创建新目录 |
 | `get_source_files` | List C++ source files for project modules / 列出项目模块的 C++ 源文件 |
 
-### Asset / 资产 (14 commands)
-Manage assets, materials, and integrate external AI generation.
-管理资产, 材质并集成外部 AI 生成.
+### Asset / 资产 (7 commands)
+Manage assets and integrate external AI generation.
+管理资产并集成外部 AI 生成.
 
 | Command | Description / 描述 |
 | :--- | :--- |
@@ -106,6 +106,15 @@ Manage assets, materials, and integrate external AI generation.
 | `get_asset_info` | Retrieve detailed asset metadata / 获取详细的资产元数据 |
 | `rename_asset` | Rename asset with redirect fixup / 重命名资产并修复重定向 |
 | `duplicate_asset` | Create a copy of an asset / 创建资产副本 |
+| `generate_texture` | Async texture generation via AI API / 通过 AI API 异步生成纹理 |
+| `check_generation_task` | Poll status of texture generation / 轮询纹理生成状态 |
+
+### Material / 材质 (7 commands)
+Programmatic material creation, node graph assembly, property configuration and compilation.
+程序化材质创建, 节点图组装, 属性配置与编译.
+
+| Command | Description / 描述 |
+| :--- | :--- |
 | `create_material` | Create Material or MaterialInstance / 创建材质或材质实例 |
 | `get_material_info` | Inspect material graph structure / 检查材质图表结构 |
 | `set_material_property` | Set material-level properties (domain, blend mode, shading model, two-sided, blendable location) / 设置材质级属性 (域, 混合模式, 着色模型, 双面, 可混合位置) |
@@ -113,8 +122,6 @@ Manage assets, materials, and integrate external AI generation.
 | `add_material_expression` | Add expression node to material / 向材质添加表达式节点 |
 | `connect_material_pins` | Link material expression pins / 连接材质表达式引脚 |
 | `compile_material` | Trigger material compilation / 触发材质编译 |
-| `generate_texture` | Async texture generation via AI API / 通过 AI API 异步生成纹理 |
-| `check_generation_task` | Poll status of texture generation / 轮询纹理生成状态 |
 
 ### Editor / 编辑器 (12 commands)
 Level stage control and actor lifecycle management.
