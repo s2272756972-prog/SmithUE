@@ -20,7 +20,7 @@ export class SmithUEClient {
     const timer = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(this.baseUrl, {
+      const response = await fetch(`${this.baseUrl}/api/v1/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command, params }),
