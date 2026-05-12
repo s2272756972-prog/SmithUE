@@ -76,9 +76,9 @@ UEAgent 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-UEAgent provides 64 specialized commands organized across 8 functional domains.
+UEAgent provides 65 specialized commands organized across 8 functional domains.
 
-UEAgent 提供了分布在 8 个功能领域的 64 个专业命令.
+UEAgent 提供了分布在 8 个功能领域的 65 个专业命令.
 
 ### System / 系统 (8 commands)
 Commands for managing project state, settings, and filesystem.
@@ -142,7 +142,7 @@ Level stage control and actor lifecycle management.
 | `simulate_key` | Send keyboard input to the editor / 向编辑器发送键盘输入 |
 | `list_key_bindings` | List editor keyboard shortcuts / 列出编辑器键盘快捷键 |
 
-### Blueprint / 蓝图 (13 commands)
+### Blueprint / 蓝图 (14 commands)
 Deep integration for programmatic Blueprint construction and DSL compilation.
 用于程序化蓝图构建和 DSL 编译的深度集成.
 
@@ -150,11 +150,12 @@ Deep integration for programmatic Blueprint construction and DSL compilation.
 | :--- | :--- |
 | `bp_create` | Create a new Blueprint class / 创建新的蓝图类 |
 | `bp_add_function` | Add function graph to Blueprint / 向蓝图添加函数图表 |
-| `bp_create_node` | Instantiate a node in Blueprint graph / 在蓝图图表中实例化节点 |
+| `bp_create_node` | Instantiate a node in Blueprint graph (supports CallFunction, VariableGet/Set, MacroInstance, InputKey, etc.) / 在蓝图图表中实例化节点 (支持 CallFunction, VariableGet/Set, MacroInstance, InputKey 等) |
 | `bp_connect_pins` | Connect two Blueprint pins / 连接两个蓝图引脚 |
 | `bp_set_pin_default` | Set default value for a pin / 设置引脚的默认值 |
 | `bp_add_variable` | Add member variable to Blueprint / 向蓝图添加成员变量 |
 | `bp_add_component` | Add component to Blueprint SCS / 向蓝图 SCS 添加组件 |
+| `bp_set_component_property` | Set property on Blueprint SCS or inherited component template, with special handling for PostProcessMaterial on Camera/PostProcess components / 设置蓝图 SCS 或继承组件模板属性, 含 Camera/PostProcess 组件的 PostProcessMaterial 特殊处理 |
 | `bp_compile` | Compile Blueprint and report errors / 编译蓝图并报告错误 |
 | `bp_get_summary` | Rich Blueprint structural summary (function signatures with params/return types, node counts, custom events, delegates, input bindings, interfaces, variable flags, component hierarchy) / 丰富的蓝图结构摘要 (函数签名含参数/返回类型, 节点数, 自定义事件, 委托, 输入绑定, 接口, 变量标志, 组件层级) |
 | `bp_describe_graph` | Compact graph description with short IDs (N0-Nn), ~38% size reduction vs GUIDs, multi-connection support, id_to_guid mapping / 紧凑图表描述使用短 ID (N0-Nn), 比 GUID 减少约 38% 体积, 多连接支持, id_to_guid 映射 |
@@ -233,6 +234,8 @@ We are committed to expanding UEAgent into a comprehensive AI-first development 
         支持 MCP (模型上下文协议), 实现与大语言模型的直接集成.
     *   Blueprint logic generation - AI-driven EventGraph / FunctionGraph construction from natural language.
         蓝图逻辑生成 - 从自然语言驱动 AI 自动构建事件图 / 函数图.
+        🔧 **Progress in v1.0.2** — `bp_set_component_property` (SCS/inherited component template properties, PostProcessMaterial special handling), `bp_create_node` now supports `K2Node_InputKey` for keyboard event binding. Verified with thermal vision toggle (PostProcessComponent + InputKey T + FlipFlop).
+        🔧 **v1.0.2 进展** — `bp_set_component_property` (SCS/继承组件模板属性, PostProcessMaterial 特殊处理), `bp_create_node` 现支持 `K2Node_InputKey` 键盘事件绑定. 已通过热成像切换验证 (PostProcessComponent + InputKey T + FlipFlop).
     *   ~~Material Blueprint generation - programmatic material node network assembly.~~
         ~~材质蓝图生成 - 程序化材质节点网络组装.~~
         ✅ **Done in v1.0.1** — Full material creation pipeline: `create_material` → `set_material_property` → `add_material_expression` → `set_expression_property` → `connect_material_pins` → `compile_material` → `add_postprocess_material`. Verified with a thermal vision post-process material end-to-end.

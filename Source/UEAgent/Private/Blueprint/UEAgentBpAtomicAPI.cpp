@@ -5,7 +5,10 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/UEAgentBpAtomicAPIHelpers.h"
 #include "Components/ActorComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Camera/CameraComponent.h"
+#include "Materials/MaterialInterface.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "EdGraph/EdGraph.h"
@@ -20,6 +23,7 @@
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
 #include "K2Node_IfThenElse.h"
+#include "K2Node_InputKey.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
@@ -43,6 +47,7 @@ void FUEAgentBpAtomicAPI::RegisterTools(FUEAgentToolRegistry& Registry)
 	Registry.Register(FUEAgentToolSchema(TEXT("bp_set_pin_default"), TEXT("Blueprint"), TEXT("Set a Blueprint node pin default value"), { FUEAgentToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FUEAgentToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FUEAgentToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true), FUEAgentToolParam(TEXT("pin_name"), TEXT("string"), TEXT("Pin name"), true), FUEAgentToolParam(TEXT("value"), TEXT("string"), TEXT("Default value string"), true) }), &HandleBpSetPinDefault);
 	Registry.Register(FUEAgentToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FUEAgentToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FUEAgentToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FUEAgentToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FUEAgentToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FUEAgentToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
 	Registry.Register(FUEAgentToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FUEAgentToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FUEAgentToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FUEAgentToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FUEAgentToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false) }), &HandleBpAddComponent);
+	Registry.Register(FUEAgentToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FUEAgentToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FUEAgentToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FUEAgentToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FUEAgentToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
 	Registry.Register(FUEAgentToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FUEAgentToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true) }), &HandleBpCompile);
 }
 
@@ -116,6 +121,14 @@ FString FUEAgentBpAtomicAPI::CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, 
 		FString MacroPath;
 		if (!ExtraParams.IsValid() || !ExtraParams->TryGetStringField(TEXT("macro_path"), MacroPath)) { return FString(); }
 		if (UEdGraph* MacroGraph = ResolveMacroGraph(MacroPath)) { MacroNode->SetMacroGraph(MacroGraph); } else { return FString(); }
+	}
+	else if (UK2Node_InputKey* InputKeyNode = Cast<UK2Node_InputKey>(NewNode))
+	{
+		FString KeyName;
+		if (ExtraParams.IsValid() && ExtraParams->TryGetStringField(TEXT("key"), KeyName))
+		{
+			InputKeyNode->InputKey = FKey(*KeyName);
+		}
 	}
 	Graph->Modify();
 	NewNode->SetFlags(RF_Transactional);
@@ -333,6 +346,191 @@ TSharedPtr<FJsonObject> FUEAgentBpAtomicAPI::HandleBpAddComponent(const TSharedP
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("component_name"), ComponentName);
+	return FUEAgentCommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// bp_set_component_property
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FUEAgentBpAtomicAPI::HandleBpSetComponentProperty(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FUEAgentCommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component_name"), TEXT("property_name"), TEXT("value") }, Error))
+	{
+		return FUEAgentCommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath, ComponentName, PropertyName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("component_name"), ComponentName);
+	Params->TryGetStringField(TEXT("property_name"), PropertyName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint || !Blueprint->GeneratedClass)
+	{
+		return FUEAgentCommonUtils::CreateErrorResponse(TEXT("Invalid bp_path"));
+	}
+
+	// --- Find component template ---
+	UActorComponent* TargetComp = nullptr;
+
+	// 1) Check SCS templates
+	if (Blueprint->SimpleConstructionScript)
+	{
+		for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (Node && Node->ComponentTemplate)
+			{
+				FString NodeVarName = Node->GetVariableName().ToString();
+				FString TemplateName = Node->ComponentTemplate->GetName();
+				if (NodeVarName.Equals(ComponentName, ESearchCase::IgnoreCase) ||
+					TemplateName.Equals(ComponentName, ESearchCase::IgnoreCase))
+				{
+					TargetComp = Node->ComponentTemplate;
+					break;
+				}
+			}
+		}
+	}
+
+	// 2) Check CDO components (inherited from C++ parent)
+	if (!TargetComp)
+	{
+		AActor* CDO = Cast<AActor>(Blueprint->GeneratedClass->GetDefaultObject());
+		if (CDO)
+		{
+			for (UActorComponent* Comp : CDO->GetComponents())
+			{
+				if (Comp && Comp->GetName().Equals(ComponentName, ESearchCase::IgnoreCase))
+				{
+					TargetComp = Comp;
+					break;
+				}
+			}
+		}
+	}
+
+	if (!TargetComp)
+	{
+		return FUEAgentCommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Component not found: '%s'"), *ComponentName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "BpSetCompProp", "UEAgent: Set BP Component Property"));
+	Blueprint->Modify();
+	TargetComp->Modify();
+
+	// --- Special handling: PostProcessMaterial ---
+	if (PropertyName.Equals(TEXT("PostProcessMaterial"), ESearchCase::IgnoreCase))
+	{
+		FString MaterialPath;
+		Params->TryGetStringField(TEXT("value"), MaterialPath);
+
+		UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+		if (!Material)
+		{
+			return FUEAgentCommonUtils::CreateErrorResponse(
+				FString::Printf(TEXT("Material not found: '%s'"), *MaterialPath));
+		}
+
+		// Works for both UCameraComponent and UPostProcessComponent
+		FPostProcessSettings* PPSettings = nullptr;
+		float* BlendWeightPtr = nullptr;
+
+		if (UCameraComponent* Camera = Cast<UCameraComponent>(TargetComp))
+		{
+			PPSettings = &Camera->PostProcessSettings;
+			BlendWeightPtr = &Camera->PostProcessBlendWeight;
+		}
+		else if (UPostProcessComponent* PPComp = Cast<UPostProcessComponent>(TargetComp))
+		{
+			PPSettings = &PPComp->Settings;
+			BlendWeightPtr = &PPComp->BlendWeight;
+		}
+
+		if (!PPSettings)
+		{
+			return FUEAgentCommonUtils::CreateErrorResponse(
+				TEXT("Component is not a CameraComponent or PostProcessComponent"));
+		}
+
+		FWeightedBlendable Entry;
+		Entry.Weight = 1.0f;
+		Entry.Object = Material;
+		PPSettings->WeightedBlendables.Array.Add(Entry);
+
+		if (BlendWeightPtr)
+		{
+			*BlendWeightPtr = 1.0f;
+		}
+
+		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		Blueprint->MarkPackageDirty();
+
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("component_name"), ComponentName);
+		Data->SetStringField(TEXT("property_name"), TEXT("PostProcessMaterial"));
+		Data->SetStringField(TEXT("material_path"), MaterialPath);
+		Data->SetNumberField(TEXT("blendable_count"), PPSettings->WeightedBlendables.Array.Num());
+		return FUEAgentCommonUtils::CreateSuccessResponse(Data);
+	}
+
+	// --- General property setting ---
+	FProperty* Prop = TargetComp->GetClass()->FindPropertyByName(FName(*PropertyName));
+	if (!Prop)
+	{
+		return FUEAgentCommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Property not found: '%s' on component '%s' (class %s)"),
+				*PropertyName, *ComponentName, *TargetComp->GetClass()->GetName()));
+	}
+
+	void* PropAddr = Prop->ContainerPtrToValuePtr<void>(TargetComp);
+
+	FString BeforeValue;
+	Prop->ExportTextItem_Direct(BeforeValue, PropAddr, nullptr, TargetComp, PPF_None);
+
+	TSharedPtr<FJsonValue> JsonValue = Params->Values.FindRef(TEXT("value"));
+	FString ValueStr;
+	if (JsonValue.IsValid())
+	{
+		if (JsonValue->Type == EJson::String) ValueStr = JsonValue->AsString();
+		else if (JsonValue->Type == EJson::Number) ValueStr = FString::SanitizeFloat(JsonValue->AsNumber());
+		else if (JsonValue->Type == EJson::Boolean) ValueStr = JsonValue->AsBool() ? TEXT("True") : TEXT("False");
+	}
+
+	bool bSuccess = false;
+	if (!ValueStr.IsEmpty())
+	{
+		const TCHAR* Result = Prop->ImportText(*ValueStr, PropAddr, 0, TargetComp);
+		bSuccess = (Result != nullptr);
+	}
+
+	if (!bSuccess && Prop->IsA<FBoolProperty>())
+	{
+		CastField<FBoolProperty>(Prop)->SetPropertyValue(PropAddr, JsonValue.IsValid() && JsonValue->AsBool());
+		bSuccess = true;
+	}
+
+	if (!bSuccess)
+	{
+		return FUEAgentCommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Failed to set property '%s' on component '%s'"),
+				*PropertyName, *ComponentName));
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+	Blueprint->MarkPackageDirty();
+
+	FString AfterValue;
+	Prop->ExportTextItem_Direct(AfterValue, PropAddr, nullptr, TargetComp, PPF_None);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("component_name"), ComponentName);
+	Data->SetStringField(TEXT("property_name"), PropertyName);
+	Data->SetStringField(TEXT("before"), BeforeValue);
+	Data->SetStringField(TEXT("after"), AfterValue);
+	Data->SetBoolField(TEXT("changed"), BeforeValue != AfterValue);
 	return FUEAgentCommonUtils::CreateSuccessResponse(Data);
 }
 
