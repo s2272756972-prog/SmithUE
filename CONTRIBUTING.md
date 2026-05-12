@@ -23,7 +23,7 @@ Docs/smithue-dev/SKILL.md
 
 To develop and compile the SmithUE plugin, you need:
 
-*   Unreal Engine 5.2 installed (typically at `E:\Program Files\Epic Games\UE_5.2\`)
+*   Unreal Engine 5.2 installed
 *   Visual Studio 2022 with the "Game development with C++" workload
 *   Node.js 18+ (required for the MCP Server)
 *   Git (for cloning the repository)
@@ -43,15 +43,14 @@ The project is divided into the C++ plugin and the TypeScript MCP server:
 SmithUE/
 ├── Source/SmithUE/
 │   ├── Private/Commands/    # 命令实现 / Domain command implementations
+│   ├── Private/Transport/   # HTTP 服务 & 连接管理 / HTTP server & connection manager
+│   ├── Private/UI/          # 编辑器状态指示器 / Editor status indicator
 │   └── Public/ToolRegistry/ # Schema/Registry 核心 / Schema and Registry core
 ├── Scripts/
-│   ├── SmithUE-MCP/         # TypeScript MCP 服务 / TypeScript MCP Server
-│   ├── Send-SmithUE.ps1     # 测试脚本 / Testing scripts
-│   └── ...
+│   └── SmithUE-MCP/         # TypeScript MCP 服务 / TypeScript MCP Server
 ├── Docs/
-│   ├── smithue-dev/         # AI 开发技能 / AI development skill
-│   │   └── SKILL.md
-│   └── PROJECT_README.md
+│   └── smithue-dev/         # AI 开发技能 / AI development skill
+│       └── SKILL.md
 ├── CONTRIBUTING.md
 └── SmithUE.uplugin
 ```
@@ -121,15 +120,18 @@ TSharedPtr<FJsonObject> FSmithUEObservationCommands::HandleMyNewCommand(const TS
 Use the Unreal Build Tool to compile the plugin. Run the following command (adjust paths if necessary):
 
 ```powershell
-dotnet "E:\Program Files\Epic Games\UE_5.2\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" SmithUE Win64 Development "-Project=F:\DXProject\AIScript\AIScript.uproject" -WaitMutex
+dotnet "{EngineRoot}/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.dll" {ProjectName}Editor Win64 Development "-Project={ProjectRoot}/{ProjectName}.uproject" -WaitMutex
 ```
+
+> Adjust `{EngineRoot}`, `{ProjectRoot}`, and `{ProjectName}` to match your local environment.
+> 请根据你的本地环境调整 `{EngineRoot}`、`{ProjectRoot}` 和 `{ProjectName}`。
 
 ### Step 6: Test Your Command
 
 You can test the command directly via HTTP before trying it through the MCP server:
 
 ```bash
-curl -X POST http://localhost:13721 -d '{"command":"my_new_command","params":{"param_name":"test"}}'
+curl -X POST http://localhost:13721/api/v1/execute -H "Content-Type: application/json" -d '{"command":"my_new_command","params":{"param_name":"test"}}'
 ```
 
 The MCP Server auto-discovers new commands from the plugin. No TypeScript changes are needed!
@@ -139,7 +141,7 @@ The MCP Server auto-discovers new commands from the plugin. No TypeScript change
 *   **Response Format**: All handlers must return a JSON object via `FSmithUECommonUtils::CreateSuccessResponse(Data)` or `CreateErrorResponse(Message)`. The final envelope will have `status: "success"|"error"` and `data: {...}`.
 *   **Logging**: Use the `SMITHUE_LOG` macro for consistent logging within the plugin.
 *   **Validation**: Always validate parameters at the start of your handler. Return clear error messages for invalid or missing inputs.
-*   **Categories**: Use one of the 8 standard domains: System, Asset, Material, Editor, Blueprint, Viewport, Observation, Analysis.
+*   **Categories**: Prefer existing domains (System, Asset, Material, Editor, Blueprint, Viewport, Observation, Analysis). New domains may be added when 3+ related commands form a distinct group — see `Docs/smithue-dev/SKILL.md` for guidelines.
 *   **Compatibility**: Target Unreal Engine 5.2 only. Avoid using APIs introduced in 5.3 or later.
 
 ## Example: Adding "list_actors"
