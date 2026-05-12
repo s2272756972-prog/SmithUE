@@ -1,10 +1,10 @@
-# UEAgent
+# SmithUE
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-UEAgent is a high-performance Unreal Engine editor plugin designed to bridge the gap between creative intent and engine execution. It provides a robust command-driven interface that allows external tools and AI agents to manipulate the Unreal Editor directly, bypassing the need for manual menu navigation and repetitive Blueprint wiring. By exposing the engine's internal capabilities through a structured protocol, it empowers developers to automate tedious editor tasks and build intelligent co-pilot systems.
+SmithUE is a high-performance Unreal Engine editor plugin designed to bridge the gap between creative intent and engine execution. It provides a robust command-driven interface that allows external tools and AI agents to manipulate the Unreal Editor directly, bypassing the need for manual menu navigation and repetitive Blueprint wiring. By exposing the engine's internal capabilities through a structured protocol, it empowers developers to automate tedious editor tasks and build intelligent co-pilot systems.
 
-UEAgent 是一款高性能虚幻引擎编辑器插件, 旨在搭建创意意图与引擎执行之间的桥梁. 它提供了一个强大的命令驱动接口, 允许外部工具和 AI 智能体直接操纵虚幻编辑器, 从而无需手动导航菜单和重复的蓝图连线. 通过结构化协议公开引擎内部功能, 它使开发人员能够自动化繁琐的编辑器任务, 并构建智能辅助驾驶系统.
+SmithUE 是一款高性能虚幻引擎编辑器插件, 旨在搭建创意意图与引擎执行之间的桥梁. 它提供了一个强大的命令驱动接口, 允许外部工具和 AI 智能体直接操纵虚幻编辑器, 从而无需手动导航菜单和重复的蓝图连线. 通过结构化协议公开引擎内部功能, 它使开发人员能够自动化繁琐的编辑器任务, 并构建智能辅助驾驶系统.
 
 ---
 
@@ -23,36 +23,36 @@ UEAgent 是一款高性能虚幻引擎编辑器插件, 旨在搭建创意意图�
 
 ## Vision / 愿景
 
-Unreal Engine developers spend significant time on repetitive manual operations: searching for assets, dragging actors into levels, configuring material parameters, and manually connecting Blueprint nodes. UEAgent transforms the editor into a programmable environment. Imagine generating a complete level layout from a text description, automatically analyzing complex module dependencies, or creating sophisticated Blueprint logic via external scripts. UEAgent frees you from the friction of the UI, allowing you to focus on high-level design and architectural decisions.
+Unreal Engine developers spend significant time on repetitive manual operations: searching for assets, dragging actors into levels, configuring material parameters, and manually connecting Blueprint nodes. SmithUE transforms the editor into a programmable environment. Imagine generating a complete level layout from a text description, automatically analyzing complex module dependencies, or creating sophisticated Blueprint logic via external scripts. SmithUE frees you from the friction of the UI, allowing you to focus on high-level design and architectural decisions.
 
-虚幻引擎开发人员在重复的手动操作上花费了大量时间: 搜索资产, 将 Actor 拖入关卡, 配置材质参数以及手动连接蓝图节点. UEAgent 将编辑器转变为可编程环境. 想象一下根据文本描述生成完整的关卡布局, 自动分析复杂的模块依赖关系, 或通过外部脚本创建复杂的蓝图逻辑. UEAgent 将您从 UI 的摩擦中解放出来, 允许您专注于高级设计和架构决策.
+虚幻引擎开发人员在重复的手动操作上花费了大量时间: 搜索资产, 将 Actor 拖入关卡, 配置材质参数以及手动连接蓝图节点. SmithUE 将编辑器转变为可编程环境. 想象一下根据文本描述生成完整的关卡布局, 自动分析复杂的模块依赖关系, 或通过外部脚本创建复杂的蓝图逻辑. SmithUE 将您从 UI 的摩擦中解放出来, 允许您专注于高级设计和架构决策.
 
 ---
 
 ## Quick Start / 快速入门
 
-1. Copy the UEAgent folder into your Unreal Engine project's `Plugins/` directory.
-   将 UEAgent 文件夹复制到虚幻引擎项目的 `Plugins/` 目录中.
+1. Copy the SmithUE folder into your Unreal Engine project's `Plugins/` directory.
+   将 SmithUE 文件夹复制到虚幻引擎项目的 `Plugins/` 目录中.
 
 2. Build your project using Unreal Engine 5.2 or later.
    使用虚幻引擎 5.2 或更高版本构建项目.
 
-3. Launch the Unreal Editor. UEAgent will automatically initialize the command servers on TCP port 13720 and HTTP port 13721.
-   启动虚幻编辑器. UEAgent 将在 TCP 端口 13720 和 HTTP 端口 13721 上自动初始化命令服务器.
+3. Launch the Unreal Editor. SmithUE will automatically initialize the command servers on TCP port 13720 and HTTP port 13721.
+   启动虚幻编辑器. SmithUE 将在 TCP 端口 13720 和 HTTP 端口 13721 上自动初始化命令服务器.
 
 4. Verify the connection using the provided PowerShell script:
    使用提供的 PowerShell 脚本验证连接:
    ```powershell
-   .\Scripts\Send-UEAgent.ps1 -Command "ping"
+   .\Scripts\Send-SmithUE.ps1 -Command "ping"
    ```
 
 ---
 
 ## Protocol / 协议
 
-UEAgent uses a standard JSON format for all requests and responses, supporting both high-performance raw TCP sockets and standard HTTP requests.
+SmithUE uses a standard JSON format for all requests and responses, supporting both high-performance raw TCP sockets and standard HTTP requests.
 
-UEAgent 在所有请求和响应中使用标准 JSON 格式, 同时支持高性能原始 TCP 套接字和标准 HTTP 请求.
+SmithUE 在所有请求和响应中使用标准 JSON 格式, 同时支持高性能原始 TCP 套接字和标准 HTTP 请求.
 
 **Request Format / 请求格式:**
 ```json
@@ -76,9 +76,9 @@ UEAgent 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-UEAgent provides 65 specialized commands organized across 8 functional domains.
+SmithUE provides 65 specialized commands organized across 8 functional domains.
 
-UEAgent 提供了分布在 8 个功能领域的 65 个专业命令.
+SmithUE 提供了分布在 8 个功能领域的 65 个专业命令.
 
 ### System / 系统 (8 commands)
 Commands for managing project state, settings, and filesystem.
@@ -211,7 +211,7 @@ The `generate_texture` command bridges the editor with modern generative AI. It 
 
 **Example Usage / 使用示例:**
 ```powershell
-.\Scripts\Send-UEAgent.ps1 -Command "generate_texture" -Params '{
+.\Scripts\Send-SmithUE.ps1 -Command "generate_texture" -Params '{
   "prompt": "seamless stylized stone floor, hand-painted style, 4K",
   "endpoint": "https://api.openai.com/v1/images/generations",
   "api_key": "sk-...",
@@ -225,9 +225,9 @@ The `generate_texture` command bridges the editor with modern generative AI. It 
 
 ## Roadmap / 路线图
 
-We are committed to expanding UEAgent into a comprehensive AI-first development toolkit, with a focus on digital twin and simulation workflows.
+We are committed to expanding SmithUE into a comprehensive AI-first development toolkit, with a focus on digital twin and simulation workflows.
 
-我们致力于将 UEAgent 扩展为全面的 AI 优先开发工具包, 聚焦数字孪生与仿真工作流.
+我们致力于将 SmithUE 扩展为全面的 AI 优先开发工具包, 聚焦数字孪生与仿真工作流.
 
 *   **v1.1**
     *   MCP (Model Context Protocol) support for direct LLM integration.
