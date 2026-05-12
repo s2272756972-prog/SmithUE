@@ -3,28 +3,45 @@
   "version": "0.1.0",
   "description": "MCP Server for SmithUE — AI-native UE5 editor automation",
   "type": "module",
-  "bin": { "smithue": "dist/index.js" },
-  "main": "dist/index.js",
-  "files": ["dist/"],
+  "bin": {
+    "smithue": "dist/bundle.js"
+  },
+  "main": "dist/bundle.js",
+  "files": [
+    "dist/"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && esbuild dist/index.js --bundle --platform=node --format=esm --outfile=dist/bundle.js",
     "dev": "tsc --watch",
-    "start": "node dist/index.js",
+    "start": "node dist/bundle.js serve",
     "test": "vitest run",
     "prepublishOnly": "npm run build && npm test"
   },
-  "keywords": ["mcp", "unreal-engine", "ue5", "ai", "editor-automation", "blueprint"],
+  "keywords": [
+    "mcp",
+    "unreal-engine",
+    "ue5",
+    "ai",
+    "editor-automation",
+    "blueprint"
+  ],
   "author": "123dx-svg",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/123dx-svg/SmithUE.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/123dx-svg/SmithUE.git"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.3.0",
-    "vitest": "^1.0.0",
-    "@types/node": "^20.0.0"
+    "vitest": "^1.0.0"
   },
-  "engines": { "node": ">=18.0.0" }
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
