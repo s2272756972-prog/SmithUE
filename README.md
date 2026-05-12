@@ -43,27 +43,20 @@ Unreal Engine developers spend significant time on repetitive manual operations:
 2. Build your project using Unreal Engine 5.2.
    使用虚幻引擎 5.2 构建项目.
 
-3. Build the MCP Server (requires Node.js 18+):
-   构建 MCP 服务（需要 Node.js 18+）：
-   ```bash
-   cd Plugins/SmithUE/Scripts/SmithUE-MCP
-   npm install
-   npm run build
-   ```
-
-4. Launch the Unreal Editor. SmithUE will automatically start the HTTP server on port 13721.
+3. Launch the Unreal Editor. SmithUE will automatically start the HTTP server on port 13721.
    启动虚幻编辑器. SmithUE 将在 HTTP 端口 13721 上自动初始化命令服务器.
 
-5. Verify the connection:
-   验证连接:
+4. Verify the connection:
+   验证连接：
    ```bash
-   curl -X POST http://localhost:13721 -d "{\"command\":\"ping\"}"
-   # OR / 或
-   .\Scripts\Send-SmithUE.ps1 -Command "ping"
+   curl -X POST http://localhost:13721/api/v1/execute -H "Content-Type: application/json" -d "{\"command\":\"ping\"}"
    ```
 
-6. Configure your AI tool (see [MCP Server / MCP 服务](#mcp-server--mcp-服务) section below).
-   配置你的 AI 工具（参见下方 [MCP Server / MCP 服务](#mcp-server--mcp-服务) 章节）.
+5. Configure AI tool (see [AI Tool Configuration](#ai-tool-configuration)).
+   配置 AI 工具（参见 [AI 工具配置](#ai-tool-configuration)）。
+
+> **Note / 注意**: The MCP Server is pre-built as `Scripts/SmithUE-MCP/dist/bundle.js`. No `npm install` or `npm run build` required for end users. Only Node.js 18+ runtime is needed.
+> MCP 服务已预构建为 `Scripts/SmithUE-MCP/dist/bundle.js`。终端用户无需执行 `npm install` 或 `npm run build`，只需安装 Node.js 18+ 运行时。
 
 ---
 
@@ -85,7 +78,7 @@ Unreal Engine 5.2 Editor
 
 ### Context Impact / 上下文影响
 
-| Approach / 方案 | 65 tools | 200 tools | 1000 tools |
+| Approach / 方案 | N tools | 200 tools | 1000 tools |
 |---|---|---|---|
 | Full registration / 全量注册 | ~6.5K tokens | ~20K tokens | ~100K tokens |
 | Meta-tool (SmithUE) / 元工具 | ~300 tokens | ~300 tokens | ~300 tokens |
@@ -100,22 +93,20 @@ Unreal Engine 5.2 Editor
 
 ### Install & Run / 安装与运行
 
-```bash
-cd Scripts/SmithUE-MCP
-npm install
-npm run build
-```
+The MCP Server is pre-built and ready to use. No build step required.
+MCP 服务已预构建，开箱即用，无需构建步骤。
 
 Start the MCP Server (requires UE Editor running with SmithUE plugin):
 启动 MCP 服务（需要 UE 编辑器运行并启用 SmithUE 插件）：
 
 ```bash
-node Scripts/SmithUE-MCP/dist/index.js serve
+node Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js serve
 ```
 
 Environment variables / 环境变量：
 - `SMITHUE_PORT` — HTTP port (default: `13721`)
 - `SMITHUE_HOST` — Host address (default: `localhost`)
+- `SMITHUE_CLIENT_NAME` — Client display name for connection indicator (default: `OpenCode`)
 
 ### AI Tool Configuration / AI 工具配置
 
@@ -129,7 +120,7 @@ Add to `mcp.json` or `.opencode/mcp.json`:
   "mcpServers": {
     "smithue": {
       "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
+      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
     }
   }
 }
@@ -138,7 +129,7 @@ Add to `mcp.json` or `.opencode/mcp.json`:
 #### Claude Code
 
 ```bash
-claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js serve
+claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js serve
 ```
 
 #### GitHub Copilot
@@ -151,7 +142,7 @@ Create or update `.github/copilot-mcp.json`:
   "mcpServers": {
     "smithue": {
       "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
+      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
     }
   }
 }
@@ -166,7 +157,7 @@ Add to VSCode settings under `cline.mcpServers`:
 {
   "smithue": {
     "command": "node",
-    "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
+    "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
   }
 }
 ```
@@ -182,6 +173,20 @@ Add to VSCode settings under `cline.mcpServers`:
 ```
 
 ---
+
+### Connection Status Indicator / 连接状态指示器
+
+SmithUE displays a circular status indicator in the editor's bottom-right status bar:
+SmithUE 在编辑器右下角状态栏显示圆形连接状态指示器：
+
+| Color / 颜色 | State / 状态 |
+|---|---|
+| 🟢 Green / 绿色 | Connected — MCP client session active / 已连接 — MCP 客户端会话活跃 |
+| 🔴 Red / 红色 | Disconnected — no active sessions / 未连接 — 无活跃会话 |
+| 🟡 Red↔Yellow blink / 红黄闪烁 | State change — session connecting or disconnecting / 状态变更中 |
+
+Hover over the indicator to see client name, connection count, and available tool count.
+悬停查看客户端名称、连接数和可用工具数。
 
 ## Protocol / 协议
 
@@ -211,9 +216,9 @@ SmithUE 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-SmithUE provides 65 specialized commands organized across 8 functional domains.
+SmithUE provides specialized commands organized across 8 functional domains. The command set is continuously growing — see `smithue_list_domain()` for the latest available commands.
 
-SmithUE 提供了分布在 8 个功能领域的 65 个专业命令.
+SmithUE 提供了分布在 8 个功能领域的专业命令集. 命令集持续增长中——使用 `smithue_list_domain()` 查看最新可用命令.
 
 ### System / 系统 (8 commands)
 Commands for managing project state, settings, and filesystem.
@@ -345,15 +350,10 @@ The `generate_texture` command bridges the editor with modern generative AI. It 
 `generate_texture` 命令将编辑器与现代生成式 AI 连接起来. 它根据提供的端点 URL 自动检测目标 API 格式, 支持 DALL-E, Imagen 和基于 OpenAI Chat 的生成.
 
 **Example Usage / 使用示例:**
-```powershell
-.\Scripts\Send-SmithUE.ps1 -Command "generate_texture" -Params '{
-  "prompt": "seamless stylized stone floor, hand-painted style, 4K",
-  "endpoint": "https://api.openai.com/v1/images/generations",
-  "api_key": "sk-...",
-  "model": "dall-e-3",
-  "save_path": "/Game/Textures",
-  "asset_name": "T_StoneFloor"
-}'
+```bash
+curl -X POST http://localhost:13721/api/v1/execute \
+  -H "Content-Type: application/json" \
+  -d '{"command":"generate_texture","params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
 ```
 
 ---
