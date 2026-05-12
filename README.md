@@ -76,9 +76,9 @@ UEAgent 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-UEAgent provides 58 specialized commands organized across 7 functional domains.
+UEAgent provides 64 specialized commands organized across 7 functional domains.
 
-UEAgent 提供了分布在 7 个功能领域的 58 个专业命令.
+UEAgent 提供了分布在 7 个功能领域的 64 个专业命令.
 
 ### System / 系统 (8 commands)
 Commands for managing project state, settings, and filesystem.
@@ -95,7 +95,7 @@ Commands for managing project state, settings, and filesystem.
 | `create_folder` | Create a new directory in Content Browser / 在内容浏览器中创建新目录 |
 | `get_source_files` | List C++ source files for project modules / 列出项目模块的 C++ 源文件 |
 
-### Asset / 资产 (12 commands)
+### Asset / 资产 (14 commands)
 Manage assets, materials, and integrate external AI generation.
 管理资产, 材质并集成外部 AI 生成.
 
@@ -108,22 +108,25 @@ Manage assets, materials, and integrate external AI generation.
 | `duplicate_asset` | Create a copy of an asset / 创建资产副本 |
 | `create_material` | Create Material or MaterialInstance / 创建材质或材质实例 |
 | `get_material_info` | Inspect material graph structure / 检查材质图表结构 |
+| `set_material_property` | Set material-level properties (domain, blend mode, shading model, two-sided, blendable location) / 设置材质级属性 (域, 混合模式, 着色模型, 双面, 可混合位置) |
+| `set_expression_property` | Set expression node properties (Custom HLSL code/output type/inputs, Constant, Constant3Vector RGB, SceneTexture ID) / 设置表达式节点属性 (自定义 HLSL 代码/输出类型/输入, 常量, 三维常量向量 RGB, 场景纹理 ID) |
 | `add_material_expression` | Add expression node to material / 向材质添加表达式节点 |
 | `connect_material_pins` | Link material expression pins / 连接材质表达式引脚 |
 | `compile_material` | Trigger material compilation / 触发材质编译 |
 | `generate_texture` | Async texture generation via AI API / 通过 AI API 异步生成纹理 |
 | `check_generation_task` | Poll status of texture generation / 轮询纹理生成状态 |
 
-### Editor / 编辑器 (11 commands)
+### Editor / 编辑器 (12 commands)
 Level stage control and actor lifecycle management.
 关卡舞台控制和 Actor 生命周期管理.
 
 | Command | Description / 描述 |
 | :--- | :--- |
 | `spawn_actor` | Place a new actor into the level / 在关卡中放置新 Actor |
-| `get_all_actors` | Retrieve all actors in the world / 获取世界中的所有 Actor |
+| `get_all_actors` | Retrieve all actors with transforms / 获取所有 Actor 及其变换 |
 | `set_actor_property` | Set UPROPERTY value on an actor / 设置 Actor 的 UPROPERTY 值 |
 | `delete_actor` | Remove an actor from the level / 从关卡中移除 Actor |
+| `add_postprocess_material` | Add a material to a PostProcessVolume's blendable list / 向后处理体积的可混合列表添加材质 |
 | `execute_editor_command` | Run internal editor commands / 运行内部编辑器命令 |
 | `execute_console_command` | Run standard console commands / 运行标准控制台命令 |
 | `list_editor_commands` | Enumerate available editor commands / 枚举可用的编辑器命令 |
@@ -146,8 +149,8 @@ Deep integration for programmatic Blueprint construction and DSL compilation.
 | `bp_add_variable` | Add member variable to Blueprint / 向蓝图添加成员变量 |
 | `bp_add_component` | Add component to Blueprint SCS / 向蓝图 SCS 添加组件 |
 | `bp_compile` | Compile Blueprint and report errors / 编译蓝图并报告错误 |
-| `bp_get_summary` | Get Blueprint structural summary / 获取蓝图结构摘要 |
-| `bp_describe_graph` | Detailed description of graph nodes / 图表节点的详细描述 |
+| `bp_get_summary` | Rich Blueprint structural summary (function signatures with params/return types, node counts, custom events, delegates, input bindings, interfaces, variable flags, component hierarchy) / 丰富的蓝图结构摘要 (函数签名含参数/返回类型, 节点数, 自定义事件, 委托, 输入绑定, 接口, 变量标志, 组件层级) |
+| `bp_describe_graph` | Compact graph description with short IDs (N0-Nn), ~38% size reduction vs GUIDs, multi-connection support, id_to_guid mapping / 紧凑图表描述使用短 ID (N0-Nn), 比 GUID 减少约 38% 体积, 多连接支持, id_to_guid 映射 |
 | `bp_compile_code` | Compile DSL text into Blueprint / 将 DSL 文本编译为蓝图 |
 | `bp_batch_op` | Execute multiple atomic operations / 执行多个原子操作 |
 | `bp_validate_code` | Validate DSL syntax dry-run / 验证 DSL 语法的空运行 |
@@ -223,8 +226,10 @@ We are committed to expanding UEAgent into a comprehensive AI-first development 
         支持 MCP (模型上下文协议), 实现与大语言模型的直接集成.
     *   Blueprint logic generation - AI-driven EventGraph / FunctionGraph construction from natural language.
         蓝图逻辑生成 - 从自然语言驱动 AI 自动构建事件图 / 函数图.
-    *   Material Blueprint generation - programmatic material node network assembly.
-        材质蓝图生成 - 程序化材质节点网络组装.
+    *   ~~Material Blueprint generation - programmatic material node network assembly.~~
+        ~~材质蓝图生成 - 程序化材质节点网络组装.~~
+        ✅ **Done in v1.0.1** — Full material creation pipeline: `create_material` → `set_material_property` → `add_material_expression` → `set_expression_property` → `connect_material_pins` → `compile_material` → `add_postprocess_material`. Verified with a thermal vision post-process material end-to-end.
+        ✅ **已在 v1.0.1 完成** — 完整材质创建流水线: `create_material` → `set_material_property` → `add_material_expression` → `set_expression_property` → `connect_material_pins` → `compile_material` → `add_postprocess_material`. 已通过热成像后处理材质端到端验证.
 *   **v1.2**
     *   Digital twin scene construction - procedural environment generation from data sources (GIS, point cloud, CAD).
         数字孪生场景构建 - 从数据源 (GIS, 点云, CAD) 程序化生成环境.
@@ -253,8 +258,10 @@ We are committed to expanding UEAgent into a comprehensive AI-first development 
     并发性: 仅支持单客户端连接.
 *   **Input Focus**: `simulate_key` requires viewport focus.
     输入焦点: `simulate_key` 需要视口焦点.
-*   **Property Types**: Advanced types like `TMap` or delegates are not supported.
-    属性类型: 不支持 `TMap` 或委托等高级类型.
+*   **Property Types**: Advanced types like `TMap` or delegates are not supported by `set_actor_property`. Nested struct properties (e.g. `Settings.WeightedBlendables`) require dedicated commands.
+    属性类型: `set_actor_property` 不支持 `TMap` 或委托等高级类型. 嵌套结构体属性 (如 `Settings.WeightedBlendables`) 需使用专用命令.
+*   **SceneTexture**: `SceneTextureId` is set via FProperty reflection to avoid link errors with unexported engine symbols.
+    场景纹理: `SceneTextureId` 通过 FProperty 反射设置, 以避免未导出引擎符号的链接错误.
 *   **OS**: Windows Win64 only.
     操作系统: 仅限 Windows Win64.
 
