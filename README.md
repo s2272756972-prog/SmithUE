@@ -59,7 +59,7 @@ SmithUE 内置 TypeScript MCP 服务，通过 **元工具架构** 桥接 AI 工�
 ```
 AI Tool (OpenCode / Claude Code / Cline / GitHub Copilot)
      ↕ MCP stdio
-SmithUE MCP Server (mcp-server/)
+SmithUE MCP Server (Scripts/SmithUE-MCP/)
      ↕ HTTP :13721
 SmithUE UE5 Plugin
      ↕ UE Reflection API
@@ -84,7 +84,7 @@ Unreal Engine 5.2 Editor
 ### Install & Run / 安装与运行
 
 ```bash
-cd mcp-server
+cd Scripts/SmithUE-MCP
 npm install
 npm run build
 ```
@@ -93,7 +93,7 @@ Start the MCP Server (requires UE Editor running with SmithUE plugin):
 启动 MCP 服务（需要 UE 编辑器运行并启用 SmithUE 插件）：
 
 ```bash
-node mcp-server/dist/index.js serve
+node Scripts/SmithUE-MCP/dist/index.js serve
 ```
 
 Environment variables / 环境变量：
@@ -112,7 +112,7 @@ Add to `mcp.json` or `.opencode/mcp.json`:
   "mcpServers": {
     "smithue": {
       "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
     }
   }
 }
@@ -121,7 +121,7 @@ Add to `mcp.json` or `.opencode/mcp.json`:
 #### Claude Code
 
 ```bash
-claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/mcp-server/dist/index.js serve
+claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js serve
 ```
 
 #### GitHub Copilot
@@ -134,7 +134,7 @@ Create or update `.github/copilot-mcp.json`:
   "mcpServers": {
     "smithue": {
       "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
     }
   }
 }
@@ -149,7 +149,7 @@ Add to VSCode settings under `cline.mcpServers`:
 {
   "smithue": {
     "command": "node",
-    "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+    "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
   }
 }
 ```

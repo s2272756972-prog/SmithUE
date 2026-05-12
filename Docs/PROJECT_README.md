@@ -56,14 +56,14 @@ Ensure the plugin is enabled in your `.uproject` file and compile the project.
 ### Step 2: Build & Start the MCP Server
 Install dependencies and build the MCP Server:
 ```bash
-cd Plugins/SmithUE/mcp-server
+cd Plugins/SmithUE/Scripts/SmithUE-MCP
 npm install
 npm run build
 ```
 
 Start the server (requires UE Editor running with SmithUE plugin):
 ```bash
-node Plugins/SmithUE/mcp-server/dist/index.js serve
+node Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js serve
 ```
 
 ### AI Configuration
@@ -75,7 +75,7 @@ Add the server to your `mcp.json` or `.opencode/mcp.json`:
   "mcpServers": {
     "smithue": {
       "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
     }
   }
 }
@@ -84,7 +84,7 @@ Add the server to your `mcp.json` or `.opencode/mcp.json`:
 #### Claude Code
 Run the following command in your terminal:
 ```bash
-claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/mcp-server/dist/index.js serve
+claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js serve
 ```
 
 #### GitHub Copilot
@@ -94,7 +94,7 @@ Create or update `.github/copilot-mcp.json`:
   "mcpServers": {
     "smithue": {
       "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
     }
   }
 }
@@ -106,7 +106,7 @@ Add the configuration to your VSCode settings under `cline.mcpServers`:
 {
   "smithue": {
     "command": "node",
-    "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+    "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js", "serve"]
   }
 }
 ```
@@ -122,7 +122,7 @@ dotnet "E:\Program Files\Epic Games\UE_5.2\Engine\Binaries\DotNET\UnrealBuildToo
 ### MCP Server
 The server defaults to port 13721 on localhost. You can override these settings using environment variables:
 ```bash
-SMITHUE_PORT=13721 SMITHUE_HOST=localhost node Plugins/SmithUE/mcp-server/dist/index.js serve
+SMITHUE_PORT=13721 SMITHUE_HOST=localhost node Plugins/SmithUE/Scripts/SmithUE-MCP/dist/index.js serve
 ```
 
 ### Verification
@@ -142,11 +142,11 @@ Copy and paste the following prompt into your AI assistant to automatically conf
 I want to set up SmithUE for editor automation. Please perform the following steps:
 
 1. Check if Node.js 18 or higher is installed on this system.
-2. Find the SmithUE plugin directory (look for `Plugins/SmithUE/mcp-server/` in the UE project).
-3. Run `cd {path-to-SmithUE}/mcp-server && npm install && npm run build` to build the MCP Server.
+2. Find the SmithUE plugin directory (look for `Plugins/SmithUE/Scripts/SmithUE-MCP/` in the UE project).
+3. Run `cd {path-to-SmithUE}/Scripts/SmithUE-MCP && npm install && npm run build` to build the MCP Server.
 4. Detect which AI tool is currently being used and write the appropriate MCP configuration:
-   - If OpenCode: Write to `mcp.json` or `.opencode/mcp.json` with `{"mcpServers":{"smithue":{"command":"node","args":["{path}/mcp-server/dist/index.js","serve"]}}}`.
-   - If Claude Code: Execute `claude mcp add smithue -- node {path}/mcp-server/dist/index.js serve`.
+   - If OpenCode: Write to `mcp.json` or `.opencode/mcp.json` with `{"mcpServers":{"smithue":{"command":"node","args":["{path}/Scripts/SmithUE-MCP/dist/index.js","serve"]}}}`.
+   - If Claude Code: Execute `claude mcp add smithue -- node {path}/Scripts/SmithUE-MCP/dist/index.js serve`.
    - If Cline: Update the VSCode settings under `cline.mcpServers`.
    - If GitHub Copilot: Create or update `.github/copilot-mcp.json`.
 5. Verify the connection by running `curl -X POST http://localhost:13721 -d '{"command":"ping"}'` and report the result.
@@ -156,11 +156,11 @@ I want to set up SmithUE for editor automation. Please perform the following ste
 我想配置 SmithUE 以实现编辑器自动化，请执行以下步骤：
 
 1. 检查系统中是否安装了 Node.js 18 或更高版本。
-2. 找到 SmithUE 插件目录（在 UE 项目中查找 `Plugins/SmithUE/mcp-server/`）。
-3. 运行 `cd {SmithUE路径}/mcp-server && npm install && npm run build` 构建 MCP 服务。
+2. 找到 SmithUE 插件目录（在 UE 项目中查找 `Plugins/SmithUE/Scripts/SmithUE-MCP/`）。
+3. 运行 `cd {SmithUE路径}/Scripts/SmithUE-MCP && npm install && npm run build` 构建 MCP 服务。
 4. 识别当前使用的 AI 工具并写入正确的 MCP 配置：
-   - 如果是 OpenCode：写入 `mcp.json` 或 `.opencode/mcp.json`，配置 `{"mcpServers":{"smithue":{"command":"node","args":["{路径}/mcp-server/dist/index.js","serve"]}}}`。
-   - 如果是 Claude Code：执行 `claude mcp add smithue -- node {路径}/mcp-server/dist/index.js serve`。
+   - 如果是 OpenCode：写入 `mcp.json` 或 `.opencode/mcp.json`，配置 `{"mcpServers":{"smithue":{"command":"node","args":["{路径}/Scripts/SmithUE-MCP/dist/index.js","serve"]}}}`。
+   - 如果是 Claude Code：执行 `claude mcp add smithue -- node {路径}/Scripts/SmithUE-MCP/dist/index.js serve`。
    - 如果是 Cline：更新 VSCode 设置中的 `cline.mcpServers`。
    - 如果是 GitHub Copilot：创建或更新 `.github/copilot-mcp.json`。
 5. 运行 `curl -X POST http://localhost:13721 -d '{"command":"ping"}'` 验证连接并报告结果。

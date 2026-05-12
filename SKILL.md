@@ -56,9 +56,9 @@ Source/SmithUE/
 └── Public/ToolRegistry/                           # Schema/Registry core logic
 ```
 
-The MCP Server (`mcp-server/`) lives at the project level:
+The MCP Server (`Scripts/SmithUE-MCP/`) lives inside the plugin:
 ```text
-mcp-server/src/
+Scripts/SmithUE-MCP/src/
 ├── client.ts    # SmithUE HTTP Client
 ├── tools.ts     # MCP meta-tool definitions
 └── index.ts     # Server entry point

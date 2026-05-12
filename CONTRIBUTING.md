@@ -27,7 +27,8 @@ SmithUE/
 ├── Source/SmithUE/
 │   ├── Private/Commands/  # Domain command implementations
 │   └── Public/ToolRegistry/ # Schema and Registry core
-├── mcp-server/            # TypeScript MCP Server
+├── Scripts/               # Testing scripts & MCP Server
+│   └── SmithUE-MCP/       # TypeScript MCP Server
 │   └── src/               # Server source code
 ├── Docs/                  # Documentation
 ├── Scripts/               # Testing scripts
@@ -36,8 +37,8 @@ SmithUE/
 └── SmithUE.uplugin        # Plugin descriptor
 ```
 
-> **Note**: Adding new UE commands does NOT require changes to `mcp-server/` — the MCP Server auto-discovers commands from the plugin.
-> **注意**：添加新 UE 命令不需要修改 `mcp-server/` — MCP 服务会自动发现插件中的命令。
+> **Note**: Adding new UE commands does NOT require changes to `Scripts/SmithUE-MCP/` — the MCP Server auto-discovers commands from the plugin.
+> **注意**：添加新 UE 命令不需要修改 `Scripts/SmithUE-MCP/` — MCP 服务会自动发现插件中的命令。
 
 ## How to Add a New Command
 
