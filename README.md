@@ -33,20 +33,37 @@ Unreal Engine developers spend significant time on repetitive manual operations:
 
 ## Quick Start / 快速入门
 
-1. Copy the SmithUE folder into your Unreal Engine project's `Plugins/` directory.
-   将 SmithUE 文件夹复制到虚幻引擎项目的 `Plugins/` 目录中.
+1. Clone the repository into your UE project's `Plugins/` directory:
+   将仓库克隆到 UE 项目的 `Plugins/` 目录：
+   ```bash
+   cd {YourProject}/Plugins
+   git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+   ```
 
-2. Build your project using Unreal Engine 5.2 or later.
-   使用虚幻引擎 5.2 或更高版本构建项目.
+2. Build your project using Unreal Engine 5.2.
+   使用虚幻引擎 5.2 构建项目.
 
-3. Launch the Unreal Editor. SmithUE will automatically initialize the command servers on TCP port 13720 and HTTP port 13721.
-   启动虚幻编辑器. SmithUE 将在 TCP 端口 13720 和 HTTP 端口 13721 上自动初始化命令服务器.
+3. Build the MCP Server (requires Node.js 18+):
+   构建 MCP 服务（需要 Node.js 18+）：
+   ```bash
+   cd Plugins/SmithUE/Scripts/SmithUE-MCP
+   npm install
+   npm run build
+   ```
 
-4. Verify the connection using the provided PowerShell script:
-   使用提供的 PowerShell 脚本验证连接:
-   ```powershell
+4. Launch the Unreal Editor. SmithUE will automatically start the HTTP server on port 13721.
+   启动虚幻编辑器. SmithUE 将在 HTTP 端口 13721 上自动初始化命令服务器.
+
+5. Verify the connection:
+   验证连接:
+   ```bash
+   curl -X POST http://localhost:13721 -d "{\"command\":\"ping\"}"
+   # OR / 或
    .\Scripts\Send-SmithUE.ps1 -Command "ping"
    ```
+
+6. Configure your AI tool (see [MCP Server / MCP 服务](#mcp-server--mcp-服务) section below).
+   配置你的 AI 工具（参见下方 [MCP Server / MCP 服务](#mcp-server--mcp-服务) 章节）.
 
 ---
 
