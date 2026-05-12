@@ -27,12 +27,17 @@ SmithUE/
 ├── Source/SmithUE/
 │   ├── Private/Commands/  # Domain command implementations
 │   └── Public/ToolRegistry/ # Schema and Registry core
+├── mcp-server/            # TypeScript MCP Server
+│   └── src/               # Server source code
 ├── Docs/                  # Documentation
 ├── Scripts/               # Testing scripts
+├── CONTRIBUTING.md        # Contribution guide
+├── SKILL.md               # AI agent skill file
 └── SmithUE.uplugin        # Plugin descriptor
 ```
 
-The MCP Server lives in a sibling directory at the project level (`mcp-server/`).
+> **Note**: Adding new UE commands does NOT require changes to `mcp-server/` — the MCP Server auto-discovers commands from the plugin.
+> **注意**：添加新 UE 命令不需要修改 `mcp-server/` — MCP 服务会自动发现插件中的命令。
 
 ## How to Add a New Command
 

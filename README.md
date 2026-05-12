@@ -12,12 +12,14 @@ SmithUE 是一款高性能虚幻引擎编辑器插件, 旨在搭建创意意图�
 
 1. [Vision / 愿景](#vision--愿景)
 2. [Quick Start / 快速入门](#quick-start--快速入门)
-3. [Protocol / 协议](#protocol--协议)
-4. [Command Reference / 命令参考](#command-reference--命令参考)
-5. [AI Texture Generation / AI 纹理生成](#ai-texture-generation--ai-纹理生成)
-6. [Roadmap / 路线图](#roadmap--路线图)
-7. [Known Limitations / 已知限制](#known-limitations--已知限制)
-8. [License / 许可证](#license--许可证)
+3. [MCP Server / MCP 服务](#mcp-server--mcp-服务)
+4. [Protocol / 协议](#protocol--协议)
+5. [Command Reference / 命令参考](#command-reference--命令参考)
+6. [AI Texture Generation / AI 纹理生成](#ai-texture-generation--ai-纹理生成)
+7. [Roadmap / 路线图](#roadmap--路线图)
+8. [Known Limitations / 已知限制](#known-limitations--已知限制)
+9. [Contributing / 贡献](#contributing--贡献)
+10. [License / 许可证](#license--许可证)
 
 ---
 
@@ -45,6 +47,122 @@ Unreal Engine developers spend significant time on repetitive manual operations:
    ```powershell
    .\Scripts\Send-SmithUE.ps1 -Command "ping"
    ```
+
+---
+
+## MCP Server / MCP 服务
+
+SmithUE includes a TypeScript MCP (Model Context Protocol) Server that bridges AI tools to the UE5 plugin. It uses a **meta-tool architecture** — 3 fixed tools instead of registering every command individually, keeping AI context usage constant (~300 tokens) regardless of command count.
+
+SmithUE 内置 TypeScript MCP 服务，通过 **元工具架构** 桥接 AI 工具与 UE5 插件。仅注册 3 个固定工具，无论命令数量多少，AI 上下文占用恒定（约 300 tokens）。
+
+```
+AI Tool (OpenCode / Claude Code / Cline / GitHub Copilot)
+     ↕ MCP stdio
+SmithUE MCP Server (mcp-server/)
+     ↕ HTTP :13721
+SmithUE UE5 Plugin
+     ↕ UE Reflection API
+Unreal Engine 5.2 Editor
+```
+
+### Context Impact / 上下文影响
+
+| Approach / 方案 | 65 tools | 200 tools | 1000 tools |
+|---|---|---|---|
+| Full registration / 全量注册 | ~6.5K tokens | ~20K tokens | ~100K tokens |
+| Meta-tool (SmithUE) / 元工具 | ~300 tokens | ~300 tokens | ~300 tokens |
+
+### 3 Meta-Tools / 3 个元工具
+
+| Tool | Description / 描述 |
+|---|---|
+| `smithue_list_domain` | List domains or get full command schemas for a domain / 列出域或获取某域的完整命令模式 |
+| `smithue_search` | Search commands by keyword / 按关键词搜索命令 |
+| `smithue_execute` | Execute any command with parameters / 执行任意命令 |
+
+### Install & Run / 安装与运行
+
+```bash
+cd mcp-server
+npm install
+npm run build
+```
+
+Start the MCP Server (requires UE Editor running with SmithUE plugin):
+启动 MCP 服务（需要 UE 编辑器运行并启用 SmithUE 插件）：
+
+```bash
+node mcp-server/dist/index.js serve
+```
+
+Environment variables / 环境变量：
+- `SMITHUE_PORT` — HTTP port (default: `13721`)
+- `SMITHUE_HOST` — Host address (default: `localhost`)
+
+### AI Tool Configuration / AI 工具配置
+
+#### OpenCode
+
+Add to `mcp.json` or `.opencode/mcp.json`:
+添加到 `mcp.json` 或 `.opencode/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "smithue": {
+      "command": "node",
+      "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+    }
+  }
+}
+```
+
+#### Claude Code
+
+```bash
+claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/mcp-server/dist/index.js serve
+```
+
+#### GitHub Copilot
+
+Create or update `.github/copilot-mcp.json`:
+创建或更新 `.github/copilot-mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "smithue": {
+      "command": "node",
+      "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+    }
+  }
+}
+```
+
+#### Cline
+
+Add to VSCode settings under `cline.mcpServers`:
+在 VSCode 设置中添加 `cline.mcpServers`：
+
+```json
+{
+  "smithue": {
+    "command": "node",
+    "args": ["{YourProject}/Plugins/SmithUE/mcp-server/dist/index.js", "serve"]
+  }
+}
+```
+
+### Workflow / 使用流程
+
+```
+1. smithue_list_domain()          → See all 8 domains / 查看全部 8 个域
+2. smithue_list_domain("Material") → Get Material command schemas / 获取材质命令模式
+3. smithue_search("blueprint")     → Find blueprint-related commands / 搜索蓝图相关命令
+4. smithue_execute("create_material", {"name": "M_Test", "path": "/Game/Materials"})
+                                   → Execute command / 执行命令
+```
 
 ---
 
@@ -274,6 +392,13 @@ We are committed to expanding SmithUE into a comprehensive AI-first development 
     场景纹理: `SceneTextureId` 通过 FProperty 反射设置, 以避免未导出引擎符号的链接错误.
 *   **OS**: Windows Win64 only.
     操作系统: 仅限 Windows Win64.
+
+---
+
+## Contributing / 贡献
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions on adding new commands.
+参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何添加新命令。
 
 ---
 
