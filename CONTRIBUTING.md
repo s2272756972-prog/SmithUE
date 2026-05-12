@@ -2,6 +2,23 @@
 
 SmithUE grows through community contributions. Adding a new command takes ~15 minutes and enables AI agents to interact with Unreal Engine in new ways.
 
+## AI 辅助开发 / AI-Assisted Development
+
+如果你使用 AI 编码工具（OpenCode、Claude Code、Cline 等）参与 SmithUE 的迭代开发，强烈建议安装项目自带的开发技能，它会教你的 AI 助手理解 SmithUE 的架构、编码规范和工作流程：
+
+If you use an AI coding tool (OpenCode, Claude Code, Cline, etc.) to contribute to SmithUE, install the bundled development skill so your AI assistant understands the architecture, conventions, and workflow:
+
+```
+# Skill 文件位置 / Skill file location:
+Docs/smithue-dev/SKILL.md
+```
+
+各工具的安装方式 / Installation per tool:
+
+- **OpenCode**: 将 `Docs/smithue-dev/` 复制到 `~/.agents/skills/smithue-dev/`
+- **Claude Code**: 运行 `claude skill add ./Docs/smithue-dev/SKILL.md`
+- **其他工具**: 将 `Docs/smithue-dev/SKILL.md` 的内容添加到你的 AI 工具的 system prompt 或 skill 配置中
+
 ## Prerequisites
 
 To develop and compile the SmithUE plugin, you need:
@@ -25,16 +42,18 @@ The project is divided into the C++ plugin and the TypeScript MCP server:
 ```text
 SmithUE/
 ├── Source/SmithUE/
-│   ├── Private/Commands/  # Domain command implementations
-│   └── Public/ToolRegistry/ # Schema and Registry core
-├── Scripts/               # Testing scripts & MCP Server
-│   └── SmithUE-MCP/       # TypeScript MCP Server
-│   └── src/               # Server source code
-├── Docs/                  # Documentation
-├── Scripts/               # Testing scripts
-├── CONTRIBUTING.md        # Contribution guide
-├── SKILL.md               # AI agent skill file
-└── SmithUE.uplugin        # Plugin descriptor
+│   ├── Private/Commands/    # 命令实现 / Domain command implementations
+│   └── Public/ToolRegistry/ # Schema/Registry 核心 / Schema and Registry core
+├── Scripts/
+│   ├── SmithUE-MCP/         # TypeScript MCP 服务 / TypeScript MCP Server
+│   ├── Send-SmithUE.ps1     # 测试脚本 / Testing scripts
+│   └── ...
+├── Docs/
+│   ├── smithue-dev/         # AI 开发技能 / AI development skill
+│   │   └── SKILL.md
+│   └── PROJECT_README.md
+├── CONTRIBUTING.md
+└── SmithUE.uplugin
 ```
 
 > **Note**: Adding new UE commands does NOT require changes to `Scripts/SmithUE-MCP/` — the MCP Server auto-discovers commands from the plugin.
