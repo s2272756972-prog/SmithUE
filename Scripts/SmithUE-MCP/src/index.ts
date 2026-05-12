@@ -19,25 +19,27 @@ async function main(): Promise<void> {
 
   const host = process.env.SMITHUE_HOST ?? 'localhost';
   const port = parseInt(process.env.SMITHUE_PORT ?? '13721', 10);
+  const clientName = process.env.SMITHUE_CLIENT_NAME ?? 'OpenCode';
 
   const server = new McpServer({ name: 'SmithUE', version: pkg.version });
   const client = new SmithUEClient(port, host);
 
   registerTools(server, client);
 
-  // Ping on startup — warn to stderr if unreachable, but continue
-  try {
-    await client.ping();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[SmithUE] Warning: UE5 editor not reachable — ${msg}\n`);
-    process.stderr.write('[SmithUE] Server will start anyway. Connect UE5 editor before using tools.\n');
+  // Try immediate registration, then start keepalive loop for reconnection
+  const sessionId = await client.registerSession(clientName);
+  if (sessionId) {
+    process.stderr.write(`[SmithUE] Session registered: ${sessionId} (client: ${clientName})\n`);
+  } else {
+    process.stderr.write('[SmithUE] UE not reachable yet. Keepalive will retry.\n');
   }
+  client.startKeepalive(clientName);
 
   const transport = new StdioServerTransport();
 
   const shutdown = async () => {
     process.stderr.write('[SmithUE] Shutting down...\n');
+    await client.unregisterSession();
     await server.close();
     process.exit(0);
   };

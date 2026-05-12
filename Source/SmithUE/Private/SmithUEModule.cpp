@@ -16,8 +16,10 @@
 #include "Commands/SmithUEScreenshotCommands.h"
 #include "Commands/SmithUETextureCommands.h"
 #include "Commands/SmithUESourceAnalysisCommands.h"
+#include "UI/SSmithUEStatusIndicator.h"
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
+#include "ToolMenus.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 
 DEFINE_LOG_CATEGORY(LogSmithUE);
@@ -52,12 +54,37 @@ void FSmithUEModule::StartupModule()
 		UE_LOG(LogSmithUE, Warning, TEXT("GEditor is not available yet; SmithUE subsystems will initialize with the editor subsystem collection."));
 	}
 
+	// Register status bar indicator
+	UToolMenus::RegisterStartupCallback(
+		FSimpleMulticastDelegate::FDelegate::CreateLambda([]()
+		{
+			UToolMenu* StatusBarMenu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.StatusBar.ToolBar"));
+			if (StatusBarMenu != nullptr)
+			{
+				FToolMenuSection& Section = StatusBarMenu->FindOrAddSection(TEXT("SmithUE"));
+				Section.AddEntry(
+					FToolMenuEntry::InitWidget(
+						TEXT("SmithUEStatus"),
+						SNew(SSmithUEStatusIndicator),
+						FText::GetEmpty()
+					)
+				);
+			}
+		})
+	);
+
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module started successfully."));
 }
 
 void FSmithUEModule::ShutdownModule()
 {
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module shutting down..."));
+
+	if (UObjectInitialized() && UToolMenus::IsToolMenuUIEnabled())
+	{
+		UToolMenus::Get()->RemoveSection(TEXT("LevelEditor.StatusBar.ToolBar"), TEXT("SmithUE"));
+	}
+
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module shut down."));
 }
 

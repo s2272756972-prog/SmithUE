@@ -7,6 +7,7 @@
 #include "Misc/Parse.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Transport/SmithUEConnectionManager.h"
 
 namespace
 {
@@ -186,6 +187,65 @@ void FSmithUEToolRegistry::RegisterBuiltinCommands()
 				Data->SetNumberField(TEXT("http_port"), GetPortFromCommandLine(TEXT("SmithUEhttpport="), 13721));
 				Data->SetStringField(TEXT("framing_type"), TEXT("length_prefix_le32"));
 
+				Response->SetObjectField(TEXT("data"), Data);
+				return Response;
+			});
+	}
+
+	// --- Session management commands ---
+	if (Registry.Find(TEXT("register_session")) == nullptr)
+	{
+		Registry.Register(
+			FSmithUEToolSchema(
+				TEXT("register_session"),
+				TEXT("System"),
+				TEXT("Register an MCP client session for connection tracking"),
+				{
+					FSmithUEToolParam(TEXT("client_name"), TEXT("string"), TEXT("Client application name (e.g. OpenCode, Claude Code)"), true)
+				}),
+			[](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+			{
+				FString ClientName;
+				if (Params.IsValid())
+				{
+					Params->TryGetStringField(TEXT("client_name"), ClientName);
+				}
+
+				const FString SessionId = FSmithUEConnectionManager::Get().RegisterSession(ClientName);
+
+				TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+				Response->SetStringField(TEXT("status"), TEXT("success"));
+				TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+				Data->SetStringField(TEXT("session_id"), SessionId);
+				Response->SetObjectField(TEXT("data"), Data);
+				return Response;
+			});
+	}
+
+	if (Registry.Find(TEXT("unregister_session")) == nullptr)
+	{
+		Registry.Register(
+			FSmithUEToolSchema(
+				TEXT("unregister_session"),
+				TEXT("System"),
+				TEXT("Unregister an MCP client session"),
+				{
+					FSmithUEToolParam(TEXT("session_id"), TEXT("string"), TEXT("Session ID returned by register_session"), true)
+				}),
+			[](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+			{
+				FString SessionId;
+				if (Params.IsValid())
+				{
+					Params->TryGetStringField(TEXT("session_id"), SessionId);
+				}
+
+				FSmithUEConnectionManager::Get().UnregisterSession(SessionId);
+
+				TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+				Response->SetStringField(TEXT("status"), TEXT("success"));
+				TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+				Data->SetStringField(TEXT("message"), TEXT("session unregistered"));
 				Response->SetObjectField(TEXT("data"), Data);
 				return Response;
 			});

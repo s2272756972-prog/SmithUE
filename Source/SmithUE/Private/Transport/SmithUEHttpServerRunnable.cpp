@@ -5,6 +5,7 @@
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 #include "Transport/SmithUEHttpServer.h"
+#include "Transport/SmithUEConnectionManager.h"
 #include "SmithUEModule.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "Utils/SmithUEDispatcher.h"
@@ -369,6 +370,13 @@ uint32 FSmithUEHttpServerRunnable::Run()
 		FString Response;
 		if (SmithUEHttpServer::Private::ReceiveHttpRequest(*ClientSocket, bStopping, Request))
 		{
+			// Touch session heartbeat if header is present
+			const FString* SessionHeader = Request.Headers.Find(TEXT("x-smithue-session"));
+			if (SessionHeader != nullptr && !SessionHeader->IsEmpty())
+			{
+				FSmithUEConnectionManager::Get().TouchSession(*SessionHeader);
+			}
+
 			const SmithUEHttpServer::Private::FRouteResult RouteResult = SmithUEHttpServer::Private::RouteRequest(Request);
 			Response = RouteResult.StatusCode == 204
 				? SmithUEHttpServer::Private::BuildNoContentResponse()
