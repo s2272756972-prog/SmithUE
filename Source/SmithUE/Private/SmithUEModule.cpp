@@ -9,6 +9,7 @@
 #include "Commands/SmithUEEditorCommands.h"
 #include "Commands/SmithUEInteractionCommands.h"
 #include "Commands/SmithUEMaterialCommands.h"
+#include "Commands/SmithUEMaterialFunctionCommands.h"
 #include "Commands/SmithUEProjectCommands.h"
 #include "Blueprint/SmithUEBpAtomicAPI.h"
 #include "Commands/SmithUEViewportCommands.h"
@@ -33,6 +34,7 @@ void FSmithUEModule::StartupModule()
 	FSmithUEToolRegistry::RegisterBuiltinCommands();
 	FSmithUEProjectCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEMaterialFunctionCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEEditorCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEInteractionCommands::RegisterTools(FSmithUEToolRegistry::Get());

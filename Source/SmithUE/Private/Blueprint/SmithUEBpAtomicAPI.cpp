@@ -175,7 +175,29 @@ bool FSmithUEBpAtomicAPI::CompileBlueprint(UBlueprint* Blueprint, TArray<FString
 	FKismetEditorUtilities::CompileBlueprint(Blueprint, CompileFlags);
 	if (Blueprint->Status == BS_Error)
 	{
-		OutErrors.Add(TEXT("Blueprint compilation failed"));
+		// Collect actual error messages from graph nodes
+		auto CollectNodeErrors = [&OutErrors](const TArray<TObjectPtr<UEdGraph>>& Graphs)
+		{
+			for (UEdGraph* Graph : Graphs)
+			{
+				if (!Graph) continue;
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					if (Node && Node->bHasCompilerMessage && Node->ErrorType <= (int32)EMessageSeverity::Error)
+					{
+						OutErrors.Add(FString::Printf(TEXT("[%s] %s"),
+							*Node->GetNodeTitle(ENodeTitleType::ListView).ToString(),
+							*Node->ErrorMsg));
+					}
+				}
+			}
+		};
+		CollectNodeErrors(Blueprint->UbergraphPages);
+		CollectNodeErrors(Blueprint->FunctionGraphs);
+		if (OutErrors.Num() == 0)
+		{
+			OutErrors.Add(TEXT("Blueprint compilation failed (no specific error messages available)"));
+		}
 		return false;
 	}
 	return true;

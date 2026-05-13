@@ -10,11 +10,18 @@
 #include "Materials/MaterialExpressionTextureSample.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionSceneTexture.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "MaterialShared.h"
+#include "MaterialGraph/MaterialGraph.h"
+#include "MaterialEditorUtilities.h"
+#include "IMaterialEditor.h"
+#include "Toolkits/ToolkitManager.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -22,9 +29,61 @@
 
 namespace
 {
-    UMaterial* LoadMaterial(const FString& MaterialPath)
+    /**
+     * Load a material for editing. If the Material Editor is open for this asset,
+     * returns the editor's working COPY (which has a valid MaterialGraph for live UI refresh).
+     * Otherwise returns the original asset.
+     *
+     * @param OutEditor  If non-null and editor is open, receives the IMaterialEditor ptr.
+     */
+    UMaterial* LoadMaterialForEditing(const FString& MaterialPath, TSharedPtr<IMaterialEditor>* OutEditor = nullptr)
     {
-        return Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+        UMaterial* Original = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+        if (!Original) return nullptr;
+
+        TSharedPtr<IToolkit> Found = FToolkitManager::Get().FindEditorForAsset(Original);
+        if (Found.IsValid())
+        {
+            TSharedPtr<IMaterialEditor> MatEditor = StaticCastSharedPtr<IMaterialEditor>(Found);
+            if (MatEditor.IsValid())
+            {
+                UMaterial* EditMat = Cast<UMaterial>(MatEditor->GetMaterialInterface());
+                if (EditMat)
+                {
+                    if (OutEditor) *OutEditor = MatEditor;
+                    return EditMat;
+                }
+            }
+        }
+
+        return Original;
+    }
+
+    /**
+     * Notify the editor that a material has been modified programmatically.
+     * When an editor is active (working on the copy), rebuilds graph and refreshes UI.
+     * When no editor is active (working on original), triggers standard change notification.
+     */
+    void NotifyMaterialModified(UMaterial* Material, TSharedPtr<IMaterialEditor> MatEditor = nullptr)
+    {
+        if (MatEditor.IsValid())
+        {
+            // Working on the editor's copy which has a valid MaterialGraph
+            if (Material->MaterialGraph)
+            {
+                Material->MaterialGraph->RebuildGraph();
+            }
+            MatEditor->UpdateMaterialAfterGraphChange();
+            UE_LOG(LogSmithUE, Log, TEXT("NotifyMaterialModified: Editor graph refreshed for %s"), *Material->GetName());
+        }
+        else
+        {
+            // Working on the original asset - no editor open
+            Material->PreEditChange(nullptr);
+            Material->PostEditChange();
+            Material->MarkPackageDirty();
+            UE_LOG(LogSmithUE, Verbose, TEXT("NotifyMaterialModified: No editor open for %s"), *Material->GetName());
+        }
     }
 
     /** Resolve a short or full expression class name to a UClass. */
@@ -182,7 +241,7 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             {
                 FSmithUEToolParam(TEXT("material_path"), TEXT("string"), TEXT("Full asset path"), true),
                 FSmithUEToolParam(TEXT("expression_index"), TEXT("number"), TEXT("Index of expression in Expressions array"), true),
-                FSmithUEToolParam(TEXT("properties"), TEXT("object"), TEXT("Key-value pairs to set. For Custom: code, output_type(float/float2/float3/float4), description, inputs(array of {name,type})"), true)
+                FSmithUEToolParam(TEXT("properties"), TEXT("object"), TEXT("Key-value pairs to set. For Custom: code, output_type(float/float2/float3/float4), description, inputs(array of {name,type}). For MaterialFunctionCall: material_function(asset path)"), true)
             }),
         [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
         {
@@ -263,7 +322,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleGetMaterialInfo(const TS
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
     }
 
-    UMaterial* Material = LoadMaterial(MaterialPath);
+    UMaterial* Material = LoadMaterialForEditing(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -328,7 +387,8 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleAddMaterialExpression(co
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: expression_class"));
     }
 
-    UMaterial* Material = LoadMaterial(MaterialPath);
+    TSharedPtr<IMaterialEditor> ActiveEditor;
+    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -352,14 +412,14 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleAddMaterialExpression(co
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create expression object"));
     }
 
+    NewExpr->Material = Material;
     NewExpr->MaterialExpressionEditorX = static_cast<int32>(PosX);
     NewExpr->MaterialExpressionEditorY = static_cast<int32>(PosY);
 
     // UE 5.2: use mutable expression collection for writes
     const int32 NewIndex = Material->GetExpressionCollection().Expressions.Add(NewExpr);
 
-    Material->PostEditChange();
-    Material->MarkPackageDirty();
+    NotifyMaterialModified(Material, ActiveEditor);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetNumberField(TEXT("expression_index"), NewIndex);
@@ -400,7 +460,8 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleConnectMaterialPins(cons
     const int32 SourceOutputIndex = static_cast<int32>(SourceOutputD);
     const int32 DestInputIndex = static_cast<int32>(DestInputD);
 
-    UMaterial* Material = LoadMaterial(MaterialPath);
+    TSharedPtr<IMaterialEditor> ActiveEditor;
+    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -458,8 +519,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleConnectMaterialPins(cons
         Input->Connect(SourceOutputIndex, SourceExpr);
     }
 
-    Material->PostEditChange();
-    Material->MarkPackageDirty();
+    NotifyMaterialModified(Material, ActiveEditor);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("connected"), true);
@@ -481,11 +541,20 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleCompileMaterial(const TS
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
     }
 
-    UMaterial* Material = LoadMaterial(MaterialPath);
+    UMaterial* Material = LoadMaterialForEditing(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
             FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    // Clear stale node errors before recompilation
+    for (UMaterialExpression* Expr : Material->GetExpressions())
+    {
+        if (Expr)
+        {
+            Expr->LastErrorText.Empty();
+        }
     }
 
     // Trigger recompilation via PostEditChange
@@ -493,12 +562,66 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleCompileMaterial(const TS
     Material->PostEditChangeProperty(ChangeEvent);
     Material->MarkPackageDirty();
 
-    const bool bHasErrors = false; // Compilation errors tracked by material resource, not exposed simply
+    // Collect compile errors from material resources (shader-level)
+    TArray<FString> Errors;
+
+    // Check SM5 and SM6 feature levels
+    static const ERHIFeatureLevel::Type FeatureLevels[] = { ERHIFeatureLevel::SM5, ERHIFeatureLevel::SM6 };
+    for (ERHIFeatureLevel::Type FL : FeatureLevels)
+    {
+        for (int32 QL = 0; QL < EMaterialQualityLevel::Num; ++QL)
+        {
+            FMaterialResource* Resource = Material->GetMaterialResource(FL, static_cast<EMaterialQualityLevel::Type>(QL));
+            if (Resource)
+            {
+                for (const FString& Err : Resource->GetCompileErrors())
+                {
+                    Errors.AddUnique(Err);
+                }
+            }
+        }
+    }
+
+    // Collect node-level errors from expressions (LastErrorText)
+    TArray<TSharedPtr<FJsonValue>> NodeErrorsArr;
+    for (int32 i = 0; i < Material->GetExpressions().Num(); ++i)
+    {
+        UMaterialExpression* Expr = Material->GetExpressions()[i];
+        if (Expr && !Expr->LastErrorText.IsEmpty())
+        {
+            TSharedPtr<FJsonObject> NodeErr = MakeShared<FJsonObject>();
+            NodeErr->SetNumberField(TEXT("expression_index"), i);
+            NodeErr->SetStringField(TEXT("class"), Expr->GetClass()->GetName());
+            NodeErr->SetStringField(TEXT("error"), Expr->LastErrorText);
+            if (!Expr->Desc.IsEmpty())
+            {
+                NodeErr->SetStringField(TEXT("desc"), Expr->Desc);
+            }
+            NodeErrorsArr.Add(MakeShared<FJsonValueObject>(NodeErr));
+        }
+    }
+
+    const bool bHasErrors = Errors.Num() > 0 || NodeErrorsArr.Num() > 0;
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("compiled"), true);
+    Data->SetBoolField(TEXT("compiled"), !bHasErrors);
     Data->SetBoolField(TEXT("has_errors"), bHasErrors);
     Data->SetStringField(TEXT("material_path"), MaterialPath);
+
+    // Shader compile errors
+    TArray<TSharedPtr<FJsonValue>> ErrorsArr;
+    for (const FString& Err : Errors)
+    {
+        ErrorsArr.Add(MakeShared<FJsonValueString>(Err));
+    }
+    Data->SetArrayField(TEXT("errors"), ErrorsArr);
+
+    // Node-level errors
+    if (NodeErrorsArr.Num() > 0)
+    {
+        Data->SetArrayField(TEXT("node_errors"), NodeErrorsArr);
+    }
+
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -519,7 +642,8 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
     }
 
-    UMaterial* Material = LoadMaterial(MaterialPath);
+    TSharedPtr<IMaterialEditor> ActiveEditor;
+    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -611,8 +735,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("No properties specified to set"));
     }
 
-    Material->PostEditChange();
-    Material->MarkPackageDirty();
+    NotifyMaterialModified(Material, ActiveEditor);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("material_path"), MaterialPath);
@@ -656,7 +779,8 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
     }
     const TSharedPtr<FJsonObject>& Props = *PropsPtr;
 
-    UMaterial* Material = LoadMaterial(MaterialPath);
+    TSharedPtr<IMaterialEditor> ActiveEditor;
+    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -760,6 +884,31 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
         if (Props->TryGetNumberField(TEXT("b"), B)) { Const3Expr->Constant.B = static_cast<float>(B); Changed.Add(TEXT("b")); }
     }
 
+    // Handle MaterialExpressionMaterialFunctionCall - bind a material function
+    UMaterialExpressionMaterialFunctionCall* FuncCallExpr = Cast<UMaterialExpressionMaterialFunctionCall>(Expr);
+    if (FuncCallExpr)
+    {
+        FString FuncPath;
+        if (Props->TryGetStringField(TEXT("material_function"), FuncPath))
+        {
+            UMaterialFunctionInterface* MFI = LoadObject<UMaterialFunctionInterface>(nullptr, *FuncPath);
+            if (!MFI)
+            {
+                return FSmithUECommonUtils::CreateErrorResponse(
+                    FString::Printf(TEXT("Material function not found: %s"), *FuncPath));
+            }
+            if (FuncCallExpr->SetMaterialFunction(MFI))
+            {
+                Changed.Add(TEXT("material_function"));
+            }
+            else
+            {
+                return FSmithUECommonUtils::CreateErrorResponse(
+                    FString::Printf(TEXT("Failed to set material function: %s"), *FuncPath));
+            }
+        }
+    }
+
     // Handle SceneTexture ID via reflection (avoids linking to unexported class)
     FString SceneTexId;
     if (Props->TryGetStringField(TEXT("scene_texture_id"), SceneTexId))
@@ -767,16 +916,40 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
         FProperty* Prop = Expr->GetClass()->FindPropertyByName(TEXT("SceneTextureId"));
         if (Prop)
         {
-            // ESceneTextureId enum values
-            uint8 TexId = 14; // PPI_PostProcessInput0 default
-            if (SceneTexId == TEXT("post_process_input_0") || SceneTexId == TEXT("scene_color")) { TexId = 14; }
-            else if (SceneTexId == TEXT("scene_depth")) { TexId = 1; }
-            else if (SceneTexId == TEXT("custom_depth")) { TexId = 12; }
+            // Map string to ESceneTextureId enum value (use actual enum for correct indices)
+            int32 TexId = -1;
+            if      (SceneTexId == TEXT("PPI_SceneColor")          || SceneTexId == TEXT("scene_color"))            { TexId = PPI_SceneColor; }
+            else if (SceneTexId == TEXT("PPI_SceneDepth")          || SceneTexId == TEXT("scene_depth"))            { TexId = PPI_SceneDepth; }
+            else if (SceneTexId == TEXT("PPI_DiffuseColor")        || SceneTexId == TEXT("diffuse_color"))          { TexId = PPI_DiffuseColor; }
+            else if (SceneTexId == TEXT("PPI_SpecularColor")       || SceneTexId == TEXT("specular_color"))         { TexId = PPI_SpecularColor; }
+            else if (SceneTexId == TEXT("PPI_BaseColor")           || SceneTexId == TEXT("base_color"))             { TexId = PPI_BaseColor; }
+            else if (SceneTexId == TEXT("PPI_Metallic")            || SceneTexId == TEXT("metallic"))               { TexId = PPI_Metallic; }
+            else if (SceneTexId == TEXT("PPI_WorldNormal")         || SceneTexId == TEXT("world_normal"))           { TexId = PPI_WorldNormal; }
+            else if (SceneTexId == TEXT("PPI_Opacity")             || SceneTexId == TEXT("opacity"))                { TexId = PPI_Opacity; }
+            else if (SceneTexId == TEXT("PPI_Roughness")           || SceneTexId == TEXT("roughness"))              { TexId = PPI_Roughness; }
+            else if (SceneTexId == TEXT("PPI_MaterialAO")          || SceneTexId == TEXT("material_ao"))            { TexId = PPI_MaterialAO; }
+            else if (SceneTexId == TEXT("PPI_CustomDepth")         || SceneTexId == TEXT("custom_depth"))           { TexId = PPI_CustomDepth; }
+            else if (SceneTexId == TEXT("PPI_PostProcessInput0")   || SceneTexId == TEXT("post_process_input_0"))   { TexId = PPI_PostProcessInput0; }
+            else if (SceneTexId == TEXT("PPI_PostProcessInput1")   || SceneTexId == TEXT("post_process_input_1"))   { TexId = PPI_PostProcessInput1; }
+            else if (SceneTexId == TEXT("PPI_PostProcessInput2")   || SceneTexId == TEXT("post_process_input_2"))   { TexId = PPI_PostProcessInput2; }
+            else if (SceneTexId == TEXT("PPI_ShadingModelColor")   || SceneTexId == TEXT("shading_model_color"))    { TexId = PPI_ShadingModelColor; }
+            else if (SceneTexId == TEXT("PPI_ShadingModelID")      || SceneTexId == TEXT("shading_model_id"))       { TexId = PPI_ShadingModelID; }
+            else if (SceneTexId == TEXT("PPI_AmbientOcclusion")    || SceneTexId == TEXT("ambient_occlusion"))      { TexId = PPI_AmbientOcclusion; }
+            else if (SceneTexId == TEXT("PPI_CustomStencil")       || SceneTexId == TEXT("custom_stencil"))         { TexId = PPI_CustomStencil; }
+            else if (SceneTexId == TEXT("PPI_Velocity")            || SceneTexId == TEXT("velocity"))               { TexId = PPI_Velocity; }
+            else if (SceneTexId == TEXT("PPI_WorldTangent")        || SceneTexId == TEXT("world_tangent"))          { TexId = PPI_WorldTangent; }
+            else if (SceneTexId == TEXT("PPI_Anisotropy")          || SceneTexId == TEXT("anisotropy"))             { TexId = PPI_Anisotropy; }
+
+            if (TexId < 0)
+            {
+                return FSmithUECommonUtils::CreateErrorResponse(
+                    FString::Printf(TEXT("Unknown scene_texture_id: %s. Use PPI_CustomStencil, PPI_PostProcessInput0, PPI_CustomDepth, etc."), *SceneTexId));
+            }
 
             void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Expr);
             if (ValuePtr)
             {
-                *static_cast<uint8*>(ValuePtr) = TexId;
+                *static_cast<uint8*>(ValuePtr) = static_cast<uint8>(TexId);
                 Changed.Add(TEXT("scene_texture_id"));
             }
         }
@@ -787,8 +960,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("No recognized properties were set. Check expression type and property names."));
     }
 
-    Material->PostEditChange();
-    Material->MarkPackageDirty();
+    NotifyMaterialModified(Material, ActiveEditor);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("material_path"), MaterialPath);

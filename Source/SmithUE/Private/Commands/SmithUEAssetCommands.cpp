@@ -10,6 +10,8 @@
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "Misc/PackageName.h"
+#include "ObjectTools.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,6 +63,29 @@ namespace
     IAssetRegistry& GetAssetRegistry()
     {
         return FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+    }
+
+    // Close all editors for an asset. Returns true if any editors were closed.
+    // bWasDirty is set to true if the asset had unsaved changes before closing.
+    bool CloseEditorsForAsset(UObject* Asset, bool& bWasDirty)
+    {
+        bWasDirty = false;
+        if (!Asset) return false;
+
+        UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+        if (!EditorSubsystem) return false;
+
+        IAssetEditorInstance* Editor = EditorSubsystem->FindEditorForAsset(Asset, false);
+        if (!Editor) return false;
+
+        UPackage* Package = Asset->GetOutermost();
+        if (Package)
+        {
+            bWasDirty = Package->IsDirty();
+        }
+
+        EditorSubsystem->CloseAllEditorsForAsset(Asset);
+        return true;
     }
 }
 
@@ -123,6 +148,39 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("dest_path"), TEXT("string"), TEXT("Destination asset path (full path including new name)"), true)
             }),
         &HandleDuplicateAsset);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("delete_asset"),
+            TEXT("Asset"),
+            TEXT("Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway."),
+            {
+                FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), TEXT("Full asset path to delete (e.g. /Game/Materials/M_Old)"), true),
+                FSmithUEToolParam(TEXT("force"), TEXT("boolean"), TEXT("Force delete even if references exist (default: false)"))
+            }),
+        &HandleDeleteAsset);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("move_asset"),
+            TEXT("Asset"),
+            TEXT("Move an asset to a new path (different folder and/or name). Updates all references."),
+            {
+                FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), TEXT("Current full asset path"), true),
+                FSmithUEToolParam(TEXT("new_path"), TEXT("string"), TEXT("New full asset path (e.g. /Game/NewFolder/NewName)"), true)
+            }),
+        &HandleMoveAsset);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("asset_editor"),
+            TEXT("Asset"),
+            TEXT("Open or close asset editors. Supports single or multiple assets."),
+            {
+                FSmithUEToolParam(TEXT("action"), TEXT("string"), TEXT("'open' or 'close'"), true),
+                FSmithUEToolParam(TEXT("asset_paths"), TEXT("array"), TEXT("Array of asset paths (e.g. [\"/Game/Materials/M_A\", \"/Game/Materials/M_B\"])"), true)
+            }),
+        &HandleAssetEditor);
 }
 
 // ---------------------------------------------------------------------------
@@ -256,13 +314,20 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleGetAssetInfo(const TSharedP
     }
 
     IAssetRegistry& AssetRegistry = GetAssetRegistry();
-    FAssetData AssetData = AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(AssetPath));
 
-    if (!AssetData.IsValid())
+    // Use FARFilter on PackageNames — GetAssetByObjectPath fails when given
+    // a package path (e.g. /Game/Foo/Bar) without the .ObjectName suffix.
+    FARFilter Filter;
+    Filter.PackageNames.Add(FName(*AssetPath));
+    TArray<FAssetData> FoundAssets;
+    AssetRegistry.GetAssets(Filter, FoundAssets);
+
+    if (FoundAssets.Num() == 0)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
             FString::Printf(TEXT("Could not retrieve asset data for: %s"), *AssetPath));
     }
+    FAssetData AssetData = FoundAssets[0];
 
     TSharedPtr<FJsonObject> Data = AssetDataToJson(AssetData, true);
 
@@ -379,5 +444,265 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleDuplicateAsset(const TShare
     Data->SetStringField(TEXT("dest_path"), DestPath);
 
     UE_LOG(LogSmithUE, Log, TEXT("duplicate_asset: %s -> %s"), *SourcePath, *DestPath);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: delete_asset
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("asset_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString AssetPath;
+    Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+
+    bool bForce = false;
+    Params->TryGetBoolField(TEXT("force"), bForce);
+
+    if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
+    }
+
+    IAssetRegistry& AssetRegistry = GetAssetRegistry();
+
+    // Use FARFilter on PackageNames — GetAssetByObjectPath fails when given
+    // a package path (e.g. /Game/Foo/Bar) without the .ObjectName suffix.
+    FARFilter Filter;
+    Filter.PackageNames.Add(FName(*AssetPath));
+    TArray<FAssetData> FoundAssets;
+    AssetRegistry.GetAssets(Filter, FoundAssets);
+
+    if (FoundAssets.Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Could not retrieve asset data for: %s"), *AssetPath));
+    }
+    FAssetData AssetData = FoundAssets[0];
+
+    // Check referencers
+    TArray<FName> Referencers;
+    AssetRegistry.GetReferencers(AssetData.PackageName, Referencers);
+
+    // Filter out self-reference
+    Referencers.RemoveAll([&](const FName& Ref) {
+        return Ref == AssetData.PackageName;
+    });
+
+    if (Referencers.Num() > 0 && !bForce)
+    {
+        TArray<TSharedPtr<FJsonValue>> RefsArray;
+        for (const FName& Ref : Referencers)
+        {
+            RefsArray.Add(MakeShared<FJsonValueString>(Ref.ToString()));
+        }
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("asset_path"), AssetPath);
+        Data->SetBoolField(TEXT("deleted"), false);
+        Data->SetNumberField(TEXT("referencer_count"), Referencers.Num());
+        Data->SetArrayField(TEXT("referencers"), RefsArray);
+        Data->SetStringField(TEXT("hint"), TEXT("Use force=true to delete anyway"));
+        // Return success=false with data so caller can see the referencers list
+        TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+        Response->SetBoolField(TEXT("success"), false);
+        Response->SetStringField(TEXT("error"),
+            FString::Printf(TEXT("Asset has %d referencer(s). Use force=true to delete anyway."), Referencers.Num()));
+        Response->SetObjectField(TEXT("data"), Data);
+        return Response;
+    }
+
+    // Close any open editors
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+    bool bWasDirty = false;
+    if (Asset)
+    {
+        CloseEditorsForAsset(Asset, bWasDirty);
+    }
+
+    // Delete
+    TArray<FAssetData> AssetsToDelete;
+    AssetsToDelete.Add(AssetData);
+    int32 DeletedCount = ObjectTools::DeleteAssets(AssetsToDelete, false);
+
+    if (DeletedCount == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to delete asset: %s"), *AssetPath));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("asset_path"), AssetPath);
+    Data->SetBoolField(TEXT("deleted"), true);
+    Data->SetBoolField(TEXT("was_dirty"), bWasDirty);
+    Data->SetBoolField(TEXT("force_used"), bForce && Referencers.Num() > 0);
+    Data->SetNumberField(TEXT("referencers_removed"), bForce ? Referencers.Num() : 0);
+
+    UE_LOG(LogSmithUE, Log, TEXT("delete_asset: deleted %s (force=%s, was_dirty=%s)"),
+        *AssetPath, bForce ? TEXT("true") : TEXT("false"), bWasDirty ? TEXT("true") : TEXT("false"));
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: move_asset
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleMoveAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("asset_path"), TEXT("new_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString AssetPath;
+    Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+
+    FString NewPath;
+    Params->TryGetStringField(TEXT("new_path"), NewPath);
+
+    if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
+    }
+
+    if (UEditorAssetLibrary::DoesAssetExist(NewPath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Destination asset already exists: %s"), *NewPath));
+    }
+
+    // Ensure destination directory exists (RenameAsset won't create it)
+    const FString DestDir = FPackageName::GetLongPackagePath(NewPath);
+    if (!UEditorAssetLibrary::DoesDirectoryExist(DestDir))
+    {
+        if (!UEditorAssetLibrary::MakeDirectory(DestDir))
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Failed to create destination directory: %s"), *DestDir));
+        }
+    }
+
+    // Close any open editors before moving
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+    bool bWasDirty = false;
+    bool bEditorsWereClosed = false;
+    if (Asset)
+    {
+        bEditorsWereClosed = CloseEditorsForAsset(Asset, bWasDirty);
+    }
+
+    if (!UEditorAssetLibrary::RenameAsset(AssetPath, NewPath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to move asset from %s to %s"), *AssetPath, *NewPath));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("old_path"), AssetPath);
+    Data->SetStringField(TEXT("new_path"), NewPath);
+    Data->SetBoolField(TEXT("was_dirty"), bWasDirty);
+    Data->SetBoolField(TEXT("editors_closed"), bEditorsWereClosed);
+
+    UE_LOG(LogSmithUE, Log, TEXT("move_asset: %s -> %s"), *AssetPath, *NewPath);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: asset_editor (open / close, single or multiple assets)
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleAssetEditor(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("action"), TEXT("asset_paths")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString Action;
+    Params->TryGetStringField(TEXT("action"), Action);
+    Action = Action.ToLower();
+
+    if (Action != TEXT("open") && Action != TEXT("close"))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Invalid action '%s'. Must be 'open' or 'close'."), *Action));
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>* PathsArray = nullptr;
+    if (!Params->TryGetArrayField(TEXT("asset_paths"), PathsArray) || !PathsArray || PathsArray->Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("asset_paths must be a non-empty array of strings"));
+    }
+
+    UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+    if (!EditorSubsystem)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("AssetEditorSubsystem not available"));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> ResultsArray;
+    ResultsArray.Reserve(PathsArray->Num());
+    int32 SuccessCount = 0;
+
+    for (const TSharedPtr<FJsonValue>& PathValue : *PathsArray)
+    {
+        FString AssetPath = PathValue->AsString();
+        TSharedPtr<FJsonObject> ItemResult = MakeShared<FJsonObject>();
+        ItemResult->SetStringField(TEXT("asset_path"), AssetPath);
+
+        if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
+        {
+            ItemResult->SetBoolField(TEXT("success"), false);
+            ItemResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
+            ResultsArray.Add(MakeShared<FJsonValueObject>(ItemResult));
+            continue;
+        }
+
+        UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+        if (!Asset)
+        {
+            ItemResult->SetBoolField(TEXT("success"), false);
+            ItemResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+            ResultsArray.Add(MakeShared<FJsonValueObject>(ItemResult));
+            continue;
+        }
+
+        if (Action == TEXT("open"))
+        {
+            const bool bOpened = EditorSubsystem->OpenEditorForAsset(Asset);
+            ItemResult->SetBoolField(TEXT("success"), bOpened);
+            ItemResult->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
+            if (bOpened) ++SuccessCount;
+        }
+        else // close
+        {
+            bool bWasDirty = false;
+            bool bClosed = CloseEditorsForAsset(Asset, bWasDirty);
+            ItemResult->SetBoolField(TEXT("success"), true); // closing is always "success" even if no editor was open
+            ItemResult->SetBoolField(TEXT("editor_was_open"), bClosed);
+            ItemResult->SetBoolField(TEXT("was_dirty"), bWasDirty);
+            ++SuccessCount;
+        }
+
+        ResultsArray.Add(MakeShared<FJsonValueObject>(ItemResult));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("action"), Action);
+    Data->SetNumberField(TEXT("total"), PathsArray->Num());
+    Data->SetNumberField(TEXT("succeeded"), SuccessCount);
+    Data->SetArrayField(TEXT("results"), ResultsArray);
+
+    UE_LOG(LogSmithUE, Log, TEXT("asset_editor: %s %d/%d assets"),
+        *Action, SuccessCount, PathsArray->Num());
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

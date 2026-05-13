@@ -67,6 +67,62 @@ https://github.com/123dx-svg/SmithUE.git
 
 > **提示**：添加新命令后，MCP 元工具会自动发现它，无需修改 TypeScript 代码。使用 `smithue_list_domain()` 确认新命令已注册。
 
+## 新增领域（Domain）
+
+当现有 8 大领域（System、Asset、Material、Editor、Blueprint、Viewport、Observation、Analysis）无法涵盖你的新命令时，可以新增领域。遵循以下原则：
+
+### 何时新增领域
+
+*   现有领域中没有语义匹配的分组。
+*   你的命令集围绕一个明确的功能主题（如 Animation、Audio、Landscape）。
+*   预计该主题下会有 3 个以上命令。如果只有 1-2 个命令，优先归入最相近的现有领域。
+
+### 新增步骤
+
+1.  **创建命令文件**：
+    ```text
+    Source/SmithUE/Private/Commands/SmithUE{NewDomain}Commands.cpp
+    Source/SmithUE/Public/Commands/SmithUE{NewDomain}Commands.h
+    ```
+
+2.  **头文件模板**：
+    ```cpp
+    #pragma once
+    #include "CoreMinimal.h"
+
+    class FSmithUEToolRegistry;
+
+    class FSmithUE{NewDomain}Commands
+    {
+    public:
+        static void RegisterTools(FSmithUEToolRegistry& Registry);
+    private:
+        // 每个命令一个静态处理函数
+        static TSharedPtr<FJsonObject> HandleMyCommand(const TSharedPtr<FJsonObject>& Params);
+    };
+    ```
+
+3.  **在模块中注册**：在 `SmithUEModule.cpp` 的 `StartupModule()` 中添加：
+    ```cpp
+    #include "Commands/SmithUE{NewDomain}Commands.h"
+    // ... 在现有 RegisterTools 调用之后
+    FSmithUE{NewDomain}Commands::RegisterTools(FSmithUEToolRegistry::Get());
+    ```
+
+4.  **Category 名称**：在 `FSmithUEToolSchema` 中使用与领域同名的 Category 字符串（首字母大写，如 `TEXT("Animation")`）。MCP 元工具的 `smithue_list_domain()` 会自动发现新领域。
+
+### 命名原则
+
+*   **领域名称**：使用 UE 生态中广泛认知的术语（如 `Animation` 而非 `Anim`，`Landscape` 而非 `Terrain`）。
+*   **命令名称**：`动词_名词` 格式，小写下划线分隔（如 `play_animation`、`get_landscape_info`）。
+*   **参数名称**：小写下划线分隔，语义明确（如 `actor_name`、`asset_path`）。
+
+### 注意事项
+
+*   新领域的所有命令必须遵循相同的代码规范（返回格式、参数校验、日志记录）。
+*   不要创建过于宽泛的领域（如 "Misc" 或 "Utils"），保持每个领域有明确的职责边界。
+*   添加完成后，使用 `smithue_list_domain()` 确认新领域已出现在列表中。
+
 ## 代码规范
 
 *   **返回格式**：使用 `FSmithUECommonUtils::CreateSuccessResponse(Data)` 或 `CreateErrorResponse(Message)`。

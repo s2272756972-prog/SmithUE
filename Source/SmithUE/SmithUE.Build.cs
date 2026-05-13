@@ -24,6 +24,7 @@ public class SmithUE : ModuleRules
 			new string[]
 			{
 				"UnrealEd",
+				"EditorFramework",
 				"EditorScriptingUtilities",
 				"EditorSubsystem",
 				"Slate",

@@ -197,7 +197,7 @@ SmithUE 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 **Request Format / 请求格式:**
 ```json
 {
-  "cmd": "command_name",
+  "command": "command_name",
   "params": {
     "param_key": "param_value"
   }
@@ -235,9 +235,9 @@ Commands for managing project state, settings, and filesystem.
 | `create_folder` | Create a new directory in Content Browser / 在内容浏览器中创建新目录 |
 | `get_source_files` | List C++ source files for project modules / 列出项目模块的 C++ 源文件 |
 
-### Asset / 资产 (7 commands)
-Manage assets and integrate external AI generation.
-管理资产并集成外部 AI 生成.
+### Asset / 资产 (10 commands)
+Manage assets, editor tabs, and integrate external AI generation.
+管理资产、编辑器标签页并集成外部 AI 生成.
 
 | Command | Description / 描述 |
 | :--- | :--- |
@@ -246,22 +246,30 @@ Manage assets and integrate external AI generation.
 | `get_asset_info` | Retrieve detailed asset metadata / 获取详细的资产元数据 |
 | `rename_asset` | Rename asset with redirect fixup / 重命名资产并修复重定向 |
 | `duplicate_asset` | Create a copy of an asset / 创建资产副本 |
+| `delete_asset` | Delete asset with reference check (force option) / 删除资产并检查引用关系 (可强制删除) |
+| `move_asset` | Move asset to new path, updating all references / 移动资产到新路径并更新所有引用 |
+| `asset_editor` | Open or close asset editors for single or multiple assets / 打开或关闭单个或多个资产的编辑器 |
 | `generate_texture` | Async texture generation via AI API / 通过 AI API 异步生成纹理 |
 | `check_generation_task` | Poll status of texture generation / 轮询纹理生成状态 |
 
-### Material / 材质 (7 commands)
-Programmatic material creation, node graph assembly, property configuration and compilation.
-程序化材质创建, 节点图组装, 属性配置与编译.
+### Material / 材质 (12 commands)
+Programmatic material and material function creation, node graph assembly, property configuration and compilation. Supports live refresh when Material Editor is open.
+程序化材质及材质函数创建, 节点图组装, 属性配置与编译. 材质编辑器打开时支持实时刷新.
 
 | Command | Description / 描述 |
 | :--- | :--- |
 | `create_material` | Create Material or MaterialInstance / 创建材质或材质实例 |
 | `get_material_info` | Inspect material graph structure / 检查材质图表结构 |
 | `set_material_property` | Set material-level properties (domain, blend mode, shading model, two-sided, blendable location) / 设置材质级属性 (域, 混合模式, 着色模型, 双面, 可混合位置) |
-| `set_expression_property` | Set expression node properties (Custom HLSL code/output type/inputs, Constant, Constant3Vector RGB, SceneTexture ID) / 设置表达式节点属性 (自定义 HLSL 代码/输出类型/输入, 常量, 三维常量向量 RGB, 场景纹理 ID) |
+| `set_expression_property` | Set expression node properties (Custom HLSL, constants, textures, SceneTexture ID, MaterialFunctionCall) / 设置表达式节点属性 (自定义 HLSL, 常量, 纹理, 场景纹理 ID, 材质函数调用) |
 | `add_material_expression` | Add expression node to material / 向材质添加表达式节点 |
 | `connect_material_pins` | Link material expression pins / 连接材质表达式引脚 |
-| `compile_material` | Trigger material compilation / 触发材质编译 |
+| `compile_material` | Trigger material compilation with shader and node-level error reporting / 触发材质编译并返回着色器和节点级错误 |
+| `create_material_function` | Create a new MaterialFunction asset / 创建新的材质函数资产 |
+| `get_material_function_info` | Inspect material function graph structure / 检查材质函数图表结构 |
+| `add_mf_expression` | Add expression node to material function / 向材质函数添加表达式节点 |
+| `connect_mf_pins` | Link pins within a material function / 连接材质函数内的引脚 |
+| `set_mf_expression_property` | Set properties on material function expression nodes / 设置材质函数表达式节点属性 |
 
 ### Editor / 编辑器 (12 commands)
 Level stage control and actor lifecycle management.
@@ -375,6 +383,8 @@ We are committed to expanding SmithUE into a comprehensive AI-first development 
         ~~材质蓝图生成 - 程序化材质节点网络组装.~~
         ✅ **Done in v1.0.1** — Full material creation pipeline: `create_material` → `set_material_property` → `add_material_expression` → `set_expression_property` → `connect_material_pins` → `compile_material` → `add_postprocess_material`. Verified with a thermal vision post-process material end-to-end.
         ✅ **已在 v1.0.1 完成** — 完整材质创建流水线: `create_material` → `set_material_property` → `add_material_expression` → `set_expression_property` → `connect_material_pins` → `compile_material` → `add_postprocess_material`. 已通过热成像后处理材质端到端验证.
+        ✅ **Done in v1.0.3** — MaterialFunction pipeline (`create_material_function` → `add_mf_expression` → `set_mf_expression_property` → `connect_mf_pins`), Material Editor live refresh (operations reflect in open editor without restart), asset management (`delete_asset`, `move_asset`, `asset_editor` for batch open/close), `compile_material` enhanced with shader-level and node-level error reporting.
+        ✅ **已在 v1.0.3 完成** — 材质函数流水线 (`create_material_function` → `add_mf_expression` → `set_mf_expression_property` → `connect_mf_pins`), 材质编辑器实时刷新 (操作实时反映在已打开的编辑器中), 资产管理 (`delete_asset`, `move_asset`, `asset_editor` 批量打开/关闭), `compile_material` 增强着色器级和节点级错误报告.
 *   **v1.2**
     *   Digital twin scene construction - procedural environment generation from data sources (GIS, point cloud, CAD).
         数字孪生场景构建 - 从数据源 (GIS, 点云, CAD) 程序化生成环境.
@@ -416,6 +426,31 @@ We are committed to expanding SmithUE into a comprehensive AI-first development 
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions on adding new commands.
 参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何添加新命令。
+
+### AI-Assisted Development Skill / AI 辅助开发技能
+
+SmithUE provides an AI development skill file (`Docs/smithue-dev/SKILL.md`) that teaches AI coding assistants how to contribute to this project. After installation, your AI assistant will understand the plugin's architecture, coding conventions, command registration patterns, and Git workflow — enabling it to help you add new commands, fix bugs, and submit code correctly.
+
+SmithUE 提供了一份 AI 开发技能文件（`Docs/smithue-dev/SKILL.md`），它能教会 AI 编码助手如何参与本项目开发。安装后，你的 AI 助手将理解插件架构、代码规范、命令注册模式和 Git 工作流——帮助你添加新命令、修复 Bug 并正确提交代码。
+
+**Install / 安装**:
+
+Copy the skill directory to your AI tool's skill location:
+将技能目录复制到 AI 工具的技能路径：
+
+```bash
+# OpenCode (project-level / 项目级)
+cp -r Plugins/SmithUE/Docs/smithue-dev {YourProject}/.agents/skills/
+
+# OpenCode (user-level / 用户级)
+cp -r Plugins/SmithUE/Docs/smithue-dev ~/.agents/skills/
+
+# Claude Code
+cp -r Plugins/SmithUE/Docs/smithue-dev ~/.claude/skills/
+```
+
+Once installed, the AI assistant will automatically activate this skill when you work on SmithUE-related tasks.
+安装后，当你处理 SmithUE 相关任务时，AI 助手会自动激活此技能。
 
 ---
 
