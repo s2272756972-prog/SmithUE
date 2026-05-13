@@ -4,10 +4,16 @@
 #include "SmithUEModule.h"
 
 #include "HAL/RunnableThread.h"
+#include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "SocketSubsystem.h"
 #include "Sockets.h"
+
+bool USmithUETcpServer::ShouldCreateSubsystem(UObject* Outer) const
+{
+	return !IsRunningCommandlet();
+}
 
 void USmithUETcpServer::Initialize(FSubsystemCollectionBase& Collection)
 {

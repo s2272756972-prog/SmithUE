@@ -31,6 +31,12 @@ void FSmithUEModule::StartupModule()
 {
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module starting up..."));
 
+	if (IsRunningCommandlet())
+	{
+		UE_LOG(LogSmithUE, Log, TEXT("SmithUE: Running in commandlet mode, skipping server and UI initialization."));
+		return;
+	}
+
 	FSmithUEToolRegistry::RegisterBuiltinCommands();
 	FSmithUEProjectCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry::Get());

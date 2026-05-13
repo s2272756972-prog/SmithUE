@@ -3,6 +3,7 @@
 #include "HAL/RunnableThread.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Interfaces/IPv4/IPv4Endpoint.h"
+#include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "SocketSubsystem.h"
 #include "Sockets.h"
@@ -18,6 +19,11 @@ USmithUEHttpServer::USmithUEHttpServer()
 
 USmithUEHttpServer::~USmithUEHttpServer()
 {
+}
+
+bool USmithUEHttpServer::ShouldCreateSubsystem(UObject* Outer) const
+{
+	return !IsRunningCommandlet();
 }
 
 void USmithUEHttpServer::Initialize(FSubsystemCollectionBase& Collection)
