@@ -1,0 +1,33 @@
+# SmithUE CODEOWNERS — 架构保护规则
+# 触发 PR 时，匹配的文件会要求对应 Owner 审查通过才能合并。
+# 规则从上到下匹配，后面的规则覆盖前面的。
+
+# ── 默认：所有文件需要 Owner 审查 ──
+*                                           @123dx-svg
+
+# ── 开放区域：命令层（任意协作者可改，仍需 1 人审查） ──
+/Source/SmithUE/Private/Commands/           @123dx-svg @LemonCXB @chenxubo511
+/Source/SmithUE/Public/Commands/            @123dx-svg @LemonCXB @chenxubo511
+
+# ── 开放区域：文档与技能文件 ──
+/Docs/                                      @123dx-svg @LemonCXB @chenxubo511
+/Skills/                                    @123dx-svg @LemonCXB @chenxubo511
+README.md                                   @123dx-svg @LemonCXB @chenxubo511
+CONTRIBUTING.md                             @123dx-svg @LemonCXB @chenxubo511
+
+# ── 受保护区域：架构核心（仅 Owner 可批准） ──
+/Source/SmithUE/Private/ToolRegistry/       @123dx-svg
+/Source/SmithUE/Public/ToolRegistry/        @123dx-svg
+/Source/SmithUE/Private/Transport/          @123dx-svg
+/Source/SmithUE/Public/Transport/           @123dx-svg
+/Source/SmithUE/Private/SmithUEModule.cpp   @123dx-svg
+/Source/SmithUE/Private/UI/                 @123dx-svg
+/Source/SmithUE/Public/UI/                  @123dx-svg
+/Source/SmithUE/Private/Blueprint/          @123dx-svg
+
+# ── 受保护区域：构建与插件配置 ──
+SmithUE.uplugin                             @123dx-svg
+/Source/SmithUE/SmithUE.Build.cs            @123dx-svg
+
+# ── 受保护区域：MCP 服务 ──
+/Scripts/                                   @123dx-svg
