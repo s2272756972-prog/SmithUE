@@ -4,6 +4,7 @@
 
 #include "Transport/SmithUEConnectionManager.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
+#include "Interfaces/IPluginManager.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -19,6 +20,25 @@ namespace
 	{
 		static FSlateRoundedBoxBrush Brush(FLinearColor::White, 5.f);
 		return Brush;
+	}
+
+	/** Read SmithUE plugin version from .uplugin descriptor (cached). */
+	static FString GetPluginVersion()
+	{
+		static FString CachedVersion;
+		if (CachedVersion.IsEmpty())
+		{
+			TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE"));
+			if (Plugin.IsValid())
+			{
+				CachedVersion = Plugin->GetDescriptor().VersionName;
+			}
+			if (CachedVersion.IsEmpty())
+			{
+				CachedVersion = TEXT("?");
+			}
+		}
+		return CachedVersion;
 	}
 }
 
@@ -52,7 +72,7 @@ void SSmithUEStatusIndicator::Construct(const FArguments& InArgs)
 			.VAlign(VAlign_Center)
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(TEXT("SmithUE")))
+				.Text(FText::FromString(FString::Printf(TEXT("SmithUE v%s"), *GetPluginVersion())))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 				.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
 			]
@@ -115,7 +135,7 @@ FText SSmithUEStatusIndicator::GetTooltipText() const
 	const int32 ToolCount = FSmithUEToolRegistry::Get().GetAll().Num();
 
 	FString Tip;
-	Tip += FString::Printf(TEXT("SmithUE Status\n"));
+	Tip += FString::Printf(TEXT("SmithUE v%s\n"), *GetPluginVersion());
 	Tip += FString::Printf(TEXT("─────────────────\n"));
 	Tip += FString::Printf(TEXT("Connections: %d\n"), Sessions.Num());
 	Tip += FString::Printf(TEXT("Tools: %d\n"), ToolCount);

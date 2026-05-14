@@ -1,6 +1,6 @@
 {
   "name": "smithue",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP Server for SmithUE — AI-native UE5 editor automation",
   "type": "module",
   "bin": {

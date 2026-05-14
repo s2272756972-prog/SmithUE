@@ -16,7 +16,7 @@ SmithUE 采用清晰的分层架构，将虚幻引擎编辑器功能安全地暴
 *   **8 大领域**：命令分组为 System、Asset、Material、Editor、Blueprint、Viewport、Observation、Analysis。
 *   **TypeScript MCP 服务**：元工具架构的桥接层。添加新 UE 命令无需修改 TypeScript 代码。
 *   **响应封装**：所有命令返回 JSON 对象：`{ "status": "success"|"error", "data": { ... } }`。
-*   **连接状态指示器**：编辑器右下角圆形图标实时显示 MCP 客户端连接状态（绿/红/红黄闪烁）。
+*   **连接状态指示器**：编辑器右下角显示 `SmithUE v{版本号}` 及圆形状态图标（绿/红/红黄闪烁），版本号从 `.uplugin` 运行时读取。
 
 ## 开发前准备（重要）
 
@@ -154,6 +154,27 @@ Scripts/SmithUE-MCP/
 ```
 
 ## Git 工作流
+
+### 版本管理
+
+SmithUE 使用语义化版本号（SemVer），显示在编辑器右下角状态指示器中，便于多人协作时确认版本一致性。
+
+**版本号定义位置**（两处必须同步）：
+*   `SmithUE.uplugin` → `"VersionName": "x.y.z"`
+*   `Scripts/SmithUE-MCP/package.json` → `"version": "x.y.z"`
+
+**何时迭代版本号**：
+
+| 变更类型 | 版本动作 | 示例 |
+|---------|---------|------|
+| 文档/README/注释/SKILL.md | **不动** | 修 README 配置说明 |
+| Bug 修复（不改命令签名） | **PATCH** `0.2.0 → 0.2.1` | 修 CollectionParameter GUID |
+| 新增命令/功能 | **MINOR** `0.2.0 → 0.3.0` | 加 MPC 工具、PIE 控制 |
+| 命令签名/协议破坏性改动 | **MAJOR** `0.2.0 → 1.0.0` | 改 list\_tools 返回结构 |
+
+**版本号提交规则**：
+*   版本号变更与功能代码在**同一次提交**中完成，不要单独提交版本号。
+*   提交信息中标注新版本：`feat(Domain): 描述 (v0.3.0)`。
 
 ### 提交代码
 
