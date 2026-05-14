@@ -22,6 +22,8 @@
 #include "Editor/TransBuffer.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/ConfigCacheIni.h"
+#include "HAL/IConsoleManager.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -181,6 +183,33 @@ void FSmithUEEditorCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("weight"),        TEXT("number"), TEXT("Blend weight (0.0-1.0, default 1.0)"))
             }),
         &HandleAddPostProcessMaterial);
+
+    // get_project_setting
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("get_project_setting"),
+            TEXT("Editor"),
+            TEXT("Read a project configuration setting from INI file"),
+            {
+                FSmithUEToolParam(TEXT("section"),      TEXT("string"), TEXT("INI section name"), true),
+                FSmithUEToolParam(TEXT("key"),          TEXT("string"), TEXT("INI key name"), true),
+                FSmithUEToolParam(TEXT("config_file"),  TEXT("string"), TEXT("Config file: Engine (default), Editor, Game, Input"))
+            }),
+        &HandleGetProjectSetting);
+
+    // set_project_setting
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("set_project_setting"),
+            TEXT("Editor"),
+            TEXT("Write a project configuration setting to INI file and flush to disk"),
+            {
+                FSmithUEToolParam(TEXT("section"),      TEXT("string"), TEXT("INI section name"), true),
+                FSmithUEToolParam(TEXT("key"),          TEXT("string"), TEXT("INI key name"), true),
+                FSmithUEToolParam(TEXT("value"),        TEXT("string"), TEXT("Value to set"), true),
+                FSmithUEToolParam(TEXT("config_file"),  TEXT("string"), TEXT("Config file: Engine (default), Editor, Game, Input"))
+            }),
+        &HandleSetProjectSetting);
 }
 
 // ---------------------------------------------------------------------------
@@ -588,19 +617,127 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleAddPostProcessMaterial(con
     PPV->Settings.WeightedBlendables.Array.Add(Entry);
 
     // Mark dirty + force viewport redraw
-    PPV->MarkPackageDirty();
-    if (GEditor)
-    {
-        GEditor->RedrawLevelEditingViewports();
-    }
+     PPV->MarkPackageDirty();
+     if (GEditor)
+     {
+         GEditor->RedrawLevelEditingViewports();
+     }
 
-    UE_LOG(LogSmithUE, Log, TEXT("add_postprocess_material: added '%s' to '%s' (weight=%.2f)"),
-        *MaterialPath, *ActorLabel, Weight);
+     UE_LOG(LogSmithUE, Log, TEXT("add_postprocess_material: added '%s' to '%s' (weight=%.2f)"),
+         *MaterialPath, *ActorLabel, Weight);
 
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("actor_label"), ActorLabel);
-    Data->SetStringField(TEXT("material_path"), MaterialPath);
-    Data->SetNumberField(TEXT("weight"), Weight);
-    Data->SetNumberField(TEXT("blendable_count"), PPV->Settings.WeightedBlendables.Array.Num());
-    return FSmithUECommonUtils::CreateSuccessResponse(Data);
-}
+     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+     Data->SetStringField(TEXT("actor_label"), ActorLabel);
+     Data->SetStringField(TEXT("material_path"), MaterialPath);
+     Data->SetNumberField(TEXT("weight"), Weight);
+     Data->SetNumberField(TEXT("blendable_count"), PPV->Settings.WeightedBlendables.Array.Num());
+     return FSmithUECommonUtils::CreateSuccessResponse(Data);
+ }
+
+ // ---------------------------------------------------------------------------
+ // Command 7: get_project_setting
+ // ---------------------------------------------------------------------------
+
+ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleGetProjectSetting(const TSharedPtr<FJsonObject>& Params)
+ {
+     if (!Params)
+     {
+         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid parameters"));
+     }
+
+     FString Section, Key, ConfigFileName;
+     if (!Params->TryGetStringField(TEXT("section"), Section) || Section.IsEmpty())
+     {
+         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing or empty 'section' parameter"));
+     }
+     if (!Params->TryGetStringField(TEXT("key"), Key) || Key.IsEmpty())
+     {
+         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing or empty 'key' parameter"));
+     }
+     Params->TryGetStringField(TEXT("config_file"), ConfigFileName);
+
+     // Resolve config file path
+     auto ResolveConfigFile = [](const FString& Name) -> FString {
+         if (Name.Equals(TEXT("Editor"), ESearchCase::IgnoreCase)) return GEditorIni;
+         if (Name.Equals(TEXT("Game"), ESearchCase::IgnoreCase)) return GGameIni;
+         if (Name.Equals(TEXT("Input"), ESearchCase::IgnoreCase)) return GInputIni;
+         return GEngineIni; // default
+     };
+
+     FString ConfigFile = ResolveConfigFile(ConfigFileName);
+     FString OutValue;
+     bool bFound = GConfig->GetString(*Section, *Key, OutValue, ConfigFile);
+
+     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+     Data->SetStringField(TEXT("section"), Section);
+     Data->SetStringField(TEXT("key"), Key);
+     Data->SetStringField(TEXT("value"), OutValue);
+     Data->SetBoolField(TEXT("found"), bFound);
+
+     UE_LOG(LogSmithUE, Log, TEXT("get_project_setting: [%s] %s = '%s' (found=%d)"),
+         *Section, *Key, *OutValue, bFound);
+
+     return FSmithUECommonUtils::CreateSuccessResponse(Data);
+ }
+
+ // ---------------------------------------------------------------------------
+ // Command 8: set_project_setting
+ // ---------------------------------------------------------------------------
+
+ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleSetProjectSetting(const TSharedPtr<FJsonObject>& Params)
+ {
+     if (!Params)
+     {
+         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid parameters"));
+     }
+
+     FString Section, Key, Value, ConfigFileName;
+     if (!Params->TryGetStringField(TEXT("section"), Section) || Section.IsEmpty())
+     {
+         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing or empty 'section' parameter"));
+     }
+     if (!Params->TryGetStringField(TEXT("key"), Key) || Key.IsEmpty())
+     {
+         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing or empty 'key' parameter"));
+     }
+     if (!Params->TryGetStringField(TEXT("value"), Value))
+     {
+         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing 'value' parameter"));
+     }
+     Params->TryGetStringField(TEXT("config_file"), ConfigFileName);
+
+     // Resolve config file path
+     auto ResolveConfigFile = [](const FString& Name) -> FString {
+         if (Name.Equals(TEXT("Editor"), ESearchCase::IgnoreCase)) return GEditorIni;
+         if (Name.Equals(TEXT("Game"), ESearchCase::IgnoreCase)) return GGameIni;
+         if (Name.Equals(TEXT("Input"), ESearchCase::IgnoreCase)) return GInputIni;
+         return GEngineIni; // default
+     };
+
+     FString ConfigFile = ResolveConfigFile(ConfigFileName);
+
+     // Read old value for logging
+     FString OldValue;
+     GConfig->GetString(*Section, *Key, OldValue, ConfigFile);
+
+     // Write new value
+     GConfig->SetString(*Section, *Key, *Value, ConfigFile);
+
+     // CRITICAL: Flush to disk
+     GConfig->Flush(false, ConfigFile);
+
+     // Optionally apply CVar at runtime if it exists
+     IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*Key);
+     if (CVar)
+     {
+         CVar->Set(*Value);
+     }
+
+     UE_LOG(LogSmithUE, Log, TEXT("set_project_setting: [%s] %s = '%s' (was '%s')"),
+         *Section, *Key, *Value, *OldValue);
+
+     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+     Data->SetBoolField(TEXT("persisted"), true);
+
+     return FSmithUECommonUtils::CreateSuccessResponse(Data);
+ }

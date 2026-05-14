@@ -17,4 +17,6 @@ private:
     static TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleMoveAsset(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleAssetEditor(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleSaveAsset(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleSaveAllDirty(const TSharedPtr<FJsonObject>& Params);
 };

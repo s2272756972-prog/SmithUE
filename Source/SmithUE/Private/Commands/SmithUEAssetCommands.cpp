@@ -12,6 +12,7 @@
 #include "Misc/PackageName.h"
 #include "ObjectTools.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "FileHelpers.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -181,6 +182,24 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("asset_paths"), TEXT("array"), TEXT("Array of asset paths (e.g. [\"/Game/Materials/M_A\", \"/Game/Materials/M_B\"])"), true)
             }),
         &HandleAssetEditor);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("save_asset"),
+            TEXT("Asset"),
+            TEXT("Save a single asset to disk"),
+            {
+                FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), TEXT("Full asset path to save (e.g. /Game/Materials/M_Base)"), true)
+            }),
+        &HandleSaveAsset);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("save_all_dirty"),
+            TEXT("Asset"),
+            TEXT("Save all dirty (modified) assets to disk"),
+            {}),
+        &HandleSaveAllDirty);
 }
 
 // ---------------------------------------------------------------------------
@@ -704,5 +723,77 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleAssetEditor(const TSharedPt
 
     UE_LOG(LogSmithUE, Log, TEXT("asset_editor: %s %d/%d assets"),
         *Action, SuccessCount, PathsArray->Num());
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: save_asset
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleSaveAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("asset_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString AssetPath;
+    Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+
+    if (AssetPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("asset_path cannot be empty"));
+    }
+
+    // Check if asset exists
+    if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
+    }
+
+    // Load asset to verify it exists and is valid
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+    if (!Asset)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+    }
+
+    // Save the asset silently (no dialog)
+    bool bSaved = UEditorAssetLibrary::SaveAsset(AssetPath, false);
+
+    if (!bSaved)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to save asset: %s"), *AssetPath));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("saved"), true);
+    Data->SetStringField(TEXT("asset_path"), AssetPath);
+
+    UE_LOG(LogSmithUE, Log, TEXT("save_asset: saved %s"), *AssetPath);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: save_all_dirty
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleSaveAllDirty(const TSharedPtr<FJsonObject>& Params)
+{
+    // No parameters required for this command
+    
+    // Save all dirty packages silently
+    // Parameters: bPromptUserToSave=false, bSaveMapPackages=true, bSaveContentPackages=true
+    int32 SavedCount = FEditorFileUtils::SaveDirtyPackages(false, true, true);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetNumberField(TEXT("saved_count"), SavedCount);
+    Data->SetStringField(TEXT("status"), TEXT("success"));
+
+    UE_LOG(LogSmithUE, Log, TEXT("save_all_dirty: saved %d dirty assets"), SavedCount);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

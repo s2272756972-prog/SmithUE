@@ -18,4 +18,7 @@ private:
     static TSharedPtr<FJsonObject> HandleRedo(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleSimulateKey(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleListKeyBindings(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleStartPIE(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleStopPIE(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleIsPIEActive(const TSharedPtr<FJsonObject>& Params);
 };

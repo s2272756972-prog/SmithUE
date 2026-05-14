@@ -4,6 +4,8 @@
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
@@ -12,6 +14,9 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionSceneTexture.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionCollectionParameter.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
@@ -22,6 +27,8 @@
 #include "MaterialEditorUtilities.h"
 #include "IMaterialEditor.h"
 #include "Toolkits/ToolkitManager.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialInstance.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -246,6 +253,137 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
         {
             return FSmithUEMaterialCommands::HandleSetExpressionProperty(Params);
+        });
+
+    // create_mpc
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("create_mpc"),
+            TEXT("Material"),
+            TEXT("Create a new Material Parameter Collection asset"),
+            {
+                FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Asset name"), true),
+                FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Content folder path, e.g. /Game/Materials"), true)
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleCreateMPC(Params);
+        });
+
+    // add_mpc_scalar
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("add_mpc_scalar"),
+            TEXT("Material"),
+            TEXT("Add a scalar parameter to a Material Parameter Collection"),
+            {
+                FSmithUEToolParam(TEXT("mpc_path"), TEXT("string"), TEXT("Full asset path to the MPC"), true),
+                FSmithUEToolParam(TEXT("param_name"), TEXT("string"), TEXT("Parameter name"), true),
+                FSmithUEToolParam(TEXT("default_value"), TEXT("number"), TEXT("Default scalar value (default: 0.0)"))
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleAddMPCScalar(Params);
+        });
+
+    // add_mpc_vector
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("add_mpc_vector"),
+            TEXT("Material"),
+            TEXT("Add a vector parameter to a Material Parameter Collection"),
+            {
+                FSmithUEToolParam(TEXT("mpc_path"), TEXT("string"), TEXT("Full asset path to the MPC"), true),
+                FSmithUEToolParam(TEXT("param_name"), TEXT("string"), TEXT("Parameter name"), true),
+                FSmithUEToolParam(TEXT("default_r"), TEXT("number"), TEXT("Default R value (default: 0.0)")),
+                FSmithUEToolParam(TEXT("default_g"), TEXT("number"), TEXT("Default G value (default: 0.0)")),
+                FSmithUEToolParam(TEXT("default_b"), TEXT("number"), TEXT("Default B value (default: 0.0)")),
+                FSmithUEToolParam(TEXT("default_a"), TEXT("number"), TEXT("Default A value (default: 1.0)"))
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleAddMPCVector(Params);
+        });
+
+    // set_mpc_value
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("set_mpc_value"),
+            TEXT("Material"),
+            TEXT("Update the default value of a scalar parameter in a Material Parameter Collection"),
+            {
+                FSmithUEToolParam(TEXT("mpc_path"), TEXT("string"), TEXT("Full asset path to the MPC"), true),
+                FSmithUEToolParam(TEXT("param_name"), TEXT("string"), TEXT("Parameter name"), true),
+                FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("New scalar value as float string"), true)
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleSetMPCValue(Params);
+        });
+
+    // create_material_instance
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("create_material_instance"),
+            TEXT("Material"),
+            TEXT("Create a new MaterialInstanceConstant asset from a parent material"),
+            {
+                FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Asset name"), true),
+                FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Content folder path, e.g. /Game/Materials"), true),
+                FSmithUEToolParam(TEXT("parent_material"), TEXT("string"), TEXT("Full asset path of the parent UMaterial or UMaterialInstance"), true)
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleCreateMaterialInstance(Params);
+        });
+
+    // set_mi_scalar
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("set_mi_scalar"),
+            TEXT("Material"),
+            TEXT("Set a scalar parameter override on a MaterialInstanceConstant"),
+            {
+                FSmithUEToolParam(TEXT("mi_path"), TEXT("string"), TEXT("Full asset path to the MaterialInstanceConstant"), true),
+                FSmithUEToolParam(TEXT("param_name"), TEXT("string"), TEXT("Scalar parameter name"), true),
+                FSmithUEToolParam(TEXT("value"), TEXT("number"), TEXT("Scalar value to set"), true)
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleSetMIScalar(Params);
+        });
+
+    // set_mi_vector
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("set_mi_vector"),
+            TEXT("Material"),
+            TEXT("Set a vector parameter override on a MaterialInstanceConstant"),
+            {
+                FSmithUEToolParam(TEXT("mi_path"), TEXT("string"), TEXT("Full asset path to the MaterialInstanceConstant"), true),
+                FSmithUEToolParam(TEXT("param_name"), TEXT("string"), TEXT("Vector parameter name"), true),
+                FSmithUEToolParam(TEXT("r"), TEXT("number"), TEXT("Red channel (default: 0.0)")),
+                FSmithUEToolParam(TEXT("g"), TEXT("number"), TEXT("Green channel (default: 0.0)")),
+                FSmithUEToolParam(TEXT("b"), TEXT("number"), TEXT("Blue channel (default: 0.0)")),
+                FSmithUEToolParam(TEXT("a"), TEXT("number"), TEXT("Alpha channel (default: 1.0)"))
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleSetMIVector(Params);
+        });
+
+    // get_mi_info
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("get_mi_info"),
+            TEXT("Material"),
+            TEXT("Get info about a MaterialInstanceConstant: parent name and all scalar/vector parameter overrides"),
+            {
+                FSmithUEToolParam(TEXT("mi_path"), TEXT("string"), TEXT("Full asset path to the MaterialInstanceConstant"), true)
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialCommands::HandleGetMIInfo(Params);
         });
 }
 
@@ -884,6 +1022,117 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
         if (Props->TryGetNumberField(TEXT("b"), B)) { Const3Expr->Constant.B = static_cast<float>(B); Changed.Add(TEXT("b")); }
     }
 
+    // Handle UMaterialExpressionScalarParameter
+    UMaterialExpressionScalarParameter* ScalarParamExpr = Cast<UMaterialExpressionScalarParameter>(Expr);
+    if (ScalarParamExpr)
+    {
+        FString ParamName;
+        if (Props->TryGetStringField(TEXT("parameter_name"), ParamName))
+        {
+            ScalarParamExpr->ParameterName = FName(*ParamName);
+            Changed.Add(TEXT("parameter_name"));
+        }
+        double DefaultVal = 0.0;
+        if (Props->TryGetNumberField(TEXT("default_value"), DefaultVal))
+        {
+            ScalarParamExpr->DefaultValue = static_cast<float>(DefaultVal);
+            Changed.Add(TEXT("default_value"));
+        }
+    }
+
+    // Handle UMaterialExpressionVectorParameter
+    UMaterialExpressionVectorParameter* VectorParamExpr = Cast<UMaterialExpressionVectorParameter>(Expr);
+    if (VectorParamExpr)
+    {
+        FString ParamName;
+        if (Props->TryGetStringField(TEXT("parameter_name"), ParamName))
+        {
+            VectorParamExpr->ParameterName = FName(*ParamName);
+            Changed.Add(TEXT("parameter_name"));
+        }
+        double R = 0, G = 0, B = 0, A = 1;
+        bool bAnyChannel = false;
+        if (Props->TryGetNumberField(TEXT("r"), R)) { bAnyChannel = true; }
+        if (Props->TryGetNumberField(TEXT("g"), G)) { bAnyChannel = true; }
+        if (Props->TryGetNumberField(TEXT("b"), B)) { bAnyChannel = true; }
+        if (Props->TryGetNumberField(TEXT("a"), A)) { bAnyChannel = true; }
+        if (bAnyChannel)
+        {
+            VectorParamExpr->DefaultValue = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));
+            Changed.Add(TEXT("default_value"));
+        }
+    }
+
+    // Handle UMaterialExpressionCollectionParameter
+    UMaterialExpressionCollectionParameter* CollectionParamExpr = Cast<UMaterialExpressionCollectionParameter>(Expr);
+    if (CollectionParamExpr)
+    {
+        FString CollectionPath;
+        if (Props->TryGetStringField(TEXT("collection"), CollectionPath))
+        {
+            UMaterialParameterCollection* MPC = LoadObject<UMaterialParameterCollection>(nullptr, *CollectionPath);
+            if (MPC)
+            {
+                CollectionParamExpr->Collection = MPC;
+                Changed.Add(TEXT("collection"));
+            }
+            else
+            {
+                return FSmithUECommonUtils::CreateErrorResponse(
+                    FString::Printf(TEXT("MPC not found: %s"), *CollectionPath));
+            }
+        }
+        FString ParamName;
+        if (Props->TryGetStringField(TEXT("parameter_name"), ParamName))
+        {
+            FName ParamFName(*ParamName);
+            CollectionParamExpr->ParameterName = ParamFName;
+
+            // Look up ParameterId (GUID) from the MPC to establish the actual link
+            if (CollectionParamExpr->Collection)
+            {
+                UMaterialParameterCollection* MPC = CollectionParamExpr->Collection;
+                FGuid ParamGuid;
+                bool bFoundParam = false;
+
+                for (const FCollectionScalarParameter& Param : MPC->ScalarParameters)
+                {
+                    if (Param.ParameterName == ParamFName)
+                    {
+                        ParamGuid = Param.Id;
+                        bFoundParam = true;
+                        break;
+                    }
+                }
+
+                if (!bFoundParam)
+                {
+                    for (const FCollectionVectorParameter& Param : MPC->VectorParameters)
+                    {
+                        if (Param.ParameterName == ParamFName)
+                        {
+                            ParamGuid = Param.Id;
+                            bFoundParam = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (bFoundParam)
+                {
+                    CollectionParamExpr->ParameterId = ParamGuid;
+                }
+                else
+                {
+                    return FSmithUECommonUtils::CreateErrorResponse(
+                        FString::Printf(TEXT("Parameter '%s' not found in MPC '%s'"), *ParamName, *MPC->GetPathName()));
+                }
+            }
+
+            Changed.Add(TEXT("parameter_name"));
+        }
+    }
+
     // Handle MaterialExpressionMaterialFunctionCall - bind a material function
     UMaterialExpressionMaterialFunctionCall* FuncCallExpr = Cast<UMaterialExpressionMaterialFunctionCall>(Expr);
     if (FuncCallExpr)
@@ -972,5 +1221,401 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
         ChangedArr.Add(MakeShared<FJsonValueString>(Prop));
     }
     Data->SetArrayField(TEXT("changed"), ChangedArr);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// MPC Commands
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleCreateMPC(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+    }
+
+    FString Name;
+    if (!Params->TryGetStringField(TEXT("name"), Name) || Name.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: name"));
+    }
+
+    FString FolderPath;
+    if (!Params->TryGetStringField(TEXT("path"), FolderPath) || FolderPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: path"));
+    }
+
+    const FString FullPath = FolderPath / Name;
+
+    if (UEditorAssetLibrary::DoesAssetExist(FullPath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("MPC already exists: %s"), *FullPath));
+    }
+
+    UPackage* Package = CreatePackage(*FullPath);
+    if (!Package)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create package"));
+    }
+
+    UMaterialParameterCollection* MPC = NewObject<UMaterialParameterCollection>(
+        Package, FName(*Name), RF_Public | RF_Standalone);
+
+    if (!MPC)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create MPC object"));
+    }
+
+    FAssetRegistryModule::AssetCreated(MPC);
+    MPC->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("name"), Name);
+    Data->SetStringField(TEXT("path"), FullPath);
+    Data->SetNumberField(TEXT("scalars"), 0);
+    Data->SetNumberField(TEXT("vectors"), 0);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleAddMPCScalar(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+    }
+
+    FString MpcPath;
+    if (!Params->TryGetStringField(TEXT("mpc_path"), MpcPath) || MpcPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: mpc_path"));
+    }
+
+    FString ParamName;
+    if (!Params->TryGetStringField(TEXT("param_name"), ParamName) || ParamName.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: param_name"));
+    }
+
+    UMaterialParameterCollection* MPC = Cast<UMaterialParameterCollection>(
+        UEditorAssetLibrary::LoadAsset(MpcPath));
+    if (!MPC)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("MPC not found: %s"), *MpcPath));
+    }
+
+    // Check for duplicate
+    for (const FCollectionScalarParameter& Existing : MPC->ScalarParameters)
+    {
+        if (Existing.ParameterName == FName(*ParamName))
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Scalar parameter already exists: %s"), *ParamName));
+        }
+    }
+
+    double DefaultValue = 0.0;
+    Params->TryGetNumberField(TEXT("default_value"), DefaultValue);
+
+    FCollectionScalarParameter NewParam;
+    NewParam.ParameterName = FName(*ParamName);
+    NewParam.DefaultValue = static_cast<float>(DefaultValue);
+    NewParam.Id = FGuid::NewGuid();
+    MPC->ScalarParameters.Add(NewParam);
+    MPC->PostEditChange();
+    MPC->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("mpc_path"), MpcPath);
+    Data->SetStringField(TEXT("param_name"), ParamName);
+    Data->SetNumberField(TEXT("default_value"), DefaultValue);
+    Data->SetNumberField(TEXT("scalar_count"), MPC->ScalarParameters.Num());
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleAddMPCVector(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+    }
+
+    FString MpcPath;
+    if (!Params->TryGetStringField(TEXT("mpc_path"), MpcPath) || MpcPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: mpc_path"));
+    }
+
+    FString ParamName;
+    if (!Params->TryGetStringField(TEXT("param_name"), ParamName) || ParamName.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: param_name"));
+    }
+
+    UMaterialParameterCollection* MPC = Cast<UMaterialParameterCollection>(
+        UEditorAssetLibrary::LoadAsset(MpcPath));
+    if (!MPC)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("MPC not found: %s"), *MpcPath));
+    }
+
+    // Check for duplicate
+    for (const FCollectionVectorParameter& Existing : MPC->VectorParameters)
+    {
+        if (Existing.ParameterName == FName(*ParamName))
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Vector parameter already exists: %s"), *ParamName));
+        }
+    }
+
+    double R = 0.0, G = 0.0, B = 0.0, A = 1.0;
+    Params->TryGetNumberField(TEXT("default_r"), R);
+    Params->TryGetNumberField(TEXT("default_g"), G);
+    Params->TryGetNumberField(TEXT("default_b"), B);
+    Params->TryGetNumberField(TEXT("default_a"), A);
+
+    FCollectionVectorParameter NewParam;
+    NewParam.ParameterName = FName(*ParamName);
+    NewParam.DefaultValue = FLinearColor(
+        static_cast<float>(R), static_cast<float>(G),
+        static_cast<float>(B), static_cast<float>(A));
+    NewParam.Id = FGuid::NewGuid();
+    MPC->VectorParameters.Add(NewParam);
+    MPC->PostEditChange();
+    MPC->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("mpc_path"), MpcPath);
+    Data->SetStringField(TEXT("param_name"), ParamName);
+    Data->SetNumberField(TEXT("default_r"), R);
+    Data->SetNumberField(TEXT("default_g"), G);
+    Data->SetNumberField(TEXT("default_b"), B);
+    Data->SetNumberField(TEXT("default_a"), A);
+    Data->SetNumberField(TEXT("vector_count"), MPC->VectorParameters.Num());
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMPCValue(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+    }
+
+    FString MpcPath;
+    if (!Params->TryGetStringField(TEXT("mpc_path"), MpcPath) || MpcPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: mpc_path"));
+    }
+
+    FString ParamName;
+    if (!Params->TryGetStringField(TEXT("param_name"), ParamName) || ParamName.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: param_name"));
+    }
+
+    FString ValueStr;
+    if (!Params->TryGetStringField(TEXT("value"), ValueStr) || ValueStr.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: value"));
+    }
+
+    float NewValue = FCString::Atof(*ValueStr);
+
+    UMaterialParameterCollection* MPC = Cast<UMaterialParameterCollection>(
+        UEditorAssetLibrary::LoadAsset(MpcPath));
+    if (!MPC)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("MPC not found: %s"), *MpcPath));
+    }
+
+    bool bFound = false;
+    for (FCollectionScalarParameter& Scalar : MPC->ScalarParameters)
+    {
+        if (Scalar.ParameterName == FName(*ParamName))
+        {
+            Scalar.DefaultValue = NewValue;
+            bFound = true;
+            break;
+        }
+    }
+
+    if (!bFound)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Scalar parameter not found: %s"), *ParamName));
+    }
+
+    MPC->PostEditChange();
+    MPC->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("mpc_path"), MpcPath);
+    Data->SetStringField(TEXT("param_name"), ParamName);
+    Data->SetNumberField(TEXT("value"), NewValue);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Material Instance handlers
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleCreateMaterialInstance(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+
+    FString Name, FolderPath, ParentPath;
+    if (!Params->TryGetStringField(TEXT("name"), Name) || Name.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: name"));
+    if (!Params->TryGetStringField(TEXT("path"), FolderPath) || FolderPath.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: path"));
+    if (!Params->TryGetStringField(TEXT("parent_material"), ParentPath) || ParentPath.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: parent_material"));
+
+    UMaterialInterface* Parent = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(ParentPath));
+    if (!Parent)
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load parent material: %s"), *ParentPath));
+
+    const FString PackagePath = FolderPath / Name;
+    if (UEditorAssetLibrary::DoesAssetExist(PackagePath))
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset already exists: %s"), *PackagePath));
+
+    UPackage* Package = CreatePackage(*PackagePath);
+    if (!Package)
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create package"));
+
+    UMaterialInstanceConstant* MIC = NewObject<UMaterialInstanceConstant>(Package, FName(*Name), RF_Public | RF_Standalone);
+    if (!MIC)
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create MaterialInstanceConstant object"));
+
+    MIC->SetParentEditorOnly(Parent);
+    FAssetRegistryModule::AssetCreated(MIC);
+    MIC->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("asset_path"), PackagePath);
+    Data->SetStringField(TEXT("parent_material"), ParentPath);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMIScalar(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+
+    FString MiPath, ParamName;
+    if (!Params->TryGetStringField(TEXT("mi_path"), MiPath) || MiPath.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: mi_path"));
+    if (!Params->TryGetStringField(TEXT("param_name"), ParamName) || ParamName.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: param_name"));
+
+    double Value = 0.0;
+    if (!Params->TryGetNumberField(TEXT("value"), Value))
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: value"));
+
+    UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(UEditorAssetLibrary::LoadAsset(MiPath));
+    if (!MIC)
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load MaterialInstanceConstant: %s"), *MiPath));
+
+    MIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(*ParamName)), static_cast<float>(Value));
+    MIC->PostEditChange();
+    MIC->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("mi_path"), MiPath);
+    Data->SetStringField(TEXT("param_name"), ParamName);
+    Data->SetNumberField(TEXT("value"), Value);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMIVector(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+
+    FString MiPath, ParamName;
+    if (!Params->TryGetStringField(TEXT("mi_path"), MiPath) || MiPath.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: mi_path"));
+    if (!Params->TryGetStringField(TEXT("param_name"), ParamName) || ParamName.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: param_name"));
+
+    double R = 0.0, G = 0.0, B = 0.0, A = 1.0;
+    Params->TryGetNumberField(TEXT("r"), R);
+    Params->TryGetNumberField(TEXT("g"), G);
+    Params->TryGetNumberField(TEXT("b"), B);
+    Params->TryGetNumberField(TEXT("a"), A);
+
+    UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(UEditorAssetLibrary::LoadAsset(MiPath));
+    if (!MIC)
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load MaterialInstanceConstant: %s"), *MiPath));
+
+    MIC->SetVectorParameterValueEditorOnly(
+        FMaterialParameterInfo(FName(*ParamName)),
+        FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A)));
+    MIC->PostEditChange();
+    MIC->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("mi_path"), MiPath);
+    Data->SetStringField(TEXT("param_name"), ParamName);
+    Data->SetNumberField(TEXT("r"), R);
+    Data->SetNumberField(TEXT("g"), G);
+    Data->SetNumberField(TEXT("b"), B);
+    Data->SetNumberField(TEXT("a"), A);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleGetMIInfo(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+
+    FString MiPath;
+    if (!Params->TryGetStringField(TEXT("mi_path"), MiPath) || MiPath.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: mi_path"));
+
+    UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(UEditorAssetLibrary::LoadAsset(MiPath));
+    if (!MIC)
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load MaterialInstanceConstant: %s"), *MiPath));
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("mi_path"), MiPath);
+
+    // Parent
+    UMaterialInterface* ParentMI = MIC->Parent;
+    Data->SetStringField(TEXT("parent"), ParentMI ? ParentMI->GetPathName() : TEXT("None"));
+
+    // Scalar overrides
+    TArray<TSharedPtr<FJsonValue>> ScalarArr;
+    for (const FScalarParameterValue& SV : MIC->ScalarParameterValues)
+    {
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("name"), SV.ParameterInfo.Name.ToString());
+        Entry->SetNumberField(TEXT("value"), SV.ParameterValue);
+        ScalarArr.Add(MakeShared<FJsonValueObject>(Entry));
+    }
+    Data->SetArrayField(TEXT("scalar_parameters"), ScalarArr);
+
+    // Vector overrides
+    TArray<TSharedPtr<FJsonValue>> VectorArr;
+    for (const FVectorParameterValue& VV : MIC->VectorParameterValues)
+    {
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("name"), VV.ParameterInfo.Name.ToString());
+        Entry->SetNumberField(TEXT("r"), VV.ParameterValue.R);
+        Entry->SetNumberField(TEXT("g"), VV.ParameterValue.G);
+        Entry->SetNumberField(TEXT("b"), VV.ParameterValue.B);
+        Entry->SetNumberField(TEXT("a"), VV.ParameterValue.A);
+        VectorArr.Add(MakeShared<FJsonValueObject>(Entry));
+    }
+    Data->SetArrayField(TEXT("vector_parameters"), VectorArr);
+
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
