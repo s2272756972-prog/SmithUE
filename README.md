@@ -112,19 +112,23 @@ Environment variables / 环境变量：
 
 #### OpenCode
 
-Add to `mcp.json` or `.opencode/mcp.json`:
-添加到 `mcp.json` 或 `.opencode/mcp.json`：
+Add to `opencode.json` in your project root:
+在项目根目录的 `opencode.json` 中添加：
 
 ```json
 {
-  "mcpServers": {
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
     "smithue": {
-      "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
+      "type": "local",
+      "command": ["node", "{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
     }
   }
 }
 ```
+
+> **Note / 注意**: OpenCode does NOT use `mcp.json`. Configuration must be in `opencode.json`.
+> OpenCode 不使用 `mcp.json`，必须配置在 `opencode.json` 中。
 
 #### Claude Code
 
