@@ -127,29 +127,6 @@ void FSmithUEInteractionCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             }),
         &HandleListKeyBindings);
 
-    Registry.Register(
-        FSmithUEToolSchema(
-            TEXT("start_pie"),
-            TEXT("Interaction"),
-            TEXT("Start a Play-In-Editor (PIE) session. Returns immediately (async operation)."),
-            {}),
-        &HandleStartPIE);
-
-    Registry.Register(
-        FSmithUEToolSchema(
-            TEXT("stop_pie"),
-            TEXT("Interaction"),
-            TEXT("Stop the active Play-In-Editor (PIE) session. Returns error if no PIE session is active."),
-            {}),
-        &HandleStopPIE);
-
-    Registry.Register(
-        FSmithUEToolSchema(
-            TEXT("is_pie_active"),
-            TEXT("Interaction"),
-            TEXT("Check whether a PIE session is currently active and return its mode."),
-            {}),
-        &HandleIsPIEActive);
 }
 
 // execute_editor_command
@@ -481,62 +458,5 @@ TSharedPtr<FJsonObject> FSmithUEInteractionCommands::HandleListKeyBindings(const
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetArrayField(TEXT("bindings"), BindingsArray);
     Data->SetNumberField(TEXT("count"), static_cast<double>(BindingsArray.Num()));
-    return FSmithUECommonUtils::CreateSuccessResponse(Data);
-}
-
-// start_pie
-TSharedPtr<FJsonObject> FSmithUEInteractionCommands::HandleStartPIE(const TSharedPtr<FJsonObject>& Params)
-{
-    if (!GEditor)
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("GEditor is not available"));
-    }
-
-    FRequestPlaySessionParams PlayParams;
-    GEditor->RequestPlaySession(PlayParams);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("requested"), true);
-    return FSmithUECommonUtils::CreateSuccessResponse(Data);
-}
-
-// stop_pie
-TSharedPtr<FJsonObject> FSmithUEInteractionCommands::HandleStopPIE(const TSharedPtr<FJsonObject>& Params)
-{
-    if (!GEditor)
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("GEditor is not available"));
-    }
-
-    if (GEditor->PlayWorld == nullptr)
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("No active PIE session to stop"));
-    }
-
-    GEditor->RequestEndPlayMap();
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("stopped"), true);
-    return FSmithUECommonUtils::CreateSuccessResponse(Data);
-}
-
-// is_pie_active
-TSharedPtr<FJsonObject> FSmithUEInteractionCommands::HandleIsPIEActive(const TSharedPtr<FJsonObject>& Params)
-{
-    if (!GEditor)
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("GEditor is not available"));
-    }
-
-    const bool bActive = GEditor->PlayWorld != nullptr;
-    FString Mode = TEXT("none");
-    if (bActive)
-    {
-        Mode = GEditor->bIsSimulatingInEditor ? TEXT("simulate") : TEXT("play");
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("active"), bActive);
-    Data->SetStringField(TEXT("mode"), Mode);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

@@ -169,7 +169,7 @@ Add to VSCode settings under `cline.mcpServers`:
 ### Workflow / 使用流程
 
 ```
-1. smithue_list_domain()          → See all 8 domains / 查看全部 8 个域
+1. smithue_list_domain()          → See all 18 domains / 查看全部 18 个域
 2. smithue_list_domain("Material") → Get Material command schemas / 获取材质命令模式
 3. smithue_search("blueprint")     → Find blueprint-related commands / 搜索蓝图相关命令
 4. smithue_execute("create_material", {"name": "M_Test", "path": "/Game/Materials"})
@@ -220,138 +220,35 @@ SmithUE 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-SmithUE provides specialized commands organized across 8 functional domains. The command set is continuously growing — see `smithue_list_domain()` for the latest available commands.
+SmithUE provides **172 tools** organized across **18 functional domains**. The command set is continuously growing — see `smithue_list_domain()` for the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
-SmithUE 提供了分布在 8 个功能领域的专业命令集. 命令集持续增长中——使用 `smithue_list_domain()` 查看最新可用命令.
+SmithUE 提供了分布在 **18 个功能领域** 的 **172 个专业工具**. 命令集持续增长中——使用 `smithue_list_domain()` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考.
 
-### System / 系统 (8 commands)
-Commands for managing project state, settings, and filesystem.
-用于管理项目状态, 设置和文件系统的命令.
+### Domain Overview / 领域概览
 
-| Command | Description / 描述 |
-| :--- | :--- |
-| `ping` | Check server availability and latency / 检查服务器可用性和延迟 |
-| `list_tools` | List all registered commands with parameters / 列出所有已注册命令及其参数 |
-| `get_protocol_info` | Retrieve protocol version and capabilities / 获取协议版本和功能 |
-| `get_project_info` | Get project metadata and paths / 获取项目元数据和路径 |
-| `list_plugins` | List all enabled plugins / 列出所有启用的插件 |
-| `get_project_settings` | Retrieve project-level configuration / 获取项目级配置 |
-| `create_folder` | Create a new directory in Content Browser / 在内容浏览器中创建新目录 |
-| `get_source_files` | List C++ source files for project modules / 列出项目模块的 C++ 源文件 |
+| Domain / 领域 | Tools / 工具数 | Description / 描述 |
+|---|---|---|
+| System / 系统 | 5 | Server connectivity, session management / 服务器连接、会话管理 |
+| Project / 项目 | 4 | Project info, plugins, folders, source files / 项目信息、插件、目录、源文件 |
+| Material / 材质 | 20 | Materials, material instances, MPC, material functions / 材质、材质实例、MPC、材质函数 |
+| Asset / 资产 | 12 | Asset CRUD, browser operations, AI texture generation / 资产增删改查、浏览器操作、AI 纹理生成 |
+| Editor / 编辑器 | 8 | Actor spawning, properties, post-process, project settings / Actor 生成、属性、后处理、项目设置 |
+| Interaction / 交互 | 7 | Console/editor commands, undo/redo, key simulation / 控制台/编辑器命令、撤销/重做、按键模拟 |
+| Blueprint / 蓝图 | 15 | BP creation, nodes, functions, variables, components, DSL compiler / 蓝图创建、节点、函数、变量、组件、DSL 编译器 |
+| Viewport / 视口 | 6 | Camera control, screenshots, actor selection / 摄像机控制、截图、Actor 选择 |
+| Observation / 观测 | 7 | Panels, editor state, actor properties, world outline / 面板、编辑器状态、Actor 属性、世界大纲 |
+| Analysis / 分析 | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation / 源码分析、依赖图、蓝图诊断、资产校验 |
+| Niagara / 粒子 | 17 | Particle system creation, emitters, modules, renderers / 粒子系统创建、发射器、模块、渲染器 |
+| Level / 关卡 | 11 | Level management, landscape, foliage / 关卡管理、地形、植被 |
+| Data / 数据 | 6 | DataTables, UserDefinedStructs, UserDefinedEnums / 数据表、用户定义结构体、用户定义枚举 |
+| Sequencer / 序列 | 6 | LevelSequence creation, bindings, tracks, keyframes / 关卡序列创建、绑定、轨道、关键帧 |
+| Environment / 环境 | 11 | Post-process, fog, sky, lights, physics, splines / 后处理、雾、天空、光照、物理、样条 |
+| PIE / 运行 | 11 | Play-In-Editor: start/stop, actors, properties, console / 运行模式：启动/停止、Actor、属性、控制台 |
+| Animation / 动画 | 7 | AnimMontage, AnimBlueprint, sections, notifies / 动画蒙太奇、动画蓝图、段落、通知 |
+| Input / 输入 | 6 | Enhanced Input: InputAction, InputMappingContext / 增强输入：输入动作、输入映射上下文 |
 
-### Asset / 资产 (10 commands)
-Manage assets, editor tabs, and integrate external AI generation.
-管理资产、编辑器标签页并集成外部 AI 生成.
-
-| Command | Description / 描述 |
-| :--- | :--- |
-| `list_assets` | List assets with optional filtering / 列出资产并支持可选过滤 |
-| `find_asset` | Search for assets by name or tag / 按名称或标签搜索资产 |
-| `get_asset_info` | Retrieve detailed asset metadata / 获取详细的资产元数据 |
-| `rename_asset` | Rename asset with redirect fixup / 重命名资产并修复重定向 |
-| `duplicate_asset` | Create a copy of an asset / 创建资产副本 |
-| `delete_asset` | Delete asset with reference check (force option) / 删除资产并检查引用关系 (可强制删除) |
-| `move_asset` | Move asset to new path, updating all references / 移动资产到新路径并更新所有引用 |
-| `asset_editor` | Open or close asset editors for single or multiple assets / 打开或关闭单个或多个资产的编辑器 |
-| `generate_texture` | Async texture generation via AI API / 通过 AI API 异步生成纹理 |
-| `check_generation_task` | Poll status of texture generation / 轮询纹理生成状态 |
-
-### Material / 材质 (12 commands)
-Programmatic material and material function creation, node graph assembly, property configuration and compilation. Supports live refresh when Material Editor is open.
-程序化材质及材质函数创建, 节点图组装, 属性配置与编译. 材质编辑器打开时支持实时刷新.
-
-| Command | Description / 描述 |
-| :--- | :--- |
-| `create_material` | Create Material or MaterialInstance / 创建材质或材质实例 |
-| `get_material_info` | Inspect material graph structure / 检查材质图表结构 |
-| `set_material_property` | Set material-level properties (domain, blend mode, shading model, two-sided, blendable location) / 设置材质级属性 (域, 混合模式, 着色模型, 双面, 可混合位置) |
-| `set_expression_property` | Set expression node properties (Custom HLSL, constants, textures, SceneTexture ID, MaterialFunctionCall) / 设置表达式节点属性 (自定义 HLSL, 常量, 纹理, 场景纹理 ID, 材质函数调用) |
-| `add_material_expression` | Add expression node to material / 向材质添加表达式节点 |
-| `connect_material_pins` | Link material expression pins / 连接材质表达式引脚 |
-| `compile_material` | Trigger material compilation with shader and node-level error reporting / 触发材质编译并返回着色器和节点级错误 |
-| `create_material_function` | Create a new MaterialFunction asset / 创建新的材质函数资产 |
-| `get_material_function_info` | Inspect material function graph structure / 检查材质函数图表结构 |
-| `add_mf_expression` | Add expression node to material function / 向材质函数添加表达式节点 |
-| `connect_mf_pins` | Link pins within a material function / 连接材质函数内的引脚 |
-| `set_mf_expression_property` | Set properties on material function expression nodes / 设置材质函数表达式节点属性 |
-
-### Editor / 编辑器 (12 commands)
-Level stage control and actor lifecycle management.
-关卡舞台控制和 Actor 生命周期管理.
-
-| Command | Description / 描述 |
-| :--- | :--- |
-| `spawn_actor` | Place a new actor into the level / 在关卡中放置新 Actor |
-| `get_all_actors` | Retrieve all actors with transforms / 获取所有 Actor 及其变换 |
-| `set_actor_property` | Set UPROPERTY value on an actor / 设置 Actor 的 UPROPERTY 值 |
-| `delete_actor` | Remove an actor from the level / 从关卡中移除 Actor |
-| `add_postprocess_material` | Add a material to a PostProcessVolume's blendable list / 向后处理体积的可混合列表添加材质 |
-| `execute_editor_command` | Run internal editor commands / 运行内部编辑器命令 |
-| `execute_console_command` | Run standard console commands / 运行标准控制台命令 |
-| `list_editor_commands` | Enumerate available editor commands / 枚举可用的编辑器命令 |
-| `undo` | Perform an undo operation / 执行撤销操作 |
-| `redo` | Perform a redo operation / 执行重做操作 |
-| `simulate_key` | Send keyboard input to the editor / 向编辑器发送键盘输入 |
-| `list_key_bindings` | List editor keyboard shortcuts / 列出编辑器键盘快捷键 |
-
-### Blueprint / 蓝图 (14 commands)
-Deep integration for programmatic Blueprint construction and DSL compilation.
-用于程序化蓝图构建和 DSL 编译的深度集成.
-
-| Command | Description / 描述 |
-| :--- | :--- |
-| `bp_create` | Create a new Blueprint class / 创建新的蓝图类 |
-| `bp_add_function` | Add function graph to Blueprint / 向蓝图添加函数图表 |
-| `bp_create_node` | Instantiate a node in Blueprint graph (supports CallFunction, VariableGet/Set, MacroInstance, InputKey, etc.) / 在蓝图图表中实例化节点 (支持 CallFunction, VariableGet/Set, MacroInstance, InputKey 等) |
-| `bp_connect_pins` | Connect two Blueprint pins / 连接两个蓝图引脚 |
-| `bp_set_pin_default` | Set default value for a pin / 设置引脚的默认值 |
-| `bp_add_variable` | Add member variable to Blueprint / 向蓝图添加成员变量 |
-| `bp_add_component` | Add component to Blueprint SCS / 向蓝图 SCS 添加组件 |
-| `bp_set_component_property` | Set property on Blueprint SCS or inherited component template, with special handling for PostProcessMaterial on Camera/PostProcess components / 设置蓝图 SCS 或继承组件模板属性, 含 Camera/PostProcess 组件的 PostProcessMaterial 特殊处理 |
-| `bp_compile` | Compile Blueprint and report errors / 编译蓝图并报告错误 |
-| `bp_get_summary` | Rich Blueprint structural summary (function signatures with params/return types, node counts, custom events, delegates, input bindings, interfaces, variable flags, component hierarchy) / 丰富的蓝图结构摘要 (函数签名含参数/返回类型, 节点数, 自定义事件, 委托, 输入绑定, 接口, 变量标志, 组件层级) |
-| `bp_describe_graph` | Compact graph description with short IDs (N0-Nn), ~38% size reduction vs GUIDs, multi-connection support, id_to_guid mapping / 紧凑图表描述使用短 ID (N0-Nn), 比 GUID 减少约 38% 体积, 多连接支持, id_to_guid 映射 |
-| `bp_compile_code` | Compile DSL text into Blueprint / 将 DSL 文本编译为蓝图 |
-| `bp_batch_op` | Execute multiple atomic operations / 执行多个原子操作 |
-| `bp_validate_code` | Validate DSL syntax dry-run / 验证 DSL 语法的空运行 |
-
-### Viewport / 视口 (6 commands)
-Camera control, selection, and visualization state.
-摄像机控制, 选择和可视化状态.
-
-| Command | Description / 描述 |
-| :--- | :--- |
-| `set_viewport_camera` | Set viewport transform and FOV / 设置视口变换和 FOV |
-| `focus_on_actor` | Focus camera on a specific actor / 将摄像机聚焦于特定 Actor |
-| `set_viewport_mode` | Switch projection modes / 切换投影模式 |
-| `get_viewport_info_detailed` | Detailed viewport state snapshot / 详细的视口状态快照 |
-| `select_actors` | Manage actor selection in level / 管理关卡中的 Actor 选择 |
-| `take_viewport_screenshot` | Capture viewport as PNG / 将视口捕获为 PNG |
-
-### Observation / 8 commands
-State inspection and world hierarchy analysis.
-状态检查和世界层级分析.
-
-| Command | Description / 描述 |
-| :--- | :--- |
-| `list_panels` | List editor panel visibility / 列出编辑器面板可见性 |
-| `open_panel` | Focus a named editor panel / 聚焦命名的编辑器面板 |
-| `close_panel` | Close an open editor panel / 关闭打开的编辑器面板 |
-| `get_editor_state` | General editor state snapshot / 通用编辑器状态快照 |
-| `get_level_info` | Metadata for current map / 当前地图的元数据 |
-| `get_actor_property` | Read UPROPERTY value from actor / 从 Actor 读取 UPROPERTY 值 |
-| `get_selected_actors` | Get data for current selection / 获取当前选择的数据 |
-| `get_world_outline` | Hierarchical world actor list / 层级化的世界 Actor 列表 |
-
-### Analysis / 分析 (3 commands)
-Structural analysis with nomnoml diagram output.
-带有 nomnoml 图表输出的结构分析.
-
-| Command | Description / 描述 |
-| :--- | :--- |
-| `analyze_module` | C++ class relationship analysis / C++ 类关系分析 |
-| `analyze_dependencies` | Module dependency graph analysis / 模块依赖图分析 |
-| `analyze_blueprints` | Blueprint hierarchy and composition / 蓝图层级和组合分析 |
+> 📖 For detailed parameter schemas and usage of each tool, see **[TOOLS.md](TOOLS.md)**.
+> 📖 每个工具的详细参数模式和用法，请参阅 **[TOOLS.md](TOOLS.md)**.
 
 ---
 
@@ -397,8 +294,10 @@ We are committed to expanding SmithUE into a comprehensive AI-first development 
     *   Python binding / REST SDK.
         Python 绑定 / REST SDK.
 *   **v1.3**
-    *   Runtime game state observation (PIE mode commands).
-        运行时游戏状态观察 (PIE 模式命令).
+    *   ~~Runtime game state observation (PIE mode commands).~~
+        ~~运行时游戏状态观察 (PIE 模式命令).~~
+        ✅ **Done in v0.2.0** — PIE domain (11 tools): start/stop/pause PIE, query actors & properties, execute console commands in runtime, auto-detect PIE world.
+        ✅ **已在 v0.2.0 完成** — PIE 领域 (11 工具): 启停/暂停 PIE, 查询 Actor 及属性, 运行时执行控制台命令, 自动检测 PIE 世界.
     *   Live data streaming - real-time external data injection into simulation actors.
         实时数据流 - 将外部实时数据注入仿真 Actor.
     *   Multi-client collaboration mode.

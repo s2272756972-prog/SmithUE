@@ -39,18 +39,6 @@ void FSmithUEProjectCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             }),
         [](const TSharedPtr<FJsonObject>& Params) { return HandleListPlugins(Params); });
 
-    // get_project_settings
-    Registry.Register(
-        FSmithUEToolSchema(TEXT("get_project_settings"), TEXT("Project"),
-            TEXT("Reads a config value from GConfig by section and key."),
-            {
-                FSmithUEToolParam(TEXT("section"), TEXT("string"),
-                    TEXT("Config section, e.g. /Script/Engine.RendererSettings"), true),
-                FSmithUEToolParam(TEXT("key"), TEXT("string"),
-                    TEXT("Config key name"), true)
-            }),
-        [](const TSharedPtr<FJsonObject>& Params) { return HandleGetProjectSettings(Params); });
-
     // create_folder
     Registry.Register(
         FSmithUEToolSchema(TEXT("create_folder"), TEXT("Project"),

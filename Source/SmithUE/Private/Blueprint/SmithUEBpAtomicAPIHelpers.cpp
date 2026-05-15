@@ -121,9 +121,19 @@ namespace SmithUEBpAtomicAPIHelpers
 			return nullptr;
 		}
 
+		// First pass: prefer exact PinName match (avoids DisplayName collisions e.g. "self" displaying as "Target")
 		for (UEdGraphPin* Pin : Node->Pins)
 		{
-			if (Pin && (Pin->PinName.ToString().Equals(PinName, ESearchCase::IgnoreCase) || Pin->GetDisplayName().ToString().Equals(PinName, ESearchCase::IgnoreCase)))
+			if (Pin && Pin->PinName.ToString().Equals(PinName, ESearchCase::IgnoreCase))
+			{
+				return Pin;
+			}
+		}
+
+		// Second pass: fallback to DisplayName
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin && Pin->GetDisplayName().ToString().Equals(PinName, ESearchCase::IgnoreCase))
 			{
 				return Pin;
 			}

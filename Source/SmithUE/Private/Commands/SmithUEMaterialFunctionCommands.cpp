@@ -3,6 +3,7 @@
 #include "Commands/SmithUEMaterialFunctionCommands.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
+#include "SmithUEModule.h"
 #include "Materials/MaterialFunction.h"
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionFunctionInput.h"

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "LevelEditor.h"
+#include "IAssetViewport.h"
 #include "EditorViewportClient.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Dom/JsonObject.h"

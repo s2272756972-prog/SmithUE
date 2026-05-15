@@ -17,6 +17,15 @@
 #include "Commands/SmithUEScreenshotCommands.h"
 #include "Commands/SmithUETextureCommands.h"
 #include "Commands/SmithUESourceAnalysisCommands.h"
+#include "Commands/SmithUENiagaraCommands.h"
+#include "Commands/SmithUELevelCommands.h"
+#include "Commands/SmithUEDebugCommands.h"
+#include "Commands/SmithUEDataCommands.h"
+#include "Commands/SmithUESequencerCommands.h"
+#include "Commands/SmithUEEnvironmentCommands.h"
+#include "Commands/SmithUEPIECommands.h"
+#include "Commands/SmithUEAnimCommands.h"
+#include "Commands/SmithUEInputCommands.h"
 #include "UI/SSmithUEStatusIndicator.h"
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
@@ -51,6 +60,15 @@ void FSmithUEModule::StartupModule()
 	FSmithUEScreenshotCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUETextureCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUESourceAnalysisCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUENiagaraCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUELevelCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEDataCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUESequencerCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEEnvironmentCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEPIECommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEAnimCommands::RegisterTools(FSmithUEToolRegistry::Get());
+FSmithUEInputCommands::RegisterTools(FSmithUEToolRegistry::Get());
 
 	if (GEditor != nullptr)
 	{

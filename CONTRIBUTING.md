@@ -141,7 +141,8 @@ The MCP Server auto-discovers new commands from the plugin. No TypeScript change
 *   **Response Format**: All handlers must return a JSON object via `FSmithUECommonUtils::CreateSuccessResponse(Data)` or `CreateErrorResponse(Message)`. The final envelope will have `status: "success"|"error"` and `data: {...}`.
 *   **Logging**: Use the `SMITHUE_LOG` macro for consistent logging within the plugin.
 *   **Validation**: Always validate parameters at the start of your handler. Return clear error messages for invalid or missing inputs.
-*   **Categories**: Prefer existing domains (System, Asset, Material, Editor, Blueprint, Viewport, Observation, Analysis). New domains may be added when 3+ related commands form a distinct group — see `Docs/smithue-dev/SKILL.md` for guidelines.
+*   **Categories**: Commands are organized into 18 domains (System, Project, Material, Asset, Editor, Interaction, Blueprint, Viewport, Observation, Analysis, Niagara, Level, Data, Sequencer, Environment, PIE, Animation, Input). New domains may be added when 3+ related commands form a distinct group — see `Docs/smithue-dev/SKILL.md` for guidelines.
+*   **Full Reference**: See [TOOLS.md](TOOLS.md) for the complete 172-tool reference with parameter schemas.
 *   **Compatibility**: Target Unreal Engine 5.2 only. Avoid using APIs introduced in 5.3 or later.
 
 ## Example: Adding "list_actors"

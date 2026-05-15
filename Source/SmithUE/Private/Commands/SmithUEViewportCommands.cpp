@@ -84,6 +84,53 @@ namespace
         return Obj;
     }
 
+    FVector VectorFromJsonField(const TSharedPtr<FJsonObject>& Params, const FString& FieldName, const FVector& Default)
+    {
+        const TSharedPtr<FJsonObject>* Obj = nullptr;
+        if (Params->TryGetObjectField(FieldName, Obj) && Obj && Obj->IsValid())
+        {
+            double X = Default.X, Y = Default.Y, Z = Default.Z;
+            (*Obj)->TryGetNumberField(TEXT("x"), X);
+            (*Obj)->TryGetNumberField(TEXT("y"), Y);
+            (*Obj)->TryGetNumberField(TEXT("z"), Z);
+            return FVector(X, Y, Z);
+        }
+        return Default;
+    }
+
+    FRotator RotatorFromJsonField(const TSharedPtr<FJsonObject>& Params, const FString& FieldName, const FRotator& Default)
+    {
+        const TSharedPtr<FJsonObject>* Obj = nullptr;
+        if (Params->TryGetObjectField(FieldName, Obj) && Obj && Obj->IsValid())
+        {
+            double Pitch = Default.Pitch, Yaw = Default.Yaw, Roll = Default.Roll;
+            (*Obj)->TryGetNumberField(TEXT("pitch"), Pitch);
+            (*Obj)->TryGetNumberField(TEXT("yaw"), Yaw);
+            (*Obj)->TryGetNumberField(TEXT("roll"), Roll);
+            return FRotator(Pitch, Yaw, Roll);
+        }
+        return Default;
+    }
+
+    AActor* FindActorByLabel(UWorld* World, const FString& Label)
+    {
+        if (!World) return nullptr;
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            if (It->GetActorLabel() == Label)
+            {
+                return *It;
+            }
+        }
+        return nullptr;
+    }
+
+    AActor* FindActorByLabel(const FString& Label)
+    {
+        UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+        return FindActorByLabel(World, Label);
+    }
+
     FString ViewportTypeToString(ELevelViewportType Type)
     {
         switch (Type)

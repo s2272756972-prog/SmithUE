@@ -52,12 +52,6 @@ void FSmithUEObservationCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 			TEXT("Returns a snapshot of the current editor state: PIE, simulation, selection, level, viewport.")),
 		[](const TSharedPtr<FJsonObject>& Params) { return HandleGetEditorState(Params); });
 
-	// get_level_info
-	Registry.Register(
-		FSmithUEToolSchema(TEXT("get_level_info"), TEXT("Observation"),
-			TEXT("Returns information about the currently loaded level/world.")),
-		[](const TSharedPtr<FJsonObject>& Params) { return HandleGetLevelInfo(Params); });
-
 	// get_actor_property
 	Registry.Register(
 		FSmithUEToolSchema(

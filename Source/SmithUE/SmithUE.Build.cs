@@ -35,7 +35,9 @@ public class SmithUE : ModuleRules
 				"Sockets",
 				"Networking",
 				"HTTP",
-				"RenderCore"
+				"RenderCore",
+				"Landscape",
+				"Foliage"
 			}
 		);
 
@@ -52,9 +54,16 @@ public class SmithUE : ModuleRules
 					"PropertyEditor",
 					"ToolMenus",
 					"ImageWrapper",
-					"AssetTools"
-				}
-			);
+				"AssetTools",
+				"Niagara",
+				"NiagaraEditor",
+				"Sequencer",
+				"MovieScene",
+				"MovieSceneTracks",
+				"LevelSequence",
+				"EnhancedInput"
+			}
+		);
 		}
 	}
 }

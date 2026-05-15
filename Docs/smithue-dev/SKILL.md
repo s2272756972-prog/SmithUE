@@ -13,7 +13,7 @@ SmithUE 采用清晰的分层架构，将虚幻引擎编辑器功能安全地暴
 
 *   **UE5 C++ 插件**：核心引擎逻辑，在默认端口 13721 上运行 HTTP 服务。
 *   **ToolRegistry 模式**：命令通过 `FSmithUEToolSchema` 定义，在 `RegisterTools()` 中注册。
-*   **8 大领域**：命令分组为 System、Asset、Material、Editor、Blueprint、Viewport、Observation、Analysis。
+*   **18 大领域**：命令分组为 System、Project、Material、Asset、Editor、Interaction、Blueprint、Viewport、Observation、Analysis、Niagara、Level、Data、Sequencer、Environment、PIE、Animation、Input。
 *   **TypeScript MCP 服务**：元工具架构的桥接层。添加新 UE 命令无需修改 TypeScript 代码。
 *   **响应封装**：所有命令返回 JSON 对象：`{ "status": "success"|"error", "data": { ... } }`。
 *   **连接状态指示器**：编辑器右下角显示 `SmithUE v{版本号}` 及圆形状态图标（绿/红/红黄闪烁），版本号从 `.uplugin` 运行时读取。
@@ -69,12 +69,12 @@ https://github.com/123dx-svg/SmithUE.git
 
 ## 新增领域（Domain）
 
-当现有 8 大领域（System、Asset、Material、Editor、Blueprint、Viewport、Observation、Analysis）无法涵盖你的新命令时，可以新增领域。遵循以下原则：
+当现有 18 大领域（System、Project、Material、Asset、Editor、Interaction、Blueprint、Viewport、Observation、Analysis、Niagara、Level、Data、Sequencer、Environment、PIE、Animation、Input）无法涵盖你的新命令时，可以新增领域。遵循以下原则：
 
 ### 何时新增领域
 
 *   现有领域中没有语义匹配的分组。
-*   你的命令集围绕一个明确的功能主题（如 Animation、Audio、Landscape）。
+*   你的命令集围绕一个明确的功能主题（如 Audio、Landscape、Networking）。
 *   预计该主题下会有 3 个以上命令。如果只有 1-2 个命令，优先归入最相近的现有领域。
 
 ### 新增步骤
@@ -135,13 +135,15 @@ https://github.com/123dx-svg/SmithUE.git
 
 ```text
 Source/SmithUE/
-├── Private/Commands/SmithUE{Domain}Commands.cpp  # 命令实现
+├── Private/Commands/SmithUE{Domain}Commands.cpp  # 命令实现（18 个领域文件）
 ├── Public/Commands/SmithUE{Domain}Commands.h     # 声明
 ├── Private/Blueprint/                             # 底层蓝图 API
 ├── Private/Transport/                             # HTTP 服务 & 连接管理
 ├── Private/UI/                                    # 编辑器状态指示器
 └── Public/ToolRegistry/                           # Schema/Registry 核心逻辑
 ```
+
+完整工具清单见 `TOOLS.md`（172 tools across 18 domains）。
 
 MCP 服务（`Scripts/SmithUE-MCP/`）位于插件内部：
 ```text

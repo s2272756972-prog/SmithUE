@@ -29,6 +29,8 @@
 #include "Toolkits/ToolkitManager.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstance.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Editor.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,13 +39,13 @@
 namespace
 {
     /**
-     * Load a material for editing. If the Material Editor is open for this asset,
-     * returns the editor's working COPY (which has a valid MaterialGraph for live UI refresh).
+     * Load a material for READING. If the Material Editor is open for this asset,
+     * returns the editor's working COPY (which reflects current visual state).
      * Otherwise returns the original asset.
      *
-     * @param OutEditor  If non-null and editor is open, receives the IMaterialEditor ptr.
+     * Use this for read-only operations (get_material_info).
      */
-    UMaterial* LoadMaterialForEditing(const FString& MaterialPath, TSharedPtr<IMaterialEditor>* OutEditor = nullptr)
+    UMaterial* LoadMaterialForReading(const FString& MaterialPath)
     {
         UMaterial* Original = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
         if (!Original) return nullptr;
@@ -57,13 +59,48 @@ namespace
                 UMaterial* EditMat = Cast<UMaterial>(MatEditor->GetMaterialInterface());
                 if (EditMat)
                 {
-                    if (OutEditor) *OutEditor = MatEditor;
                     return EditMat;
                 }
             }
         }
 
         return Original;
+    }
+
+    /**
+     * Load a material for WRITING. If the Material Editor is open for this asset,
+     * CLOSES the editor first to prevent save conflicts (user clicking "Save" on
+     * exit would overwrite our programmatic changes with stale state).
+     *
+     * Always returns the original asset. Caller should use NotifyMaterialModified()
+     * with nullptr editor (the no-editor path).
+     */
+    UMaterial* LoadMaterialForWriting(const FString& MaterialPath)
+    {
+        UMaterial* Original = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+        if (!Original) return nullptr;
+
+        // Close any open Material Editor to prevent save conflicts
+        UAssetEditorSubsystem* EditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+        if (EditorSubsystem)
+        {
+            IAssetEditorInstance* Editor = EditorSubsystem->FindEditorForAsset(Original, false);
+            if (Editor)
+            {
+                UE_LOG(LogSmithUE, Log, TEXT("LoadMaterialForWriting: Closing editor for '%s' to prevent save conflicts"), *MaterialPath);
+                EditorSubsystem->CloseAllEditorsForAsset(Original);
+            }
+        }
+
+        return Original;
+    }
+
+    // Legacy wrapper for backward compat (delegates to LoadMaterialForReading)
+    UMaterial* LoadMaterialForEditing(const FString& MaterialPath, TSharedPtr<IMaterialEditor>* OutEditor = nullptr)
+    {
+        // OutEditor is no longer populated - write ops use LoadMaterialForWriting instead
+        if (OutEditor) *OutEditor = nullptr;
+        return LoadMaterialForReading(MaterialPath);
     }
 
     /**
@@ -131,6 +168,8 @@ namespace
         case 2: return &Material->GetEditorOnlyData()->Roughness;
         case 3: return &Material->GetEditorOnlyData()->Normal;
         case 4: return &Material->GetEditorOnlyData()->EmissiveColor;
+        case 5: return &Material->GetEditorOnlyData()->Opacity;
+        case 6: return &Material->GetEditorOnlyData()->OpacityMask;
         default: return nullptr;
         }
     }
@@ -199,7 +238,7 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("source_expression_index"), TEXT("number"), TEXT("Index of source expression in Expressions array"), true),
                 FSmithUEToolParam(TEXT("source_output_index"), TEXT("number"), TEXT("Output pin index on source expression"), false, TEXT("0")),
                 FSmithUEToolParam(TEXT("dest_expression_index"), TEXT("number"), TEXT("Index of dest expression, or -1 for material output"), true),
-                FSmithUEToolParam(TEXT("dest_input_index"), TEXT("number"), TEXT("Input pin index. For material output: 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=Emissive"), false, TEXT("0"))
+                FSmithUEToolParam(TEXT("dest_input_index"), TEXT("number"), TEXT("Input pin index. For material output: 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=Emissive,5=Opacity,6=OpacityMask"), false, TEXT("0"))
             }),
         [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
         {
@@ -460,7 +499,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleGetMaterialInfo(const TS
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
     }
 
-    UMaterial* Material = LoadMaterialForEditing(MaterialPath);
+    UMaterial* Material = LoadMaterialForReading(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -525,8 +564,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleAddMaterialExpression(co
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: expression_class"));
     }
 
-    TSharedPtr<IMaterialEditor> ActiveEditor;
-    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
+    UMaterial* Material = LoadMaterialForWriting(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -557,7 +595,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleAddMaterialExpression(co
     // UE 5.2: use mutable expression collection for writes
     const int32 NewIndex = Material->GetExpressionCollection().Expressions.Add(NewExpr);
 
-    NotifyMaterialModified(Material, ActiveEditor);
+    NotifyMaterialModified(Material);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetNumberField(TEXT("expression_index"), NewIndex);
@@ -598,8 +636,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleConnectMaterialPins(cons
     const int32 SourceOutputIndex = static_cast<int32>(SourceOutputD);
     const int32 DestInputIndex = static_cast<int32>(DestInputD);
 
-    TSharedPtr<IMaterialEditor> ActiveEditor;
-    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
+    UMaterial* Material = LoadMaterialForWriting(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -627,7 +664,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleConnectMaterialPins(cons
         if (!Input)
         {
             return FSmithUECommonUtils::CreateErrorResponse(
-                FString::Printf(TEXT("dest_input_index %d is out of range for material output (0-4)"), DestInputIndex));
+                FString::Printf(TEXT("dest_input_index %d is out of range for material output (0-6)"), DestInputIndex));
         }
         Input->Connect(SourceOutputIndex, SourceExpr);
     }
@@ -657,7 +694,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleConnectMaterialPins(cons
         Input->Connect(SourceOutputIndex, SourceExpr);
     }
 
-    NotifyMaterialModified(Material, ActiveEditor);
+    NotifyMaterialModified(Material);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("connected"), true);
@@ -679,7 +716,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleCompileMaterial(const TS
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
     }
 
-    UMaterial* Material = LoadMaterialForEditing(MaterialPath);
+    UMaterial* Material = LoadMaterialForWriting(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -780,13 +817,13 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: material_path"));
     }
 
-    TSharedPtr<IMaterialEditor> ActiveEditor;
-    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
+    UMaterial* Material = LoadMaterialForWriting(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
             FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
     }
+
 
     TArray<FString> Changed;
 
@@ -873,7 +910,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("No properties specified to set"));
     }
 
-    NotifyMaterialModified(Material, ActiveEditor);
+    NotifyMaterialModified(Material);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("material_path"), MaterialPath);
@@ -917,8 +954,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
     }
     const TSharedPtr<FJsonObject>& Props = *PropsPtr;
 
-    TSharedPtr<IMaterialEditor> ActiveEditor;
-    UMaterial* Material = LoadMaterialForEditing(MaterialPath, &ActiveEditor);
+    UMaterial* Material = LoadMaterialForWriting(MaterialPath);
     if (!Material)
     {
         return FSmithUECommonUtils::CreateErrorResponse(
@@ -1209,7 +1245,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("No recognized properties were set. Check expression type and property names."));
     }
 
-    NotifyMaterialModified(Material, ActiveEditor);
+    NotifyMaterialModified(Material);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("material_path"), MaterialPath);

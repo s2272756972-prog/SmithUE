@@ -1,0 +1,15 @@
+# UE Build artifacts
+Binaries/
+Intermediate/
+
+# IDE
+.vs/
+.idea/
+*.sln
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Saved state
+Saved/
