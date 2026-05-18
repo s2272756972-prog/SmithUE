@@ -1079,62 +1079,42 @@ TSharedPtr<FJsonObject> FSmithUENiagaraCommands::HandleSpawnNiagaraActor(const T
         NiagaraSystem->WaitForCompilationComplete(true);
     }
 
-    // Use UNiagaraFunctionLibrary::SpawnSystemAtLocation — the standard Blueprint API.
-    UNiagaraComponent* SpawnedComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        NiagaraSystem,
-        Location,
-        Rotation,
-        FVector(1.0f),
-        false,   // bAutoDestroy = false (persist in level)
-        true,    // bAutoActivate = true
-        ENCPoolMethod::None,
-        false    // bPreCullCheck = false
-    );
+    // Spawn a proper ANiagaraActor so it persists in the level with correct class identity.
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    ANiagaraActor* NiagaraActor = World->SpawnActor<ANiagaraActor>(ANiagaraActor::StaticClass(), Location, Rotation, SpawnParams);
+    if (!NiagaraActor)
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to spawn ANiagaraActor"));
 
-    if (!SpawnedComp)
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("SpawnSystemAtLocation returned nullptr"));
+    // Set actor label
+    if (!ActorName.IsEmpty())
+    {
+        NiagaraActor->SetActorLabel(*ActorName);
+    }
+
+    // Configure the NiagaraComponent
+    UNiagaraComponent* NiagaraComp = NiagaraActor->GetNiagaraComponent();
+    if (!NiagaraComp)
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("ANiagaraActor has no NiagaraComponent"));
+
+    NiagaraComp->SetAsset(NiagaraSystem);
+
+    // ForceSolo enables editor-time ticking without PIE
+    NiagaraComp->SetForceSolo(true);
+    NiagaraComp->Activate(true);
 
     TSharedPtr<FJsonObject> DiagJson = MakeShared<FJsonObject>();
     DiagJson->SetBoolField(TEXT("system_ready_to_run"), NiagaraSystem->IsReadyToRun());
-    DiagJson->SetBoolField(TEXT("active_after_spawn"), SpawnedComp->IsActive());
-    DiagJson->SetBoolField(TEXT("tick_after_spawn"), SpawnedComp->IsComponentTickEnabled());
-
-    // The first Activate (from auto-activate during RegisterComponentWithWorld) creates the 
-    // system instance via InitializeSystem() → ResetMode gets overridden to None → 
-    // fresh instance with None appears "complete" → OnSystemComplete deactivates.
-    // 
-    // Fix: Set ForceSolo first, then call Activate(true). Since the instance already exists,
-    // InitializeSystem() returns false → ResetMode stays ResetSystem → proper emitter reset →
-    // IsComplete() returns false → IsSolo() is true → ScopedComponentTickEnabled.bTickEnabled = true.
-    SpawnedComp->SetForceSolo(true);
-    SpawnedComp->Activate(true);
-
-    DiagJson->SetBoolField(TEXT("active_after_reactivate"), SpawnedComp->IsActive());
-    DiagJson->SetBoolField(TEXT("tick_after_reactivate"), SpawnedComp->IsComponentTickEnabled());
-    DiagJson->SetBoolField(TEXT("is_solo"), SpawnedComp->GetForceSolo());
-
-    AActor* OwnerActor = SpawnedComp->GetOwner();
-    DiagJson->SetBoolField(TEXT("has_owner_actor"), OwnerActor != nullptr);
-
-    // If we don't have an owner actor, create one and attach
-    if (!OwnerActor)
-    {
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        OwnerActor = World->SpawnActor<AActor>(AActor::StaticClass(), Location, Rotation, SpawnParams);
-    }
-
-    if (OwnerActor && !ActorName.IsEmpty())
-    {
-        OwnerActor->SetActorLabel(*ActorName);
-    }
+    DiagJson->SetBoolField(TEXT("active"), NiagaraComp->IsActive());
+    DiagJson->SetBoolField(TEXT("ticking"), NiagaraComp->IsComponentTickEnabled());
+    DiagJson->SetBoolField(TEXT("is_solo"), NiagaraComp->GetForceSolo());
 
     TSharedPtr<FJsonObject> ResultJson = MakeShared<FJsonObject>();
-    ResultJson->SetStringField(TEXT("actor_label"), OwnerActor ? OwnerActor->GetActorLabel() : TEXT("no_owner"));
+    ResultJson->SetStringField(TEXT("actor_label"), NiagaraActor->GetActorLabel());
+    ResultJson->SetStringField(TEXT("actor_class"), TEXT("NiagaraActor"));
     ResultJson->SetStringField(TEXT("system_path"), SystemPath);
     ResultJson->SetBoolField(TEXT("component_valid"), true);
-    ResultJson->SetBoolField(TEXT("component_active"), SpawnedComp->IsActive());
+    ResultJson->SetBoolField(TEXT("component_active"), NiagaraComp->IsActive());
     ResultJson->SetObjectField(TEXT("diagnostics"), DiagJson);
     return FSmithUECommonUtils::CreateSuccessResponse(ResultJson);
 }

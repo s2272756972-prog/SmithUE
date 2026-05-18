@@ -888,6 +888,34 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
         Changed.Add(TEXT("two_sided"));
     }
 
+    // Usage Flags (uses SetMaterialUsage to trigger proper shader recompilation)
+    const TSharedPtr<FJsonObject>* UsageObj = nullptr;
+    if (Params->TryGetObjectField(TEXT("usage"), UsageObj) && UsageObj && (*UsageObj).IsValid())
+    {
+        bool bVal = false;
+        bool bNeedsRecompile = false;
+        if ((*UsageObj)->TryGetBoolField(TEXT("niagara_sprites"), bVal) && bVal)
+        {
+            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_NiagaraSprites);
+            Changed.Add(TEXT("usage_niagara_sprites"));
+        }
+        if ((*UsageObj)->TryGetBoolField(TEXT("niagara_ribbons"), bVal) && bVal)
+        {
+            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_NiagaraRibbons);
+            Changed.Add(TEXT("usage_niagara_ribbons"));
+        }
+        if ((*UsageObj)->TryGetBoolField(TEXT("niagara_mesh_particles"), bVal) && bVal)
+        {
+            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_NiagaraMeshParticles);
+            Changed.Add(TEXT("usage_niagara_mesh_particles"));
+        }
+        if ((*UsageObj)->TryGetBoolField(TEXT("particle_sprites"), bVal) && bVal)
+        {
+            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_ParticleSprites);
+            Changed.Add(TEXT("usage_particle_sprites"));
+        }
+    }
+
     // Blendable Location (PostProcess only)
     FString BlendableLoc;
     if (Params->TryGetStringField(TEXT("blendable_location"), BlendableLoc) && !BlendableLoc.IsEmpty())
