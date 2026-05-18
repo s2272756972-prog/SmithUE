@@ -1,6 +1,7 @@
 // Copyright 2026, 123dx-svg. MIT License.
 
 #include "Commands/SmithUESequencerCommands.h"
+#include "SmithUEModule.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
 

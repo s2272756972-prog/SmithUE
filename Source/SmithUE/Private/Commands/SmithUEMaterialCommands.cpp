@@ -1,6 +1,7 @@
 ﻿// Copyright 2026, 123dx-svg. MIT License.
 
 #include "Commands/SmithUEMaterialCommands.h"
+#include "SmithUEModule.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "Materials/Material.h"
