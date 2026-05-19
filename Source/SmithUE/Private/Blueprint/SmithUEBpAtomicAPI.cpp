@@ -547,7 +547,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 	bool bSuccess = false;
 	if (!ValueStr.IsEmpty())
 	{
-		const TCHAR* Result = Prop->ImportText(*ValueStr, PropAddr, 0, TargetComp);
+        const TCHAR* Result = Prop->ImportText_Direct(*ValueStr, PropAddr, TargetComp, PPF_None);
 		bSuccess = (Result != nullptr);
 	}
 

@@ -685,7 +685,7 @@ TSharedPtr<FJsonObject> FSmithUENiagaraCommands::HandleNiagaraSetRendererPropert
         }
         else
         {
-            Prop->ImportText(*Value, PropertyAddr, 0, Renderer);
+            Prop->ImportText_Direct(*Value, PropertyAddr, Renderer, PPF_None);
         }
     }
 

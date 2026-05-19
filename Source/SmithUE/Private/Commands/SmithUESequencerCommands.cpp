@@ -167,7 +167,7 @@ TSharedPtr<FJsonObject> FSmithUESequencerCommands::HandleSeqCreate(const TShared
     }
 
     IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
-    UFactory* Factory = NewObject<UFactory>(GetTransientPackage(), FindObject<UClass>(ANY_PACKAGE, TEXT("LevelSequenceFactoryNew")));
+    UFactory* Factory = NewObject<UFactory>(GetTransientPackage(), FindObject<UClass>(nullptr, TEXT("/Script/LevelSequenceEditor.LevelSequenceFactoryNew")));
     if (!Factory)
     {
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("LevelSequenceFactoryNew not found"));

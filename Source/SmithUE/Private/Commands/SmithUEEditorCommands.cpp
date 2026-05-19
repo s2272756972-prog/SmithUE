@@ -31,6 +31,7 @@
 #include "Materials/MaterialExpression.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Engine/Blueprint.h"
+#include "ComponentReregisterContext.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -239,7 +240,7 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleSpawnActor(const TSharedPt
     }
 
     // --- find UClass by name ---
-    UClass* ActorClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
+    UClass* ActorClass = FindObject<UClass>(nullptr, *FString::Printf(TEXT("/Script/Engine.%s"), *ClassName));
     if (!ActorClass)
     {
         // Try loading it (handles short names like "StaticMeshActor")
@@ -430,7 +431,7 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleSetActorProperty(const TSh
     // Use ImportText as primary method
     if (!ValueStr.IsEmpty())
     {
-        const TCHAR* Result = Prop->ImportText(*ValueStr, PropAddr, 0, PropOwner);
+        const TCHAR* Result = Prop->ImportText_Direct(*ValueStr, PropAddr, PropOwner, PPF_None);
         bSuccess = (Result != nullptr);
     }
 
@@ -818,7 +819,7 @@ namespace GraphLayoutInternal
     {
         if (!Expr) return 100.f;
         // Custom nodes are tall due to code preview + many inputs
-        int32 NumInputs = Expr->GetInputs().Num();
+        int32 NumInputs = Expr->CountInputs();
         float BaseHeight = 80.f;
         float PerInputHeight = 28.f;
         float Height = BaseHeight + NumInputs * PerInputHeight;
@@ -879,9 +880,10 @@ namespace GraphLayoutInternal
         {
             UMaterialExpression* Expr = Expressions[i];
             if (!Expr) continue;
-            const TArray<FExpressionInput*> Inputs = Expr->GetInputs();
-            for (FExpressionInput* Input : Inputs)
+            const int32 NumInputsE = Expr->CountInputs();
+            for (int32 j = 0; j < NumInputsE; ++j)
             {
+                FExpressionInput* Input = Expr->GetInput(j);
                 if (Input && Input->Expression)
                 {
                     int32* PredIdx = ExprToIndex.Find(Input->Expression);

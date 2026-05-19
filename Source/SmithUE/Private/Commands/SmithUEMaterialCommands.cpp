@@ -741,13 +741,13 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleCompileMaterial(const TS
     // Collect compile errors from material resources (shader-level)
     TArray<FString> Errors;
 
-    // Check SM5 and SM6 feature levels
-    static const ERHIFeatureLevel::Type FeatureLevels[] = { ERHIFeatureLevel::SM5, ERHIFeatureLevel::SM6 };
-    for (ERHIFeatureLevel::Type FL : FeatureLevels)
+    // Check SM5 and SM6 shader platforms
+    static const EShaderPlatform ShaderPlatforms[] = { SP_PCD3D_SM5, SP_PCD3D_SM6 };
+    for (EShaderPlatform SP : ShaderPlatforms)
     {
         for (int32 QL = 0; QL < EMaterialQualityLevel::Num; ++QL)
         {
-            FMaterialResource* Resource = Material->GetMaterialResource(FL, static_cast<EMaterialQualityLevel::Type>(QL));
+            FMaterialResource* Resource = Material->GetMaterialResource(SP, static_cast<EMaterialQualityLevel::Type>(QL));
             if (Resource)
             {
                 for (const FString& Err : Resource->GetCompileErrors())

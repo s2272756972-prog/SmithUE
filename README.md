@@ -37,11 +37,11 @@ Unreal Engine developers spend significant time on repetitive manual operations:
    将仓库克隆到 UE 项目的 `Plugins/` 目录：
    ```bash
    cd {YourProject}/Plugins
-   git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+   git clone -b UE5.7 https://github.com/123dx-svg/SmithUE.git
    ```
 
-2. Build your project using Unreal Engine 5.2.
-   使用虚幻引擎 5.2 构建项目.
+2. Build your project using Unreal Engine 5.7.
+   使用虚幻引擎 5.7 构建项目.
 
 3. Launch the Unreal Editor. SmithUE will automatically start the HTTP server on port 13721.
    启动虚幻编辑器. SmithUE 将在 HTTP 端口 13721 上自动初始化命令服务器.
@@ -73,7 +73,7 @@ SmithUE MCP Server (Scripts/SmithUE-MCP/)
      ↕ HTTP :13721
 SmithUE UE5 Plugin
      ↕ UE Reflection API
-Unreal Engine 5.2 Editor
+Unreal Engine 5.7 Editor
 ```
 
 ### Context Impact / 上下文影响
@@ -169,7 +169,7 @@ Add to VSCode settings under `cline.mcpServers`:
 ### Workflow / 使用流程
 
 ```
-1. smithue_list_domain()          → See all 18 domains / 查看全部 18 个域
+1. smithue_list_domain()          → See all 20 domains / 查看全部 20 个域
 2. smithue_list_domain("Material") → Get Material command schemas / 获取材质命令模式
 3. smithue_search("blueprint")     → Find blueprint-related commands / 搜索蓝图相关命令
 4. smithue_execute("create_material", {"name": "M_Test", "path": "/Game/Materials"})
@@ -220,9 +220,9 @@ SmithUE 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-SmithUE provides **172 tools** organized across **18 functional domains**. The command set is continuously growing — see `smithue_list_domain()` for the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **180 tools** organized across **20 functional domains**. The command set is continuously growing — see `smithue_list_domain()` for the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
-SmithUE 提供了分布在 **18 个功能领域** 的 **172 个专业工具**. 命令集持续增长中——使用 `smithue_list_domain()` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考.
+SmithUE 提供了分布在 **20 个功能领域** 的 **180 个专业工具**. 命令集持续增长中——使用 `smithue_list_domain()` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考.
 
 ### Domain Overview / 领域概览
 
@@ -246,6 +246,8 @@ SmithUE 提供了分布在 **18 个功能领域** 的 **172 个专业工具**. �
 | PIE / 运行 | 11 | Play-In-Editor: start/stop, actors, properties, console / 运行模式：启动/停止、Actor、属性、控制台 |
 | Animation / 动画 | 7 | AnimMontage, AnimBlueprint, sections, notifies / 动画蒙太奇、动画蓝图、段落、通知 |
 | Input / 输入 | 6 | Enhanced Input: InputAction, InputMappingContext / 增强输入：输入动作、输入映射上下文 |
+| PCG / 程序化内容生成 | 4 | PCG graph creation, volume spawning, generation / PCG图创建、体积生成、触发生成 |
+| UMG / 控件蓝图 | 4 | Widget blueprint creation, tree reading, widget management / 控件蓝图创建、树读取、控件管理 |
 
 > 📖 For detailed parameter schemas and usage of each tool, see **[TOOLS.md](TOOLS.md)**.
 > 📖 每个工具的详细参数模式和用法，请参阅 **[TOOLS.md](TOOLS.md)**.

@@ -54,14 +54,18 @@ public class SmithUE : ModuleRules
 					"PropertyEditor",
 					"ToolMenus",
 					"ImageWrapper",
-				"AssetTools",
-				"Niagara",
-				"NiagaraEditor",
-				"Sequencer",
-				"MovieScene",
-				"MovieSceneTracks",
-				"LevelSequence",
-				"EnhancedInput"
+					"AssetTools",
+					"Niagara",
+					"NiagaraEditor",
+					"Sequencer",
+					"MovieScene",
+					"MovieSceneTracks",
+					"LevelSequence",
+					"EnhancedInput",
+					"PCG",
+					"UMG",
+					"UMGEditor",
+					"ContentBrowser"
 			}
 		);
 		}
