@@ -49,6 +49,7 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false) }), &HandleBpAddComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_override_function"), TEXT("Blueprint"), TEXT("Override a parent class function in a Blueprint (creates proper override graph with correct signature)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Parent function name to override"), true) }), &HandleBpOverrideFunction);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true) }), &HandleBpCompile);
 }
 
@@ -575,6 +576,137 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 	Data->SetStringField(TEXT("before"), BeforeValue);
 	Data->SetStringField(TEXT("after"), AfterValue);
 	Data->SetBoolField(TEXT("changed"), BeforeValue != AfterValue);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// bp_override_function
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpOverrideFunction(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("function_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath, FunctionName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("function_name"), FunctionName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path"));
+	}
+
+	// Check if override graph already exists
+	if (FindGraph(Blueprint, FunctionName))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Override graph already exists for '%s'"), *FunctionName));
+	}
+
+	// Find the parent function to override
+	UClass* ParentClass = Blueprint->ParentClass;
+	if (!ParentClass)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Blueprint has no parent class"));
+	}
+
+	UFunction* ParentFunction = ParentClass->FindFunctionByName(FName(*FunctionName));
+	if (!ParentFunction)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Function '%s' not found in parent class '%s' or its ancestors"),
+				*FunctionName, *ParentClass->GetName()));
+	}
+
+	// Verify the function is overridable (BlueprintNativeEvent or BlueprintImplementableEvent)
+	if (!ParentFunction->HasAnyFunctionFlags(FUNC_BlueprintEvent))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Function '%s' is not a BlueprintEvent and cannot be overridden in Blueprint"),
+				*FunctionName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpOverrideFunction", "SmithUE: Override Blueprint Function"));
+
+	// Create the override graph using UClass* overload — this properly sets up:
+	// - Entry node with FunctionReference pointing to parent class
+	// - CallParentFunction node (calls Super)
+	// - Result node with correct pin types from parent signature
+	// - All exec/data pins auto-connected
+	UClass* FunctionOwnerClass = ParentFunction->GetOwnerClass();
+	UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(
+		Blueprint, FName(*FunctionName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+	FBlueprintEditorUtils::AddFunctionGraph<UClass>(Blueprint, NewGraph, /*bIsUserCreated=*/false, FunctionOwnerClass);
+
+	// Find Entry/Result nodes created by the engine for response reporting
+	UK2Node_FunctionEntry* EntryNode = nullptr;
+	UK2Node_FunctionResult* ResultNode = nullptr;
+	for (UEdGraphNode* Node : NewGraph->Nodes)
+	{
+		if (!EntryNode) { EntryNode = Cast<UK2Node_FunctionEntry>(Node); }
+		if (!ResultNode) { ResultNode = Cast<UK2Node_FunctionResult>(Node); }
+	}
+
+	// Build response with function signature info
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("graph_name"), FunctionName);
+	Data->SetStringField(TEXT("parent_class"), ParentClass->GetName());
+
+	// Report the pins on entry/result for caller reference
+	if (EntryNode)
+	{
+		TArray<TSharedPtr<FJsonValue>> InputPins;
+		for (UEdGraphPin* Pin : EntryNode->Pins)
+		{
+			if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+			{
+				TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+				PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+				FString Type = Pin->PinType.PinCategory.ToString();
+				if (Pin->PinType.PinSubCategoryObject != nullptr)
+				{
+					Type += TEXT("/");
+					Type += Pin->PinType.PinSubCategoryObject->GetName();
+				}
+				PinObj->SetStringField(TEXT("type"), Type);
+				InputPins.Add(MakeShared<FJsonValueObject>(PinObj));
+			}
+		}
+		if (InputPins.Num() > 0)
+		{
+			Data->SetArrayField(TEXT("inputs"), InputPins);
+		}
+	}
+	if (ResultNode)
+	{
+		TArray<TSharedPtr<FJsonValue>> OutputPins;
+		for (UEdGraphPin* Pin : ResultNode->Pins)
+		{
+			if (Pin && Pin->Direction == EGPD_Input && Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+			{
+				TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+				PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+				FString Type = Pin->PinType.PinCategory.ToString();
+				if (Pin->PinType.PinSubCategoryObject != nullptr)
+				{
+					Type += TEXT("/");
+					Type += Pin->PinType.PinSubCategoryObject->GetName();
+				}
+				PinObj->SetStringField(TEXT("type"), Type);
+				OutputPins.Add(MakeShared<FJsonValueObject>(PinObj));
+			}
+		}
+		if (OutputPins.Num() > 0)
+		{
+			Data->SetArrayField(TEXT("outputs"), OutputPins);
+		}
+	}
+
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

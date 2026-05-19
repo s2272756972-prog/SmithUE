@@ -312,17 +312,20 @@ TSharedPtr<FJsonObject> FSmithUELevelCommands::HandleLevelOpen(const TSharedPtr<
     FString LevelPath;
     Params->TryGetStringField(TEXT("level_path"), LevelPath);
 
-    const bool bLoaded = FEditorFileUtils::LoadMap(LevelPath, false, true);
-    if (!bLoaded)
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load map '%s'"), *LevelPath));
-    }
+    // Defer map load to next frame via DeferredCommands.
+    // Loading a map during tick processing (AsyncTask picked up by WaitUntilTasksComplete)
+    // destroys the world while TickTaskManager still holds tick level references,
+    // causing assertion: !LevelList.Contains(TickTaskLevel) in FreeTickTaskLevel.
+    // DeferredCommands execute at the beginning of the next frame in UEngine::TickDeferredCommands,
+    // safely outside any tick group.
+    GEngine->DeferredCommands.Add(FString::Printf(TEXT("MAP LOAD \"%s\""), *LevelPath));
 
     UWorld* World = SmithUELevel::GetEditorWorld();
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("level_path"), LevelPath);
     Data->SetStringField(TEXT("level_name"), World ? World->GetMapName() : TEXT(""));
     Data->SetBoolField(TEXT("loaded"), true);
+    Data->SetStringField(TEXT("note"), TEXT("Map load deferred to next frame. Allow ~1s before querying new level state."));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
