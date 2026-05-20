@@ -13,6 +13,7 @@ struct FSmithUEToolParam
 	bool bRequired;
 	FString DefaultValue;
 	FString ItemsType;
+	TArray<FString> AllowedValues;
 
 	FSmithUEToolParam(FString InName, FString InType, FString InDesc, bool bInRequired = false, FString InDefault = FString(), FString InItemsType = FString())
 		: Name(MoveTemp(InName))
@@ -33,6 +34,15 @@ struct FSmithUEToolParam
 		JsonObject->SetBoolField(TEXT("required"), bRequired);
 		JsonObject->SetStringField(TEXT("default"), DefaultValue);
 		JsonObject->SetStringField(TEXT("itemsType"), ItemsType);
+		if (AllowedValues.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> EnumArray;
+			for (const FString& Val : AllowedValues)
+			{
+				EnumArray.Add(MakeShared<FJsonValueString>(Val));
+			}
+			JsonObject->SetArrayField(TEXT("enum"), EnumArray);
+		}
 		return JsonObject;
 	}
 };
