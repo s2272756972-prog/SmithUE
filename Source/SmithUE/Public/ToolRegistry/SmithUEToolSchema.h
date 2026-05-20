@@ -32,8 +32,14 @@ struct FSmithUEToolParam
 		JsonObject->SetStringField(TEXT("type"), Type);
 		JsonObject->SetStringField(TEXT("description"), Description);
 		JsonObject->SetBoolField(TEXT("required"), bRequired);
-		JsonObject->SetStringField(TEXT("default"), DefaultValue);
-		JsonObject->SetStringField(TEXT("itemsType"), ItemsType);
+		if (!DefaultValue.IsEmpty())
+		{
+			JsonObject->SetStringField(TEXT("default"), DefaultValue);
+		}
+		if (!ItemsType.IsEmpty())
+		{
+			JsonObject->SetStringField(TEXT("itemsType"), ItemsType);
+		}
 		if (AllowedValues.Num() > 0)
 		{
 			TArray<TSharedPtr<FJsonValue>> EnumArray;
@@ -41,7 +47,7 @@ struct FSmithUEToolParam
 			{
 				EnumArray.Add(MakeShared<FJsonValueString>(Val));
 			}
-			JsonObject->SetArrayField(TEXT("enum"), EnumArray);
+			JsonObject->SetArrayField(TEXT("allowedValues"), EnumArray);
 		}
 		return JsonObject;
 	}
