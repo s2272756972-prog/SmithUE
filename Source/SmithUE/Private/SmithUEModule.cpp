@@ -26,6 +26,7 @@
 #include "Commands/SmithUEPIECommands.h"
 #include "Commands/SmithUEAnimCommands.h"
 #include "Commands/SmithUEInputCommands.h"
+#include "Commands/SmithUEUMGCommands.h"
 #include "UI/SSmithUEStatusIndicator.h"
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
@@ -68,7 +69,8 @@ void FSmithUEModule::StartupModule()
 	FSmithUEEnvironmentCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEPIECommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEAnimCommands::RegisterTools(FSmithUEToolRegistry::Get());
-FSmithUEInputCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEInputCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEUMGCommands::RegisterTools(FSmithUEToolRegistry::Get());
 
 	if (GEditor != nullptr)
 	{

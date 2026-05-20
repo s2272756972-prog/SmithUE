@@ -430,7 +430,7 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleSetActorProperty(const TSh
     // Use ImportText as primary method
     if (!ValueStr.IsEmpty())
     {
-        const TCHAR* Result = Prop->ImportText(*ValueStr, PropAddr, 0, PropOwner);
+        const TCHAR* Result = Prop->ImportText_Direct(*ValueStr, PropAddr, PropOwner, PPF_None);
         bSuccess = (Result != nullptr);
     }
 
