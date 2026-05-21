@@ -73,7 +73,7 @@ void SSmithUEStatusIndicator::Construct(const FArguments& InArgs)
 			.VAlign(VAlign_Center)
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(FString::Printf(TEXT("SmithUE v%s"), *GetPluginVersion())))
+				.Text(FText::FromString(TEXT("SmithUE")))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 				.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
 			]
