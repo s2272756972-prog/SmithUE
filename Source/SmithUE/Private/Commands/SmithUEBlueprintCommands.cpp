@@ -379,10 +379,23 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetSummary(const TSha
         Data->SetArrayField(TEXT("event_dispatchers"), Delegates);
     }
 
-    // --- Components ---
+    // --- 组件列表 (含层级关系) ---
+    // --- Components (with hierarchy) ---
     TArray<TSharedPtr<FJsonValue>> Components;
     if (USimpleConstructionScript* SCS = BP->SimpleConstructionScript)
     {
+        // 构建父级查找表: 子节点 → 父节点
+        // Build parent lookup: child node → parent node
+        TMap<USCS_Node*, USCS_Node*> ParentMap;
+        for (USCS_Node* Node : SCS->GetAllNodes())
+        {
+            if (!Node) { continue; }
+            for (USCS_Node* Child : Node->ChildNodes)
+            {
+                if (Child) { ParentMap.Add(Child, Node); }
+            }
+        }
+
         for (USCS_Node* Node : SCS->GetAllNodes())
         {
             if (!Node)
@@ -392,10 +405,24 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetSummary(const TSha
             TSharedPtr<FJsonObject> CompObj = MakeShared<FJsonObject>();
             CompObj->SetStringField(TEXT("name"), Node->GetVariableName().ToString());
             CompObj->SetStringField(TEXT("class"), Node->ComponentClass ? Node->ComponentClass->GetName() : TEXT("None"));
-            // Show parent attachment
+            // Show SCS tree parent
+            if (USCS_Node** ParentPtr = ParentMap.Find(Node))
+            {
+                CompObj->SetStringField(TEXT("parent"), (*ParentPtr)->GetVariableName().ToString());
+            }
+            // Show attachment to inherited component
             if (Node->ParentComponentOrVariableName != NAME_None)
             {
                 CompObj->SetStringField(TEXT("attached_to"), Node->ParentComponentOrVariableName.ToString());
+            }
+            if (Node->ChildNodes.Num() > 0)
+            {
+                TArray<TSharedPtr<FJsonValue>> Children;
+                for (USCS_Node* Child : Node->ChildNodes)
+                {
+                    if (Child) { Children.Add(MakeShared<FJsonValueString>(Child->GetVariableName().ToString())); }
+                }
+                CompObj->SetArrayField(TEXT("children"), Children);
             }
             Components.Add(MakeShared<FJsonValueObject>(CompObj));
         }

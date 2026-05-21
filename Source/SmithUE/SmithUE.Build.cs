@@ -62,6 +62,7 @@ public class SmithUE : ModuleRules
 					"MovieSceneTracks",
 					"LevelSequence",
 					"EnhancedInput",
+				"InputBlueprintNodes",
 					"UMG",
 					"UMGEditor"
 			}
