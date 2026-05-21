@@ -30,7 +30,37 @@ export function registerTools(server: McpServer, client: SmithUEClient): void {
     { destructiveHint: true, idempotentHint: false },
     async ({ command, params }) => {
       try {
-        const result = await client.execute(command, params);
+        // Pre-flight schema validation
+        const allTools = await client.listTools();
+        const toolSchema = allTools.find((t) => t.name === command);
+
+        if (toolSchema) {
+          const args = params ?? {};
+          const filled: Record<string, unknown> = { ...args };
+
+          for (const p of toolSchema.params) {
+            const provided = filled[p.name];
+            if (provided === undefined) {
+              if (p.required) {
+                if (p.default) {
+                  filled[p.name] = p.default;
+                } else {
+                  return errorResult(new Error(`Validation failed: param '${p.name}' is required but missing`));
+                }
+              }
+            } else if (p.allowedValues && p.allowedValues.length > 0) {
+              if (!p.allowedValues.includes(String(provided))) {
+                return errorResult(new Error(`Validation failed: param '${p.name}' value '${String(provided)}' not in allowed values [${p.allowedValues.join(', ')}]`));
+              }
+            }
+          }
+
+          const result = await client.executeWithFailover(command, filled);
+          return textResult(result);
+        }
+
+        // No schema found — pass through as-is
+        const result = await client.executeWithFailover(command, params);
         return textResult(result);
       } catch (err) {
         return errorResult(err);
@@ -43,25 +73,39 @@ export function registerTools(server: McpServer, client: SmithUEClient): void {
     'Search available SmithUE commands by keyword. Returns command names, categories, and descriptions. Use smithue_list_domain with a domain name to get full parameter schemas.',
     {
       query: z.string(),
+      limit: z.number().int().min(1).max(50).optional(),
     },
     { readOnlyHint: true },
-    async ({ query }) => {
+    async ({ query, limit = 10 }) => {
       try {
-        const tools = await client.listTools();
-        const normalizedQuery = query.toLowerCase();
-        const matches = tools
-          .filter((tool) =>
-            tool.name.includes(query) ||
-            tool.description.toLowerCase().includes(normalizedQuery) ||
-            tool.category.toLowerCase().includes(normalizedQuery)
-          )
-          .map(({ name, category, description }) => ({ name, category, description }));
+        if (!query) {
+          return textResult(`No commands found matching ''. Use smithue_list_domain() to see all available domains.`);
+        }
 
-        if (matches.length === 0) {
+        const tools = await client.listTools();
+        const q = query.toLowerCase();
+        const scored = tools
+          .map((tool) => {
+            const nameLower = tool.name.toLowerCase();
+            const catLower = tool.category.toLowerCase();
+            const descLower = tool.description.toLowerCase();
+            let score = 0;
+            if (nameLower === q) score += 3;
+            else if (nameLower.includes(q)) score += 2;
+            if (catLower.includes(q)) score += 1.5;
+            if (descLower.includes(q)) score += 1;
+            return { tool, score };
+          })
+          .filter(({ score }) => score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, Math.min(limit, 50))
+          .map(({ tool: { name, category, description } }) => ({ name, category, description }));
+
+        if (scored.length === 0) {
           return textResult(`No commands found matching '${query}'. Use smithue_list_domain() to see all available domains.`);
         }
 
-        return textResult(matches);
+        return textResult(scored);
       } catch (err) {
         return errorResult(err);
       }
@@ -89,11 +133,14 @@ export function registerTools(server: McpServer, client: SmithUEClient): void {
               name,
               category,
               description,
-              params: params.map(({ name: paramName, type, description: paramDescription, required }) => ({
-                name: paramName,
-                type,
-                description: paramDescription,
-                required,
+              params: params.map((p) => ({
+                name: p.name,
+                type: p.type,
+                description: p.description,
+                required: p.required,
+                ...(p.default ? { default: p.default } : {}),
+                ...(p.itemsType ? { itemsType: p.itemsType } : {}),
+                ...(p.allowedValues && p.allowedValues.length > 0 ? { allowedValues: p.allowedValues } : {}),
               })),
             }))
           );

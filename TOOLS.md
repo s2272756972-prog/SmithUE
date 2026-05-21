@@ -1,6 +1,6 @@
 # SmithUE Tool Reference
 
-> **172 tools across 18 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **178 tools across 19 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
@@ -12,7 +12,7 @@
 | Asset | 12 | Asset CRUD, browser operations, AI texture generation |
 | Editor | 8 | Actor spawning, properties, post-process, project settings, graph layout |
 | Interaction | 7 | Console/editor commands, undo/redo, key simulation, key bindings |
-| Blueprint | 15 | BP creation, nodes, functions, variables, components, DSL compiler |
+| Blueprint | 17 | BP creation, nodes, functions, variables, components, DSL compiler |
 | Viewport | 6 | Camera control, screenshots, actor selection, view modes |
 | Observation | 7 | Panels, editor state, actor properties, world outline |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
@@ -24,6 +24,7 @@
 | PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
 | Animation | 7 | AnimMontage, AnimBlueprint, sections, notifies |
 | Input | 6 | Enhanced Input: InputAction, InputMappingContext |
+| UMG | 4 | Widget Blueprint creation, widget tree, properties |
 
 ---
 
@@ -113,21 +114,23 @@
 | `simulate_key` | Simulate a key press |
 | `list_key_bindings` | List registered key bindings |
 
-## Blueprint (15 tools)
+## Blueprint (17 tools)
 
 | Tool | Description |
 |------|-------------|
-| `bp_create` | Create a new Blueprint asset |
+| `bp_create` | Create a new Blueprint asset (supports C++ class, BP class name `_C`, or BP path `/Game/...` as parent) |
 | `bp_add_function` | Add a function graph |
-| `bp_create_node` | Create a node in a graph |
+| `bp_create_node` | Create a node in a graph (supports `Class::Function` shorthand for CallFunction nodes) |
 | `bp_connect_pins` | Connect two node pins |
 | `bp_set_pin_default` | Set pin default value |
 | `bp_delete_node` | Delete a node from a graph |
 | `bp_add_variable` | Add a member variable |
-| `bp_add_component` | Add a component to SCS |
+| `bp_add_component` | Add a component to SCS (supports `parent` param for hierarchy attachment) |
+| `bp_remove_component` | Remove a component from SCS (children reparented automatically) |
 | `bp_set_component_property` | Set property on component template |
+| `bp_override_function` | Override a parent class function |
 | `bp_compile` | Compile a Blueprint |
-| `bp_get_summary` | Get Blueprint metadata |
+| `bp_get_summary` | Get Blueprint metadata (includes component hierarchy with parent/children) |
 | `bp_describe_graph` | Describe nodes and connections |
 | `bp_compile_code` | Compile Blueprint DSL |
 | `bp_batch_op` | Execute multiple atomic operations |
@@ -289,9 +292,32 @@
 | `input_edit_mapping_context` | Add/remove key mappings in IMC |
 | `input_delete_asset` | Delete InputAction or IMC asset |
 
+## UMG (4 tools)
+
+| Tool | Description |
+|------|-------------|
+| `create_widget_blueprint` | Create a new Widget Blueprint asset (supports custom root widget class) |
+| `read_widget_blueprint` | Read the widget tree of an existing Widget Blueprint |
+| `add_widget` | Add a widget to a Widget Blueprint's widget tree (supports parent hierarchy) |
+| `set_widget_property` | Set a property on a widget inside a Widget Blueprint via reflection |
+
 ---
 
 ## Changelog
+
+### v0.3.0 — UMG, MCP 增强, Schema 修正
+
+**新增域 / New domains:**
+- UMG (4 tools) — Widget Blueprint 创建、控件树读取、添加控件、设置属性
+
+**MCP 增强 / MCP enhancements:**
+- 异步失败回退与透明轮询 (async failover with transparent polling)
+- 每任务超时 + 异步任务 GC (per-task timeout + async task GC)
+- 转发 default/itemsType + 搜索限制 (forward default/itemsType + search limit)
+
+**Schema 修正 / Schema fixes:**
+- `enum` JSON key 重命名为 `allowedValues` (与 MCP 协议对齐)
+- 空 `default` 和 `itemsType` 字段不再序列化 (guard empty values)
 
 ### v0.2.0 — Domain Expansion
 

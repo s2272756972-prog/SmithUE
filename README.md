@@ -17,9 +17,10 @@ SmithUE 是一款高性能虚幻引擎编辑器插件, 旨在搭建创意意图�
 5. [Command Reference / 命令参考](#command-reference--命令参考)
 6. [AI Texture Generation / AI 纹理生成](#ai-texture-generation--ai-纹理生成)
 7. [Roadmap / 路线图](#roadmap--路线图)
-8. [Known Limitations / 已知限制](#known-limitations--已知限制)
-9. [Contributing / 贡献](#contributing--贡献)
-10. [License / 许可证](#license--许可证)
+8. [Changelog / 更新日志](#changelog--更新日志)
+9. [Known Limitations / 已知限制](#known-limitations--已知限制)
+10. [Contributing / 贡献](#contributing--贡献)
+11. [License / 许可证](#license--许可证)
 
 ---
 
@@ -309,6 +310,36 @@ We are committed to expanding SmithUE into a comprehensive AI-first development 
         全 AI 辅助驾驶模式 - 自然语言 → 蓝图编译流水线.
     *   Scenario orchestration - programmatic traffic / pedestrian / weather control for simulation.
         场景编排 - 程序化交通 / 行人 / 天气控制用于仿真.
+
+---
+
+## Changelog / 更新日志
+
+### v1.3.0 — Blueprint 组件系统增强
+
+**新增功能 / New Features:**
+- `bp_add_component` 支持 `parent` 参数，可指定父组件实现层级挂载
+  `bp_add_component` supports `parent` param for hierarchical component attachment
+- `bp_remove_component` 新命令，从蓝图 SCS 中移除组件（子组件自动上移到父节点）
+  New `bp_remove_component` command to remove components from SCS (children reparented automatically)
+- `bp_get_summary` 返回组件的 `parent`/`children` 嵌套关系
+  `bp_get_summary` now returns component hierarchy with `parent`/`children` fields
+- `bp_create` 支持三种父类格式：C++ 类名、蓝图类名（`_C` 后缀）、蓝图资产路径（`/Game/...`）
+  `bp_create` supports three parent class formats: C++ class name, BP class name (`_C` suffix), BP asset path (`/Game/...`)
+- `bp_create_node` 支持 `Class::Function` 简写自动创建 `K2Node_CallFunction` 节点
+  `bp_create_node` supports `Class::Function` shorthand to auto-create CallFunction nodes
+- `bp_create_node` 支持 `K2Node_EnhancedInputAction`（通过 `input_action` 参数指定 InputAction 资产）
+  `bp_create_node` supports `K2Node_EnhancedInputAction` (via `input_action` extra param)
+- `bp_create_node` 支持 `K2Node_DynamicCast`（通过 `target_class` 参数指定目标类）
+  `bp_create_node` supports `K2Node_DynamicCast` (via `target_class` extra param)
+- 新增 `InputBlueprintNodes` 模块依赖，支持增强输入蓝图节点
+  Added `InputBlueprintNodes` module dependency for Enhanced Input Blueprint nodes
+
+**Bug 修复 / Bug Fixes:**
+- 修复蓝图组件重编译崩溃：编译时始终使用 `SkipGarbageCollection` 防止 GC 过早销毁被引用的模板对象
+  Fixed Blueprint component recompilation crash: always use `SkipGarbageCollection` to prevent GC from prematurely destroying referenced templates
+- 修复蓝图派生组件添加到 SCS 时的纯虚函数崩溃：创建模板后禁用 Tick，添加前自动编译未编译的组件蓝图
+  Fixed pure virtual crash when adding BP-derived components to SCS: disable tick on template, auto-compile uncompiled component BPs before adding
 
 ---
 

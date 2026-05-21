@@ -8,6 +8,7 @@ export interface SmithUEToolParam {
   required: boolean;
   default?: string;
   itemsType?: string;
+  allowedValues?: string[];
 }
 
 export interface SmithUEToolSchema {

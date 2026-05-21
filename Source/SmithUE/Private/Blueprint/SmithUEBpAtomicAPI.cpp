@@ -20,6 +20,8 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_DynamicCast.h"
+#include "K2Node_EnhancedInputAction.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
 #include "K2Node_IfThenElse.h"
@@ -27,6 +29,7 @@
 #include "K2Node_MacroInstance.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "InputAction.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
@@ -47,7 +50,8 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_pin_default"), TEXT("Blueprint"), TEXT("Set a Blueprint node pin default value"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true), FSmithUEToolParam(TEXT("pin_name"), TEXT("string"), TEXT("Pin name"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Default value string"), true) }), &HandleBpSetPinDefault);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false) }), &HandleBpAddComponent);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_override_function"), TEXT("Blueprint"), TEXT("Override a parent class function in a Blueprint (creates proper override graph with correct signature)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Parent function name to override"), true) }), &HandleBpOverrideFunction);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true) }), &HandleBpCompile);
@@ -83,6 +87,20 @@ FString FSmithUEBpAtomicAPI::CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, 
 		return FString();
 	}
 	UClass* NodeType = ResolveClassByName(NodeClass, UEdGraphNode::StaticClass(), TEXT('U'));
+	// Fallback: if NodeClass contains "::" and resolution failed, treat as K2Node_CallFunction shorthand
+	if (!NodeType && NodeClass.Contains(TEXT("::")))
+	{
+		NodeType = UK2Node_CallFunction::StaticClass();
+		if (ExtraParams.IsValid() && !ExtraParams->HasField(TEXT("function_name")))
+		{
+			const_cast<FJsonObject&>(*ExtraParams).SetStringField(TEXT("function_name"), NodeClass);
+		}
+		else if (!ExtraParams.IsValid())
+		{
+			// Can't set function_name without ExtraParams - fail
+			return FString();
+		}
+	}
 	if (!NodeType)
 	{
 		return FString();
@@ -132,6 +150,24 @@ FString FSmithUEBpAtomicAPI::CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, 
 			InputKeyNode->InputKey = FKey(*KeyName);
 		}
 	}
+	else if (UK2Node_EnhancedInputAction* EIANode = Cast<UK2Node_EnhancedInputAction>(NewNode))
+	{
+		FString InputActionPath;
+		if (ExtraParams.IsValid() && ExtraParams->TryGetStringField(TEXT("input_action"), InputActionPath))
+		{
+			UInputAction* Action = LoadObject<UInputAction>(nullptr, *NormalizeObjectPath(InputActionPath));
+			if (Action) { EIANode->InputAction = Action; }
+		}
+	}
+	else if (UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(NewNode))
+	{
+		FString TargetClassName;
+		if (ExtraParams.IsValid() && ExtraParams->TryGetStringField(TEXT("target_class"), TargetClassName))
+		{
+			UClass* TargetClass = ResolveClassByName(TargetClassName, UObject::StaticClass(), TEXT('U'));
+			if (TargetClass) { CastNode->TargetType = TargetClass; }
+		}
+	}
 	Graph->Modify();
 	NewNode->SetFlags(RF_Transactional);
 	NewNode->CreateNewGuid();
@@ -169,11 +205,11 @@ bool FSmithUEBpAtomicAPI::CompileBlueprint(UBlueprint* Blueprint, TArray<FString
 		OutErrors.Add(TEXT("Blueprint is null"));
 		return false;
 	}
-	EBlueprintCompileOptions CompileFlags = EBlueprintCompileOptions::None;
-	if (bSkipGarbageCollection)
-	{
-		CompileFlags |= EBlueprintCompileOptions::SkipGarbageCollection;
-	}
+	// 编译时始终跳过 GC, 防止其他蓝图 SCS 引用的组件模板被提前销毁
+	// (例如蓝图组件类在重编译时会触发 FTickFunction 纯虚函数崩溃)
+	// Always skip GC during compile to prevent premature destruction of templates
+	// referenced by other Blueprints' SCS (e.g., Blueprint component classes).
+	EBlueprintCompileOptions CompileFlags = EBlueprintCompileOptions::SkipGarbageCollection;
 	FKismetEditorUtilities::CompileBlueprint(Blueprint, CompileFlags);
 	if (Blueprint->Status == BS_Error)
 	{
@@ -213,6 +249,26 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCreate(const TSharedPtr<FJs
 	Params->TryGetStringField(TEXT("name"), Name); Params->TryGetStringField(TEXT("parent_class"), ParentClassName); Params->TryGetStringField(TEXT("save_path"), SavePath);
 	UClass* ParentClass = ResolveClassByName(ParentClassName, UObject::StaticClass(), TEXT('A'));
 	if (!ParentClass) { ParentClass = ResolveClassByName(ParentClassName, UObject::StaticClass(), TEXT('U')); }
+	// 回退: 如果 parent_class 看起来像蓝图路径 (含 "/"), 加载蓝图并使用其 GeneratedClass
+	// Fallback: if parent_class looks like a Blueprint path, load the Blueprint and use its GeneratedClass
+	if (!ParentClass && ParentClassName.Contains(TEXT("/")))
+	{
+		FString BpPathToLoad = ParentClassName;
+		// Strip _C suffix if user passed the generated class path (e.g. /Game/BP_BoxPawn.BP_BoxPawn_C)
+		if (BpPathToLoad.EndsWith(TEXT("_C")))
+		{
+			// Convert "/Game/BP_BoxPawn.BP_BoxPawn_C" to "/Game/BP_BoxPawn"
+			int32 DotIdx;
+			if (BpPathToLoad.FindLastChar(TEXT('.'), DotIdx))
+			{
+				BpPathToLoad = BpPathToLoad.Left(DotIdx);
+			}
+		}
+		if (UBlueprint* ParentBP = LoadBlueprint(BpPathToLoad))
+		{
+			ParentClass = ParentBP->GeneratedClass;
+		}
+	}
 	if (!ParentClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parent class not found: %s"), *ParentClassName)); }
 	const FString CleanSavePath = SavePath.EndsWith(TEXT("/")) ? SavePath.LeftChop(1) : SavePath;
 	const FString PackagePath = FString::Printf(TEXT("%s/%s"), *CleanSavePath, *Name);
@@ -372,10 +428,54 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddComponent(const TSharedP
 	if (!Blueprint->SimpleConstructionScript) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Blueprint has no SimpleConstructionScript")); }
 	UClass* ComponentClass = ResolveClassByName(ComponentClassName, UActorComponent::StaticClass(), TEXT('U'));
 	if (!ComponentClass) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Component class not found")); }
+
+	// 如果组件类来自蓝图, 确保添加前先编译该蓝图 (防止未编译导致崩溃)
+	// If this is a Blueprint-generated class, ensure its Blueprint is compiled first
+	if (UBlueprint* ComponentBP = Cast<UBlueprint>(ComponentClass->ClassGeneratedBy))
+	{
+		if (ComponentBP->Status == BS_Dirty || ComponentBP->Status == BS_Unknown)
+		{
+			FKismetEditorUtilities::CompileBlueprint(ComponentBP, EBlueprintCompileOptions::SkipGarbageCollection);
+			// 编译后重新获取生成类
+			// Re-resolve the class after compilation
+			ComponentClass = ComponentBP->GeneratedClass;
+			if (!ComponentClass) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Component Blueprint failed to compile")); }
+		}
+	}
+
 	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddComponent", "SmithUE: Add Blueprint Component"));
 	USCS_Node* SCSNode = Blueprint->SimpleConstructionScript->CreateNode(ComponentClass, FName(*ComponentName));
 	if (!SCSNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create component node")); }
-	Blueprint->SimpleConstructionScript->AddNode(SCSNode);
+
+	// 安全措施: 禁用组件模板的 Tick, 防止重编译时触发纯虚函数崩溃
+	// Safety: disable tick on the component template to prevent pure virtual crashes
+	if (UActorComponent* Template = SCSNode->ComponentTemplate)
+	{
+		Template->PrimaryComponentTick.bCanEverTick = false;
+		Template->PrimaryComponentTick.bStartWithTickEnabled = false;
+	}
+
+	// 可选: 挂载到父组件实现层级结构
+	// Optional: attach to parent component
+	FString ParentName;
+	if (Params->TryGetStringField(TEXT("parent"), ParentName) && !ParentName.IsEmpty())
+	{
+		USCS_Node* ParentNode = nullptr;
+		for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (Node && Node->GetVariableName().ToString().Equals(ParentName, ESearchCase::IgnoreCase))
+			{
+				ParentNode = Node;
+				break;
+			}
+		}
+		if (ParentNode) { ParentNode->AddChildNode(SCSNode); }
+		else { Blueprint->SimpleConstructionScript->AddNode(SCSNode); }
+	}
+	else
+	{
+		Blueprint->SimpleConstructionScript->AddNode(SCSNode);
+	}
 
 	// Optional: set static mesh on StaticMeshComponent template
 	FString StaticMeshPath;
@@ -390,6 +490,62 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddComponent(const TSharedP
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("component_name"), ComponentName);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// bp_remove_component
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveComponent(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BpPath; FString ComponentName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath); Params->TryGetStringField(TEXT("component_name"), ComponentName);
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	if (!Blueprint->SimpleConstructionScript) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Blueprint has no SimpleConstructionScript")); }
+
+	USCS_Node* TargetNode = nullptr;
+	for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+	{
+		if (Node && Node->GetVariableName().ToString().Equals(ComponentName, ESearchCase::IgnoreCase))
+		{
+			TargetNode = Node;
+			break;
+		}
+	}
+	if (!TargetNode) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: '%s'"), *ComponentName)); }
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpRemoveComponent", "SmithUE: Remove Blueprint Component"));
+
+	// 移除前将子节点重新挂载到目标的父节点 (防止子组件成为孤儿)
+	// Reparent children to the target's parent before removing
+	for (USCS_Node* Child : TargetNode->ChildNodes)
+	{
+		if (!Child) { continue; }
+		// Find parent of target node
+		USCS_Node* ParentOfTarget = nullptr;
+		for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (Node && Node->ChildNodes.Contains(TargetNode))
+			{
+				ParentOfTarget = Node;
+				break;
+			}
+		}
+		if (ParentOfTarget) { ParentOfTarget->AddChildNode(Child); }
+		else { Blueprint->SimpleConstructionScript->AddNode(Child); }
+	}
+	TargetNode->ChildNodes.Empty();
+
+	Blueprint->SimpleConstructionScript->RemoveNode(TargetNode);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetStringField(TEXT("component_name"), ComponentName);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

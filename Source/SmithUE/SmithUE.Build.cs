@@ -63,6 +63,7 @@ public class SmithUE : ModuleRules
 					"LevelSequence",
 					"EnhancedInput",
 					"PCG",
+					"InputBlueprintNodes",
 					"UMG",
 					"UMGEditor",
 					"ContentBrowser"

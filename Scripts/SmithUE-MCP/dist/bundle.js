@@ -21158,6 +21158,117 @@ var SmithUEClient = class {
   async execute(command, params = {}) {
     return this.request(command, params);
   }
+  async executeWithFailover(command, params = {}) {
+    const syncTimeout = parseInt(process.env.SMITHUE_SYNC_TIMEOUT || "10000", 10);
+    const asyncTimeout = parseInt(process.env.SMITHUE_ASYNC_TIMEOUT || "120000", 10);
+    try {
+      return await this.postExecute(command, params, syncTimeout);
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        throw this.normalizeRequestError(err, command);
+      }
+    }
+    const taskId = await this.startAsyncTask(command, params);
+    const startedAt = Date.now();
+    let delayMs = 500;
+    while (Date.now() - startedAt <= asyncTimeout) {
+      const remainingMs = asyncTimeout - (Date.now() - startedAt);
+      if (remainingMs <= 0)
+        break;
+      const poll = await this.getAsyncTask(taskId, remainingMs);
+      if (poll.status === "error") {
+        if (poll.error?.startsWith("Unknown task_id:")) {
+          throw new Error("Task lost \u2014 server may have restarted");
+        }
+        throw new Error(poll.error ?? `SmithUE async task failed: ${command}`);
+      }
+      const data = poll.data;
+      if (this.isAsyncTaskComplete(data)) {
+        return { status: "success", data: data.result };
+      }
+      await this.sleep(Math.min(delayMs, Math.max(asyncTimeout - (Date.now() - startedAt), 0)));
+      delayMs = Math.min(delayMs * 2, 4e3);
+    }
+    throw new Error(`Async task timed out after ${Math.ceil(asyncTimeout / 1e3)}s`);
+  }
+  async postExecute(command, params, timeoutMs) {
+    const data = await this.postJson("/api/v1/execute", { command, params }, timeoutMs);
+    if (data.status === "error") {
+      throw new Error(data.error ?? `SmithUE command failed: ${command}`);
+    }
+    return data;
+  }
+  async startAsyncTask(command, params) {
+    const data = await this.postJson("/api/v1/async", { command, params });
+    if (data.status === "error") {
+      throw new Error(data.error ?? `SmithUE async task failed: ${command}`);
+    }
+    const taskId = data.data?.task_id;
+    if (typeof taskId !== "string" || taskId.length === 0) {
+      throw new Error("SmithUE async task did not return a task_id");
+    }
+    return taskId;
+  }
+  async getAsyncTask(taskId, timeoutMs) {
+    return this.getJson(`/api/v1/async/${encodeURIComponent(taskId)}`, timeoutMs);
+  }
+  async postJson(path, body, timeoutMs) {
+    return this.fetchJson(path, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(body)
+    }, timeoutMs);
+  }
+  async getJson(path, timeoutMs) {
+    return this.fetchJson(path, {
+      method: "GET",
+      headers: this.headers()
+    }, timeoutMs);
+  }
+  async fetchJson(path, init, timeoutMs) {
+    const controller = timeoutMs !== void 0 ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        signal: controller?.signal
+      });
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`SmithUE plugin returned HTTP ${response.status}. Body: ${body.slice(0, 200)}`);
+      }
+      return await response.json();
+    } finally {
+      if (timer)
+        clearTimeout(timer);
+    }
+  }
+  headers() {
+    const headers = { "Content-Type": "application/json" };
+    if (this.sessionId) {
+      headers["X-SmithUE-Session"] = this.sessionId;
+    }
+    return headers;
+  }
+  normalizeRequestError(err, command) {
+    const msg = err.message ?? "";
+    if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed") || msg.includes("Failed to fetch") || msg.includes("ENOTFOUND") || msg.includes("connect ECONNREFUSED")) {
+      return new Error(`SmithUE plugin unreachable at ${this.host}:${this.port}. Start UE Editor with SmithUE plugin enabled.`);
+    }
+    if (err.name === "AbortError") {
+      return new Error(`SmithUE plugin timed out. Command: ${command} (port: ${this.port})`);
+    }
+    return err instanceof Error ? err : new Error(String(err));
+  }
+  isAsyncTaskComplete(data) {
+    return data?.completed === true && this.isRecord(data.result);
+  }
+  isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+  async sleep(ms) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
   async listTools(category) {
     const res = await this.execute("list_tools", category ? { category } : {});
     const data = res.data;
@@ -21251,23 +21362,65 @@ function registerTools(server, client) {
     params: external_exports.record(external_exports.unknown()).optional()
   }, { destructiveHint: true, idempotentHint: false }, async ({ command, params }) => {
     try {
-      const result = await client.execute(command, params);
+      const allTools = await client.listTools();
+      const toolSchema = allTools.find((t) => t.name === command);
+      if (toolSchema) {
+        const args = params ?? {};
+        const filled = { ...args };
+        for (const p of toolSchema.params) {
+          const provided = filled[p.name];
+          if (provided === void 0) {
+            if (p.required) {
+              if (p.default) {
+                filled[p.name] = p.default;
+              } else {
+                return errorResult(new Error(`Validation failed: param '${p.name}' is required but missing`));
+              }
+            }
+          } else if (p.allowedValues && p.allowedValues.length > 0) {
+            if (!p.allowedValues.includes(String(provided))) {
+              return errorResult(new Error(`Validation failed: param '${p.name}' value '${String(provided)}' not in allowed values [${p.allowedValues.join(", ")}]`));
+            }
+          }
+        }
+        const result2 = await client.executeWithFailover(command, filled);
+        return textResult(result2);
+      }
+      const result = await client.executeWithFailover(command, params);
       return textResult(result);
     } catch (err) {
       return errorResult(err);
     }
   });
   server.tool("smithue_search", "Search available SmithUE commands by keyword. Returns command names, categories, and descriptions. Use smithue_list_domain with a domain name to get full parameter schemas.", {
-    query: external_exports.string()
-  }, { readOnlyHint: true }, async ({ query }) => {
+    query: external_exports.string(),
+    limit: external_exports.number().int().min(1).max(50).optional()
+  }, { readOnlyHint: true }, async ({ query, limit = 10 }) => {
     try {
+      if (!query) {
+        return textResult(`No commands found matching ''. Use smithue_list_domain() to see all available domains.`);
+      }
       const tools = await client.listTools();
-      const normalizedQuery = query.toLowerCase();
-      const matches = tools.filter((tool) => tool.name.includes(query) || tool.description.toLowerCase().includes(normalizedQuery) || tool.category.toLowerCase().includes(normalizedQuery)).map(({ name, category, description }) => ({ name, category, description }));
-      if (matches.length === 0) {
+      const q = query.toLowerCase();
+      const scored = tools.map((tool) => {
+        const nameLower = tool.name.toLowerCase();
+        const catLower = tool.category.toLowerCase();
+        const descLower = tool.description.toLowerCase();
+        let score = 0;
+        if (nameLower === q)
+          score += 3;
+        else if (nameLower.includes(q))
+          score += 2;
+        if (catLower.includes(q))
+          score += 1.5;
+        if (descLower.includes(q))
+          score += 1;
+        return { tool, score };
+      }).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score).slice(0, Math.min(limit, 50)).map(({ tool: { name, category, description } }) => ({ name, category, description }));
+      if (scored.length === 0) {
         return textResult(`No commands found matching '${query}'. Use smithue_list_domain() to see all available domains.`);
       }
-      return textResult(matches);
+      return textResult(scored);
     } catch (err) {
       return errorResult(err);
     }
@@ -21285,11 +21438,14 @@ function registerTools(server, client) {
           name,
           category,
           description,
-          params: params.map(({ name: paramName, type, description: paramDescription, required: required2 }) => ({
-            name: paramName,
-            type,
-            description: paramDescription,
-            required: required2
+          params: params.map((p) => ({
+            name: p.name,
+            type: p.type,
+            description: p.description,
+            required: p.required,
+            ...p.default ? { default: p.default } : {},
+            ...p.itemsType ? { itemsType: p.itemsType } : {},
+            ...p.allowedValues && p.allowedValues.length > 0 ? { allowedValues: p.allowedValues } : {}
           }))
         })));
       }

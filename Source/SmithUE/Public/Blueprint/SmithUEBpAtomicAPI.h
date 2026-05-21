@@ -28,6 +28,7 @@ private:
 	static TSharedPtr<FJsonObject> HandleBpDeleteNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpAddVariable(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpAddComponent(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpRemoveComponent(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpSetComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpCompile(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpOverrideFunction(const TSharedPtr<FJsonObject>& Params);
