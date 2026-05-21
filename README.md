@@ -221,9 +221,9 @@ SmithUE 在所有请求和响应中使用标准 JSON 格式, 同时支持高性�
 
 ## Command Reference / 命令参考
 
-SmithUE provides **172 tools** organized across **18 functional domains**. The command set is continuously growing — see `smithue_list_domain()` for the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **178 tools** organized across **19 functional domains**. The command set is continuously growing — see `smithue_list_domain()` for the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
-SmithUE 提供了分布在 **18 个功能领域** 的 **172 个专业工具**. 命令集持续增长中——使用 `smithue_list_domain()` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考.
+SmithUE 提供了分布在 **19 个功能领域** 的 **178 个专业工具**. 命令集持续增长中——使用 `smithue_list_domain()` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考.
 
 ### Domain Overview / 领域概览
 
@@ -235,7 +235,7 @@ SmithUE 提供了分布在 **18 个功能领域** 的 **172 个专业工具**. �
 | Asset / 资产 | 12 | Asset CRUD, browser operations, AI texture generation / 资产增删改查、浏览器操作、AI 纹理生成 |
 | Editor / 编辑器 | 8 | Actor spawning, properties, post-process, project settings / Actor 生成、属性、后处理、项目设置 |
 | Interaction / 交互 | 7 | Console/editor commands, undo/redo, key simulation / 控制台/编辑器命令、撤销/重做、按键模拟 |
-| Blueprint / 蓝图 | 15 | BP creation, nodes, functions, variables, components, DSL compiler / 蓝图创建、节点、函数、变量、组件、DSL 编译器 |
+| Blueprint / 蓝图 | 17 | BP creation, nodes, functions, variables, components, DSL compiler / 蓝图创建、节点、函数、变量、组件、DSL 编译器 |
 | Viewport / 视口 | 6 | Camera control, screenshots, actor selection / 摄像机控制、截图、Actor 选择 |
 | Observation / 观测 | 7 | Panels, editor state, actor properties, world outline / 面板、编辑器状态、Actor 属性、世界大纲 |
 | Analysis / 分析 | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation / 源码分析、依赖图、蓝图诊断、资产校验 |
@@ -247,6 +247,7 @@ SmithUE 提供了分布在 **18 个功能领域** 的 **172 个专业工具**. �
 | PIE / 运行 | 11 | Play-In-Editor: start/stop, actors, properties, console / 运行模式：启动/停止、Actor、属性、控制台 |
 | Animation / 动画 | 7 | AnimMontage, AnimBlueprint, sections, notifies / 动画蒙太奇、动画蓝图、段落、通知 |
 | Input / 输入 | 6 | Enhanced Input: InputAction, InputMappingContext / 增强输入：输入动作、输入映射上下文 |
+| UMG / 控件 | 4 | Widget Blueprint creation, widget tree, properties / 控件蓝图创建、控件树、属性 |
 
 > 📖 For detailed parameter schemas and usage of each tool, see **[TOOLS.md](TOOLS.md)**.
 > 📖 每个工具的详细参数模式和用法，请参阅 **[TOOLS.md](TOOLS.md)**.

@@ -1,6 +1,6 @@
 # SmithUE Tool Reference
 
-> **174 tools across 18 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **178 tools across 19 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
@@ -24,6 +24,7 @@
 | PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
 | Animation | 7 | AnimMontage, AnimBlueprint, sections, notifies |
 | Input | 6 | Enhanced Input: InputAction, InputMappingContext |
+| UMG | 4 | Widget Blueprint creation, widget tree, properties |
 
 ---
 
@@ -291,9 +292,32 @@
 | `input_edit_mapping_context` | Add/remove key mappings in IMC |
 | `input_delete_asset` | Delete InputAction or IMC asset |
 
+## UMG (4 tools)
+
+| Tool | Description |
+|------|-------------|
+| `create_widget_blueprint` | Create a new Widget Blueprint asset (supports custom root widget class) |
+| `read_widget_blueprint` | Read the widget tree of an existing Widget Blueprint |
+| `add_widget` | Add a widget to a Widget Blueprint's widget tree (supports parent hierarchy) |
+| `set_widget_property` | Set a property on a widget inside a Widget Blueprint via reflection |
+
 ---
 
 ## Changelog
+
+### v0.3.0 — UMG, MCP 增强, Schema 修正
+
+**新增域 / New domains:**
+- UMG (4 tools) — Widget Blueprint 创建、控件树读取、添加控件、设置属性
+
+**MCP 增强 / MCP enhancements:**
+- 异步失败回退与透明轮询 (async failover with transparent polling)
+- 每任务超时 + 异步任务 GC (per-task timeout + async task GC)
+- 转发 default/itemsType + 搜索限制 (forward default/itemsType + search limit)
+
+**Schema 修正 / Schema fixes:**
+- `enum` JSON key 重命名为 `allowedValues` (与 MCP 协议对齐)
+- 空 `default` 和 `itemsType` 字段不再序列化 (guard empty values)
 
 ### v0.2.0 — Domain Expansion
 
