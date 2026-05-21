@@ -216,8 +216,30 @@ void FSmithUEUpdateChecker::ExecuteUpdate()
 
 	if (PullCode == 0)
 	{
-		// 7. Success — restart editor
-		FUnrealEdMisc::Get().RestartEditor(false);
+		// 7. Build plugin after pull (source code may have changed)
+		const FString EngineDir = FPaths::ConvertRelativePathToFull(FPaths::EngineDir());
+		const FString BuildBat = EngineDir / TEXT("Build/BatchFiles/Build.bat");
+		const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath());
+		const FString ProjectName = FPaths::GetBaseFilename(ProjectPath);
+
+		const FString BuildArgs = FString::Printf(
+			TEXT("%sEditor Win64 Development -Project=\"%s\""),
+			*ProjectName, *ProjectPath
+		);
+
+		FString BuildOut, BuildErr;
+		int32 BuildCode = -1;
+		FPlatformProcess::ExecProcess(*BuildBat, *BuildArgs, &BuildCode, &BuildOut, &BuildErr, nullptr);
+
+		if (BuildCode == 0)
+		{
+			// 8. Build succeeded — restart editor
+			FUnrealEdMisc::Get().RestartEditor(false);
+		}
+		else
+		{
+			ShowErrorToast(TEXT("Update pulled but build failed. Please rebuild manually."));
+		}
 	}
 	else
 	{
