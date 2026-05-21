@@ -3,6 +3,7 @@
 #include "SmithUEModule.h"
 #include "Transport/SmithUETcpServer.h"
 #include "Transport/SmithUEHttpServer.h"
+#include "Utils/SmithUEUpdateChecker.h"
 
 #include "Commands/SmithUEAssetCommands.h"
 #include "Commands/SmithUEBlueprintCommands.h"
@@ -31,6 +32,7 @@
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
 #include "ToolMenus.h"
+#include "Containers/Ticker.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 
 DEFINE_LOG_CATEGORY(LogSmithUE);
@@ -83,7 +85,7 @@ void FSmithUEModule::StartupModule()
 	}
 
 	// Register status bar indicator
-	UToolMenus::RegisterStartupCallback(
+ 	UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateLambda([]()
 		{
 			UToolMenu* StatusBarMenu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.StatusBar.ToolBar"));
@@ -99,6 +101,23 @@ void FSmithUEModule::StartupModule()
 				);
 			}
 		})
+	);
+
+	// Schedule update check 7 seconds after startup (non-blocking)
+	FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([](float DeltaTime) -> bool
+		{
+			FSmithUEUpdateChecker::OnUpdateCheckComplete.AddLambda([]()
+			{
+				if (FSmithUEUpdateChecker::IsUpdateAvailable())
+				{
+					FSmithUEUpdateChecker::ShowUpdateNotification();
+				}
+			});
+			FSmithUEUpdateChecker::CheckForUpdate();
+			return false; // one-shot
+		}),
+		7.0f
 	);
 
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module started successfully."));

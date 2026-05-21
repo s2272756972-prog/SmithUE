@@ -20,6 +20,7 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	void SetUpdateAvailable(bool bAvailable);
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 private:
@@ -28,6 +29,8 @@ private:
 
 	/** Seconds since last session-count change (drives blink). */
 	float BlinkTimer = 0.f;
+	bool bUpdateAvailable = false;
+	float UpdateBlinkTimer = 0.f;
 	int32 LastSessionCount = 0;
 
 	/** Purge stale sessions every N seconds. */

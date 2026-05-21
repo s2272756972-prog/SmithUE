@@ -4,6 +4,7 @@
 
 #include "Transport/SmithUEConnectionManager.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
+#include "Utils/SmithUEUpdateChecker.h"
 #include "Interfaces/IPluginManager.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
@@ -80,6 +81,12 @@ void SSmithUEStatusIndicator::Construct(const FArguments& InArgs)
 	];
 }
 
+void SSmithUEStatusIndicator::SetUpdateAvailable(bool bAvailable)
+{
+	bUpdateAvailable = bAvailable;
+	UpdateBlinkTimer = 0.f;
+}
+
 void SSmithUEStatusIndicator::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
@@ -104,10 +111,23 @@ void SSmithUEStatusIndicator::Tick(const FGeometry& AllottedGeometry, const doub
 	{
 		BlinkTimer -= InDeltaTime;
 	}
+
+	if (bUpdateAvailable)
+	{
+		UpdateBlinkTimer += InDeltaTime;
+	}
 }
 
 FSlateColor SSmithUEStatusIndicator::GetIndicatorColor() const
 {
+	if (bUpdateAvailable)
+	{
+		const float T = (FMath::Sin(UpdateBlinkTimer * 4.f) + 1.f) * 0.5f;
+		const FLinearColor Cyan(0.0f, 0.8f, 1.0f, 1.f);
+		const FLinearColor Green(0.1f, 0.9f, 0.3f, 1.f);
+		return FSlateColor(FMath::Lerp(Cyan, Green, T));
+	}
+
 	const bool bHasSession = FSmithUEConnectionManager::Get().HasActiveSession();
 
 	if (!bHasSession)
@@ -135,6 +155,11 @@ FText SSmithUEStatusIndicator::GetTooltipText() const
 	const int32 ToolCount = FSmithUEToolRegistry::Get().GetAll().Num();
 
 	FString Tip;
+	if (bUpdateAvailable)
+	{
+		Tip += FString::Printf(TEXT("⬆ Update available: v%s → v%s\n"), *FSmithUEUpdateChecker::GetCurrentVersion(), *FSmithUEUpdateChecker::GetLatestVersion());
+		Tip += TEXT("─────────────────\n");
+	}
 	Tip += FString::Printf(TEXT("SmithUE v%s\n"), *GetPluginVersion());
 	Tip += FString::Printf(TEXT("─────────────────\n"));
 	Tip += FString::Printf(TEXT("Connections: %d\n"), Sessions.Num());
