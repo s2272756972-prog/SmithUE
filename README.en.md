@@ -188,13 +188,31 @@ SmithUE provides **178 tools** organized across **19 functional domains**. The c
 
 ## Connection Status Indicator
 
-SmithUE displays a status indicator in the editor status bar:
+SmithUE displays a circular status indicator in the editor status bar showing real-time connection health.
+
+### Indicator Colors
 
 | Color | State |
 |---|---|
-| 🟢 Green | Connected, MCP client session active |
-| 🔴 Red | Disconnected, no active sessions |
-| 🟡 Red/Yellow blink | State change, session connecting or disconnecting |
+| 🟢 Green | Connected — at least one MCP client session active |
+| 🔴 Red | Disconnected — no active sessions |
+| 🟡 Red/Yellow blink | Transitioning — session connecting or disconnecting (3 s) |
+| 🔵 Cyan/Green pulse | Update available — a newer SmithUE version was detected |
+
+### Tooltip Details
+
+Hover over the indicator to see:
+
+- **SmithUE version** (read from `.uplugin`)
+- **Connection count** — number of active MCP sessions
+- **Tool count** — total registered commands
+- **Client list** — each connected AI tool name and session duration in minutes
+- **Update notice** — current vs. latest version when an update is available
+
+### Session Management
+
+- Stale sessions (no heartbeat for 20 seconds) are automatically purged every 5 seconds.
+- The indicator blinks for 3 seconds whenever the session count changes (connect or disconnect).
 
 ---
 
