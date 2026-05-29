@@ -13,6 +13,7 @@
 #include "ObjectTools.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "FileHelpers.h"
+#include "UObject/UObjectIterator.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -228,8 +229,15 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleListAssets(const TSharedPtr
 
     if (!TypeFilter.IsEmpty())
     {
-        // UE 5.2: use ClassNames
-        Filter.ClassNames.Add(FName(*TypeFilter));
+        // UE 5.1+: ClassPaths replaces ClassNames
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            if (It->GetName() == TypeFilter)
+            {
+                Filter.ClassPaths.Add(It->GetClassPathName());
+                break;
+            }
+        }
         Filter.bRecursiveClasses = true;
     }
 
@@ -278,7 +286,14 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleFindAsset(const TSharedPtr<
 
     if (!AssetType.IsEmpty())
     {
-        Filter.ClassNames.Add(FName(*AssetType));
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            if (It->GetName() == AssetType)
+            {
+                Filter.ClassPaths.Add(It->GetClassPathName());
+                break;
+            }
+        }
         Filter.bRecursiveClasses = true;
     }
 

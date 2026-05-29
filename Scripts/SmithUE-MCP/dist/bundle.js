@@ -21344,6 +21344,14 @@ var SmithUEClient = class {
 
 // dist/tools.js
 var AVAILABLE_DOMAINS = "System, Asset, Material, Editor, Blueprint, Viewport, Observation, Analysis";
+var SEARCH_ALIASES = {
+  "input": ["key", "keyboard", "bind", "mapping", "action", "enhanced"],
+  "blueprint": ["bp", "graph", "node", "k2"],
+  "create": ["add", "new", "spawn", "make"],
+  "connect": ["wire", "link", "pin"],
+  "delete": ["remove", "destroy"],
+  "search": ["find", "query", "list"]
+};
 function textResult(result) {
   return {
     content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
@@ -21357,7 +21365,7 @@ function errorResult(err) {
   };
 }
 function registerTools(server, client) {
-  server.tool("smithue_execute", "Execute any SmithUE command in the UE5 editor. Use smithue_list_domain to discover available commands and their parameters first.", {
+  server.tool("execute", "Execute any SmithUE command in the UE5 editor. Use list_domain to discover available commands and their parameters first.", {
     command: external_exports.string(),
     params: external_exports.record(external_exports.unknown()).optional()
   }, { destructiveHint: true, idempotentHint: false }, async ({ command, params }) => {
@@ -21392,40 +21400,71 @@ function registerTools(server, client) {
       return errorResult(err);
     }
   });
-  server.tool("smithue_search", "Search available SmithUE commands by keyword. Returns command names, categories, and descriptions. Use smithue_list_domain with a domain name to get full parameter schemas.", {
+  server.tool("search", "Search available SmithUE commands by keyword. Returns command names, categories, and descriptions. Use list_domain with a domain name to get full parameter schemas.", {
     query: external_exports.string(),
     limit: external_exports.number().int().min(1).max(50).optional()
   }, { readOnlyHint: true }, async ({ query, limit = 10 }) => {
     try {
+      let expandWord2 = function(word) {
+        const terms = /* @__PURE__ */ new Set([word]);
+        if (SEARCH_ALIASES[word]) {
+          for (const alias of SEARCH_ALIASES[word])
+            terms.add(alias);
+        }
+        for (const [key, aliases] of Object.entries(SEARCH_ALIASES)) {
+          if (aliases.includes(word)) {
+            terms.add(key);
+            for (const alias of aliases)
+              terms.add(alias);
+          }
+        }
+        return Array.from(terms);
+      };
+      var expandWord = expandWord2;
       if (!query) {
-        return textResult(`No commands found matching ''. Use smithue_list_domain() to see all available domains.`);
+        return textResult(`No commands found matching ''. Use list_domain() to see all available domains.`);
       }
       const tools = await client.listTools();
-      const q = query.toLowerCase();
+      const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const expandedWords = words.map(expandWord2);
       const scored = tools.map((tool) => {
+        const paramText = tool.params.map((p) => `${p.name} ${p.description ?? ""}`).join(" ").toLowerCase();
+        const searchText = [
+          tool.name.toLowerCase(),
+          tool.category.toLowerCase(),
+          tool.description.toLowerCase(),
+          paramText
+        ].join(" ");
+        const allMatch = expandedWords.every((terms) => terms.some((term) => searchText.includes(term)));
+        if (!allMatch)
+          return { tool, score: 0 };
+        let score = 0;
         const nameLower = tool.name.toLowerCase();
         const catLower = tool.category.toLowerCase();
         const descLower = tool.description.toLowerCase();
-        let score = 0;
-        if (nameLower === q)
-          score += 3;
-        else if (nameLower.includes(q))
-          score += 2;
-        if (catLower.includes(q))
-          score += 1.5;
-        if (descLower.includes(q))
-          score += 1;
+        for (const terms of expandedWords) {
+          if (terms.some((t) => nameLower === t))
+            score += 3;
+          else if (terms.some((t) => nameLower.includes(t)))
+            score += 2;
+          if (terms.some((t) => catLower.includes(t)))
+            score += 1.5;
+          if (terms.some((t) => descLower.includes(t)))
+            score += 1;
+          if (terms.some((t) => paramText.includes(t)))
+            score += 0.5;
+        }
         return { tool, score };
       }).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score).slice(0, Math.min(limit, 50)).map(({ tool: { name, category, description } }) => ({ name, category, description }));
       if (scored.length === 0) {
-        return textResult(`No commands found matching '${query}'. Use smithue_list_domain() to see all available domains.`);
+        return textResult(`No commands found matching '${query}'. Use list_domain() to see all available domains.`);
       }
       return textResult(scored);
     } catch (err) {
       return errorResult(err);
     }
   });
-  server.tool("smithue_list_domain", `List SmithUE commands by domain. Without arguments: returns all domain names with command counts. With domain argument: returns full command list with parameter schemas for that domain. Available domains: ${AVAILABLE_DOMAINS}.`, {
+  server.tool("list_domain", `List SmithUE commands by domain. Without arguments: returns all domain names with command counts. With domain argument: returns full command list with parameter schemas for that domain. Available domains: ${AVAILABLE_DOMAINS}.`, {
     domain: external_exports.string().optional()
   }, { readOnlyHint: true }, async ({ domain }) => {
     try {
@@ -21457,7 +21496,7 @@ function registerTools(server, client) {
       return textResult(Array.from(counts.entries()).map(([domainName, count]) => ({
         domain: domainName,
         count,
-        hint: `Call smithue_list_domain('${domainName}') for full command list`
+        hint: `Call list_domain('${domainName}') for full command list`
       })));
     } catch (err) {
       return errorResult(err);

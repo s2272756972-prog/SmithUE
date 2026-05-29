@@ -9,4 +9,5 @@ struct FSmithUEScreenshotCommands
     static void RegisterTools(FSmithUEToolRegistry& Registry);
 private:
     static TSharedPtr<FJsonObject> HandleTakeViewportScreenshot(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleTakeBlueprintPreviewScreenshot(const TSharedPtr<FJsonObject>& Params);
 };

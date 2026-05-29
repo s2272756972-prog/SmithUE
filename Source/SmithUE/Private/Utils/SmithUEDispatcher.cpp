@@ -7,7 +7,14 @@
 #include "Misc/Guid.h"
 #include "Misc/ScopeLock.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
+#include "UObject/UObjectGlobals.h"
 #include "Utils/SmithUECommonUtils.h"
+
+/** Returns true if the engine is currently in a state where StaticLoadObject / StaticFindObject is illegal. */
+static bool IsInUnsafeObjectState()
+{
+	return GIsSavingPackage || IsGarbageCollecting();
+}
 
 FSmithUEDispatcher::FSmithUEDispatcher()
 {
@@ -29,17 +36,47 @@ FString FSmithUEDispatcher::DispatchSync(const FString& CommandName, const TShar
 {
 	if (IsInGameThread())
 	{
+		// If already on game thread but in an unsafe state (e.g. task drained during autosave
+		// progress tick), return a retriable error instead of crashing.
+		if (IsInUnsafeObjectState())
+		{
+			TSharedPtr<FJsonObject> ErrResult = FSmithUECommonUtils::CreateErrorResponse(
+				TEXT("Engine is currently saving or garbage-collecting. Command deferred — please retry."));
+			return FSmithUECommonUtils::SerializeJson(ErrResult);
+		}
 		TSharedPtr<FJsonObject> Result = FSmithUEToolRegistry::Get().DispatchCommand(CommandName, Params);
 		return FSmithUECommonUtils::SerializeJson(Result);
 	}
 
-	TPromise<FString> Promise;
-	TFuture<FString> Future = Promise.GetFuture();
-	AsyncTask(ENamedThreads::GameThread, [&Promise, CommandName, Params]()
+	// Off game thread: post to game thread, but guard against unsafe states.
+	// Use a shared promise so the deferred ticker can set it safely.
+	auto SharedPromise = MakeShared<TPromise<FString>>();
+	TFuture<FString> Future = SharedPromise->GetFuture();
+
+	AsyncTask(ENamedThreads::GameThread, [SharedPromise, CommandName, Params]()
 	{
+		if (IsInUnsafeObjectState())
+		{
+			// Defer execution to the next safe tick instead of executing now.
+			FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateLambda([SharedPromise, CommandName, Params](float) -> bool
+				{
+					if (IsInUnsafeObjectState())
+					{
+						return true; // keep retrying next tick
+					}
+					TSharedPtr<FJsonObject> Result = FSmithUEToolRegistry::Get().DispatchCommand(CommandName, Params);
+					SharedPromise->SetValue(FSmithUECommonUtils::SerializeJson(Result));
+					return false; // done
+				}),
+				0.0f
+			);
+			return;
+		}
 		TSharedPtr<FJsonObject> Result = FSmithUEToolRegistry::Get().DispatchCommand(CommandName, Params);
-		Promise.SetValue(FSmithUECommonUtils::SerializeJson(Result));
+		SharedPromise->SetValue(FSmithUECommonUtils::SerializeJson(Result));
 	});
+
 	return Future.Get();
 }
 
@@ -56,6 +93,32 @@ FString FSmithUEDispatcher::DispatchAsync(const FString& CommandName, const TSha
 
 	AsyncTask(ENamedThreads::GameThread, [this, TaskId, CommandName, Params]()
 	{
+		if (IsInUnsafeObjectState())
+		{
+			// Defer execution to the next safe tick.
+			FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateLambda([this, TaskId, CommandName, Params](float) -> bool
+				{
+					if (IsInUnsafeObjectState())
+					{
+						return true; // keep retrying next tick
+					}
+					TSharedPtr<FJsonObject> Result = FSmithUEToolRegistry::Get().DispatchCommand(CommandName, Params);
+					const FString ResultJson = FSmithUECommonUtils::SerializeJson(Result);
+
+					FScopeLock Lock(&AsyncTaskLock);
+					if (FAsyncTaskEntry* Entry = AsyncTaskEntries.Find(TaskId))
+					{
+						Entry->ResultJson = ResultJson;
+						Entry->CompletedTime = FPlatformTime::Seconds();
+					}
+					return false; // done
+				}),
+				0.0f
+			);
+			return;
+		}
+
 		TSharedPtr<FJsonObject> Result = FSmithUEToolRegistry::Get().DispatchCommand(CommandName, Params);
 		const FString ResultJson = FSmithUECommonUtils::SerializeJson(Result);
 
@@ -108,7 +171,7 @@ FString FSmithUEDispatcher::GetAsyncResult(const FString& TaskId)
 
 void FSmithUEDispatcher::StartGCTicker()
 {
-	GCTickerHandle = FTicker::GetCoreTicker().AddTicker(
+	GCTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateLambda([this](float DeltaTime) -> bool
 		{
 			const double Now = FPlatformTime::Seconds();
@@ -152,8 +215,8 @@ void FSmithUEDispatcher::StopGCTicker()
 {
 	if (GCTickerHandle.IsValid())
 	{
-		FTicker::GetCoreTicker().RemoveTicker(GCTickerHandle);
-		GCTickerHandle = FDelegateHandle();
+		FTSTicker::GetCoreTicker().RemoveTicker(GCTickerHandle);
+		GCTickerHandle = FTSTicker::FDelegateHandle();
 	}
 }
 

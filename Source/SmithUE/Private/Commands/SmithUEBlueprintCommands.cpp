@@ -44,6 +44,31 @@ namespace
             Type += TEXT("/");
             Type += PinType.PinSubCategoryObject->GetName();
         }
+        // Wrap with container type if applicable
+        if (PinType.ContainerType == EPinContainerType::Array)
+        {
+            Type = FString::Printf(TEXT("TArray<%s>"), *Type);
+        }
+        else if (PinType.ContainerType == EPinContainerType::Set)
+        {
+            Type = FString::Printf(TEXT("TSet<%s>"), *Type);
+        }
+        else if (PinType.ContainerType == EPinContainerType::Map)
+        {
+            // Build value type string
+            FString ValueType = PinType.PinValueType.TerminalCategory.ToString();
+            if (!PinType.PinValueType.TerminalSubCategory.IsNone())
+            {
+                ValueType += TEXT(":");
+                ValueType += PinType.PinValueType.TerminalSubCategory.ToString();
+            }
+            if (PinType.PinValueType.TerminalSubCategoryObject != nullptr)
+            {
+                ValueType += TEXT("/");
+                ValueType += PinType.PinValueType.TerminalSubCategoryObject->GetName();
+            }
+            Type = FString::Printf(TEXT("TMap<%s, %s>"), *Type, *ValueType);
+        }
         return Type;
     }
 
@@ -165,11 +190,11 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_batch_op"),
             TEXT("Blueprint"),
-            TEXT("Execute multiple Blueprint atomic operations in a single transaction"),
+            TEXT("Execute multiple Blueprint atomic operations in a single transaction. Supports op aliases (connect/link/disconnect/unlink/set_default/set_value/create/add_node/delete/remove_node). Max 50 ops. Partial commit: failures do not stop subsequent ops."),
             {
-                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
-                FSmithUEToolParam(TEXT("operations"), TEXT("array"), TEXT("Array of operation objects"), true),
-                FSmithUEToolParam(TEXT("stop_on_error"), TEXT("bool"), TEXT("Stop after first failed operation"))
+                FSmithUEToolParam(TEXT("operations"), TEXT("array"), TEXT("Array of operation objects {op, params}. Max 50."), true),
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Shared Blueprint asset path injected into each op (op-level overrides)")),
+                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Shared graph name injected into each op (op-level overrides)"))
             }),
         &HandleBpBatchOp);
 
@@ -445,6 +470,28 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
     Params->TryGetStringField(TEXT("bp_path"), BpPath);
     Params->TryGetStringField(TEXT("graph_name"), GraphName);
 
+    // Mode parameter: "full" (default), "compact", "summary", "node_pins"
+    FString Mode = TEXT("full");
+    Params->TryGetStringField(TEXT("mode"), Mode);
+
+    // node_ids param for "node_pins" mode
+    TSet<FString> NodeIdsFilter;
+    if (Mode == TEXT("node_pins"))
+    {
+        const TArray<TSharedPtr<FJsonValue>>* NodeIdsArr = nullptr;
+        if (Params->TryGetArrayField(TEXT("node_ids"), NodeIdsArr) && NodeIdsArr)
+        {
+            for (const TSharedPtr<FJsonValue>& Val : *NodeIdsArr)
+            {
+                FString NidStr;
+                if (Val.IsValid() && Val->TryGetString(NidStr))
+                {
+                    NodeIdsFilter.Add(NidStr);
+                }
+            }
+        }
+    }
+
     UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
     if (!BP)
     {
@@ -468,6 +515,25 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
         }
     }
 
+    // Store server-side N-id → GUID mapping for subsequent commands (e.g. bp_connect_pins).
+    // GraphPath is scoped per-graph so N-ids are never shared across graphs.
+    {
+        const FString GraphPath = BpPath + TEXT("::") + GraphName;
+        TMap<int32, FGuid> IndexToGuid;
+        IndexToGuid.Reserve(GuidToShortId.Num());
+        for (const TPair<FGuid, FString>& Pair : GuidToShortId)
+        {
+            // NidStr is "N<index>"; strip the leading 'N' to get the integer key.
+            const FString& NidStr = Pair.Value;
+            if (NidStr.Len() >= 2 && NidStr[0] == TEXT('N'))
+            {
+                const int32 Idx = FCString::Atoi(*NidStr.Mid(1));
+                IndexToGuid.Add(Idx, Pair.Key);
+            }
+        }
+        FSmithUEToolRegistry::Get().NidSession.StoreNids(GraphPath, IndexToGuid);
+    }
+
     // Helper: resolve a linked pin to "ShortId.PinName"
     auto ResolvePinRef = [&GuidToShortId](UEdGraphPin* LinkedPin) -> FString
     {
@@ -488,33 +554,30 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
         return FString::Printf(TEXT("%s.%s"), **ShortId, *LinkedPin->PinName.ToString());
     };
 
-    TArray<TSharedPtr<FJsonValue>> Nodes;
-    for (UEdGraphNode* Node : Graph->Nodes)
+    // Helper: build full pin arrays for a node (shared by "full" and "node_pins" modes)
+    auto BuildPinArrays = [&](UEdGraphNode* Node,
+                               TArray<TSharedPtr<FJsonValue>>& Inputs,
+                               TArray<TSharedPtr<FJsonValue>>& Outputs,
+                               bool bCompact)
     {
-        if (!Node)
-        {
-            continue;
-        }
-
-        const FString* ShortId = GuidToShortId.Find(Node->NodeGuid);
-        if (!ShortId)
-        {
-            continue;
-        }
-
-        TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
-        NodeObj->SetStringField(TEXT("id"), *ShortId);
-        NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
-        NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
-
-        TArray<TSharedPtr<FJsonValue>> Inputs;
-        TArray<TSharedPtr<FJsonValue>> Outputs;
-
         for (UEdGraphPin* Pin : Node->Pins)
         {
             if (!Pin)
             {
                 continue;
+            }
+
+            // compact: skip hidden pins and pins with no default and no connections
+            if (bCompact)
+            {
+                if (Pin->bHidden)
+                {
+                    continue;
+                }
+                if (Pin->DefaultValue.IsEmpty() && Pin->LinkedTo.Num() == 0)
+                {
+                    continue;
+                }
             }
 
             if (Pin->Direction == EGPD_Input)
@@ -530,7 +593,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
                     PinObj->SetStringField(TEXT("default"), DefaultVal);
                 }
 
-                // All connections (fix: previously only captured first)
+                // All connections
                 if (Pin->LinkedTo.Num() > 0)
                 {
                     TArray<TSharedPtr<FJsonValue>> Conns;
@@ -556,14 +619,9 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
             }
             else // Output
             {
-                // Only include outputs that have connections
-                if (Pin->LinkedTo.Num() == 0)
-                {
-                    continue;
-                }
-
                 TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
                 PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+                PinObj->SetStringField(TEXT("type"), PinTypeToString(Pin->PinType));
 
                 TArray<TSharedPtr<FJsonValue>> Conns;
                 for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
@@ -585,23 +643,52 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
                 Outputs.Add(MakeShared<FJsonValueObject>(PinObj));
             }
         }
+    };
 
-        if (Inputs.Num() > 0)
-        {
-            NodeObj->SetArrayField(TEXT("in"), Inputs);
-        }
-        if (Outputs.Num() > 0)
-        {
-            NodeObj->SetArrayField(TEXT("out"), Outputs);
-        }
-        Nodes.Add(MakeShared<FJsonValueObject>(NodeObj));
-    }
-
-    // Include GUID mapping for tools that need to reference nodes by GUID (e.g. bp_connect_pins)
-    TSharedPtr<FJsonObject> IdMap = MakeShared<FJsonObject>();
-    for (const auto& Pair : GuidToShortId)
+    TArray<TSharedPtr<FJsonValue>> Nodes;
+    for (UEdGraphNode* Node : Graph->Nodes)
     {
-        IdMap->SetStringField(Pair.Value, Pair.Key.ToString());
+        if (!Node)
+        {
+            continue;
+        }
+
+        const FString* ShortId = GuidToShortId.Find(Node->NodeGuid);
+        if (!ShortId)
+        {
+            continue;
+        }
+
+        // node_pins mode: skip nodes not in the requested list
+        if (Mode == TEXT("node_pins") && !NodeIdsFilter.Contains(*ShortId))
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
+        NodeObj->SetStringField(TEXT("id"), *ShortId);
+        NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+        NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+
+        // summary mode: no pins
+        if (Mode != TEXT("summary"))
+        {
+            const bool bCompact = (Mode == TEXT("compact"));
+            TArray<TSharedPtr<FJsonValue>> Inputs;
+            TArray<TSharedPtr<FJsonValue>> Outputs;
+            BuildPinArrays(Node, Inputs, Outputs, bCompact);
+
+            if (Inputs.Num() > 0)
+            {
+                NodeObj->SetArrayField(TEXT("in"), Inputs);
+            }
+            if (Outputs.Num() > 0)
+            {
+                NodeObj->SetArrayField(TEXT("out"), Outputs);
+            }
+        }
+
+        Nodes.Add(MakeShared<FJsonValueObject>(NodeObj));
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -609,7 +696,18 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
     Data->SetStringField(TEXT("graph_name"), GraphName);
     Data->SetNumberField(TEXT("node_count"), Graph->Nodes.Num());
     Data->SetArrayField(TEXT("nodes"), Nodes);
-    Data->SetObjectField(TEXT("id_to_guid"), IdMap);
+
+    // Only "full" mode includes id_to_guid (largest token cost)
+    if (Mode == TEXT("full"))
+    {
+        TSharedPtr<FJsonObject> IdMap = MakeShared<FJsonObject>();
+        for (const auto& Pair : GuidToShortId)
+        {
+            IdMap->SetStringField(Pair.Value, Pair.Key.ToString());
+        }
+        Data->SetObjectField(TEXT("id_to_guid"), IdMap);
+    }
+
     return WrapSuccess(Data);
 }
 
@@ -656,91 +754,167 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpCompileCode(const TSh
 
 TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpBatchOp(const TSharedPtr<FJsonObject>& Params)
 {
-    FString Error;
-    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path"), TEXT("operations")}, Error))
+    // --- Op alias table (resolved once at first call) ---
+    static const TMap<FString, FString> OpAliases = []()
     {
-		return MakeErrResp(Error);
-    }
+        TMap<FString, FString> T;
+        T.Add(TEXT("connect"),       TEXT("bp_connect_pins"));
+        T.Add(TEXT("link"),          TEXT("bp_connect_pins"));
+        T.Add(TEXT("disconnect"),    TEXT("bp_disconnect_pins"));
+        T.Add(TEXT("unlink"),        TEXT("bp_disconnect_pins"));
+        T.Add(TEXT("set_default"),   TEXT("bp_set_pin_default"));
+        T.Add(TEXT("set_value"),     TEXT("bp_set_pin_default"));
+        T.Add(TEXT("create"),        TEXT("bp_create_node"));
+        T.Add(TEXT("add_node"),      TEXT("bp_create_node"));
+        T.Add(TEXT("delete"),        TEXT("bp_delete_node"));
+        T.Add(TEXT("remove_node"),   TEXT("bp_delete_node"));
+        return T;
+    }();
 
-    FString BpPath;
-    Params->TryGetStringField(TEXT("bp_path"), BpPath);
+    // --- Validate 'operations' is present ---
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("operations")}, Error))
+    {
+        return MakeErrResp(Error);
+    }
 
     const TArray<TSharedPtr<FJsonValue>>* Operations = nullptr;
     if (!Params->TryGetArrayField(TEXT("operations"), Operations) || !Operations)
     {
-		return MakeErrResp(TEXT("Invalid or missing param: 'operations'"));
+        return MakeErrResp(TEXT("Invalid or missing param: 'operations'"));
     }
 
-    bool bStopOnError = true;
-    Params->TryGetBoolField(TEXT("stop_on_error"), bStopOnError);
-
-    UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
-    if (!BP)
+    // --- Batch size limit ---
+    if (Operations->Num() > 50)
     {
-		return MakeErrResp(FString::Printf(TEXT("Failed to load blueprint: %s"), *BpPath));
+        return MakeErrResp(FString::Printf(
+            TEXT("Batch size %d exceeds maximum of 50 operations"), Operations->Num()));
     }
 
+    // --- Shared batch-level params (bp_path, graph_name) ---
+    FString BatchBpPath;
+    Params->TryGetStringField(TEXT("bp_path"), BatchBpPath);
+    FString BatchGraphName;
+    Params->TryGetStringField(TEXT("graph_name"), BatchGraphName);
+
+    // --- Single transaction wrapping the entire batch ---
     const FScopedTransaction Transaction(FText::FromString(TEXT("SmithUE: Blueprint Batch Op")));
 
     TArray<TSharedPtr<FJsonValue>> Results;
-    for (const TSharedPtr<FJsonValue>& OpValue : *Operations)
+    TSet<FString> StaleGraphPaths;
+    for (int32 OpIndex = 0; OpIndex < Operations->Num(); ++OpIndex)
     {
+        const TSharedPtr<FJsonValue>& OpValue = (*Operations)[OpIndex];
+
+        TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+        Item->SetNumberField(TEXT("index"), OpIndex);
+
         TSharedPtr<FJsonObject> OpObj = OpValue.IsValid() ? OpValue->AsObject() : nullptr;
         if (!OpObj.IsValid())
         {
-            TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+            Item->SetStringField(TEXT("status"), TEXT("error"));
             Item->SetStringField(TEXT("error"), TEXT("Each operation must be an object"));
             Results.Add(MakeShared<FJsonValueObject>(Item));
-            if (bStopOnError)
-            {
-                break;
-            }
             continue;
         }
 
         FString OpName;
         if (!OpObj->TryGetStringField(TEXT("op"), OpName) || OpName.IsEmpty())
         {
-            TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+            Item->SetStringField(TEXT("status"), TEXT("error"));
             Item->SetStringField(TEXT("error"), TEXT("Operation missing 'op'"));
             Results.Add(MakeShared<FJsonValueObject>(Item));
-            if (bStopOnError)
-            {
-                break;
-            }
             continue;
         }
 
-        const TSharedPtr<FJsonObject>* OpParamsPtr = nullptr;
-        TSharedPtr<FJsonObject> OpParams = MakeShared<FJsonObject>();
-        if (OpObj->TryGetObjectField(TEXT("params"), OpParamsPtr) && OpParamsPtr)
+        // --- Resolve alias ---
+        if (const FString* Resolved = OpAliases.Find(OpName))
         {
-            OpParams = *OpParamsPtr;
+            OpName = *Resolved;
         }
 
+        // --- Build merged params: batch-level defaults, op-level overrides ---
+        TSharedPtr<FJsonObject> OpParams = MakeShared<FJsonObject>();
+
+        // Inject batch-level shared params first (lower priority)
+        if (!BatchBpPath.IsEmpty())
+        {
+            OpParams->SetStringField(TEXT("bp_path"), BatchBpPath);
+        }
+        if (!BatchGraphName.IsEmpty())
+        {
+            OpParams->SetStringField(TEXT("graph_name"), BatchGraphName);
+        }
+
+        // Overlay op-level params (higher priority — overwrite batch-level)
+        // First: copy direct op-level fields (flat format: {op:"set_default", node_id:"N5", ...})
+        for (const auto& KV : OpObj->Values)
+        {
+            if (!KV.Key.Equals(TEXT("op"), ESearchCase::IgnoreCase))
+            {
+                OpParams->Values.Add(KV.Key, KV.Value);
+            }
+        }
+        // Also support nested "params" sub-object (legacy format), overrides flat fields
+        const TSharedPtr<FJsonObject>* OpParamsPtr = nullptr;
+        if (OpObj->TryGetObjectField(TEXT("params"), OpParamsPtr) && OpParamsPtr && OpParamsPtr->IsValid())
+        {
+            for (const auto& KV : (*OpParamsPtr)->Values)
+            {
+                OpParams->Values.Add(KV.Key, KV.Value);
+            }
+        }
+
+        // --- Dispatch ---
         TSharedPtr<FJsonObject> DispatchResult = FSmithUEToolRegistry::Get().DispatchCommand(OpName, OpParams);
         if (!DispatchResult.IsValid())
         {
-			DispatchResult = MakeErrResp(FString::Printf(TEXT("Unknown command: %s"), *OpName));
+            DispatchResult = MakeErrResp(FString::Printf(TEXT("Unknown command: %s"), *OpName));
         }
 
-        TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
-        Item->SetStringField(TEXT("op"), OpName);
-        Item->SetObjectField(TEXT("result"), DispatchResult);
-        Results.Add(MakeShared<FJsonValueObject>(Item));
+        // --- Build per-op result entry ---
+        FString OpStatus;
+        DispatchResult->TryGetStringField(TEXT("status"), OpStatus);
+        const bool bOpFailed = OpStatus.Equals(TEXT("error"), ESearchCase::IgnoreCase);
+        const bool bMutationOp = OpName.Equals(TEXT("bp_create_node"), ESearchCase::IgnoreCase) ||
+                                 OpName.Equals(TEXT("bp_delete_node"), ESearchCase::IgnoreCase);
 
-        FString Status;
-        if (DispatchResult->TryGetStringField(TEXT("status"), Status) && Status.Equals(TEXT("error"), ESearchCase::IgnoreCase))
+        Item->SetStringField(TEXT("status"), bOpFailed ? TEXT("error") : TEXT("success"));
+        if (bOpFailed)
         {
-            if (bStopOnError)
+            FString OpError;
+            DispatchResult->TryGetStringField(TEXT("error"), OpError);
+            if (OpError.IsEmpty())
             {
-                break;
+                // Fallback: serialize the full result as error detail
+                OpError = FString::Printf(TEXT("Op '%s' failed"), *OpName);
+            }
+            Item->SetStringField(TEXT("error"), OpError);
+        }
+        else if (bMutationOp)
+        {
+            FString OpBpPath;
+            FString OpGraphName;
+            if (OpParams->TryGetStringField(TEXT("bp_path"), OpBpPath) &&
+                OpParams->TryGetStringField(TEXT("graph_name"), OpGraphName) &&
+                !OpBpPath.IsEmpty() && !OpGraphName.IsEmpty())
+            {
+                const FString GraphPath = OpBpPath + TEXT("::") + OpGraphName;
+                StaleGraphPaths.Add(GraphPath);
+                Item->SetBoolField(TEXT("nid_stale"), true);
             }
         }
+
+        Results.Add(MakeShared<FJsonValueObject>(Item));
+        // Partial commit: always continue to next op regardless of failure
+    }
+
+    for (const FString& GraphPath : StaleGraphPaths)
+    {
+        FSmithUEToolRegistry::Get().NidSession.MarkStale(GraphPath);
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("bp_path"), BpPath);
     Data->SetArrayField(TEXT("results"), Results);
     return WrapSuccess(Data);
 }

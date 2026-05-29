@@ -36,5 +36,5 @@ private:
 
 	FCriticalSection AsyncTaskLock;
 	TMap<FString, FAsyncTaskEntry> AsyncTaskEntries;
-	FDelegateHandle GCTickerHandle;
+	FTSTicker::FDelegateHandle GCTickerHandle;
 };

@@ -3,6 +3,7 @@
 #include "ToolRegistry/SmithUEToolRegistry.h"
 
 #include "Dom/JsonValue.h"
+#include "Editor.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Serialization/JsonSerializer.h"
@@ -50,17 +51,100 @@ const FSmithUEToolSchema* FSmithUEToolRegistry::Find(const FString& Name) const
 	return Tools.Find(Name);
 }
 
-TSharedPtr<FJsonObject> FSmithUEToolRegistry::DispatchCommand(const FString& Name, const TSharedPtr<FJsonObject>& Params) const
+TSharedPtr<FJsonObject> FSmithUEToolRegistry::DispatchCommand(const FString& Name, const TSharedPtr<FJsonObject>& Params)
 {
-	if (const FSmithUECommandHandler* Handler = Handlers.Find(Name))
+	check(IsInGameThread());
+
+	// --- Editor state pre-check ---
+	// Readonly commands bypass the busy check.
+	static const TArray<FString> ReadonlyCommands = {
+		TEXT("ping"),
+		TEXT("bp_describe_graph"),
+		TEXT("bp_get_summary"),
+	};
+	const bool bIsReadonly = ReadonlyCommands.Contains(Name) || Name.StartsWith(TEXT("observation_"));
+
+	if (!bIsReadonly)
 	{
-		return (*Handler)(Params);
+		if (GEditor && GEditor->PlayWorld != nullptr)
+		{
+			TSharedPtr<FJsonObject> Error = MakeShared<FJsonObject>();
+			Error->SetStringField(TEXT("status"), TEXT("error"));
+			Error->SetStringField(TEXT("error"), TEXT("Editor is busy: PIE running. Command rejected. Please stop PIE first."));
+			return Error;
+		}
+
+		// Note: Live Coding compilation is not checked here because ILiveCodingModule
+		// would add a module dependency. During Live Coding, commands fail with their
+		// own descriptive errors which is acceptable.
+	}
+	// --- End editor state pre-check ---
+
+	// --- Metrics: measure request bytes ---
+	int64 RequestBytes = 0;
+	if (Params.IsValid())
+	{
+		FString ParamsStr;
+		TSharedRef<TJsonWriter<>> ParamsWriter = TJsonWriterFactory<>::Create(&ParamsStr);
+		FJsonSerializer::Serialize(Params.ToSharedRef(), ParamsWriter);
+		RequestBytes = ParamsStr.Len();
 	}
 
-	TSharedPtr<FJsonObject> Error = MakeShared<FJsonObject>();
-	Error->SetStringField(TEXT("status"), TEXT("error"));
-	Error->SetStringField(TEXT("error"), FString::Printf(TEXT("Unknown command: %s"), *Name));
-	return Error;
+	const double StartTime = FPlatformTime::Seconds();
+
+	TSharedPtr<FJsonObject> Response;
+	if (const FSmithUECommandHandler* Handler = Handlers.Find(Name))
+	{
+		Response = (*Handler)(Params);
+	}
+	else
+	{
+		TSharedPtr<FJsonObject> Error = MakeShared<FJsonObject>();
+		Error->SetStringField(TEXT("status"), TEXT("error"));
+		Error->SetStringField(TEXT("error"), FString::Printf(TEXT("Unknown command: %s"), *Name));
+		Response = Error;
+	}
+
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
+
+	// --- Metrics: measure response bytes ---
+	int64 ResponseBytes = 0;
+	if (Response.IsValid())
+	{
+		FString ResponseStr;
+		TSharedRef<TJsonWriter<>> ResponseWriter = TJsonWriterFactory<>::Create(&ResponseStr);
+		FJsonSerializer::Serialize(Response.ToSharedRef(), ResponseWriter);
+		ResponseBytes = ResponseStr.Len();
+	}
+
+	// --- Metrics: update (system_ commands skip CallCount) ---
+	const bool bIsSystemCommand = Name.StartsWith(TEXT("system_"));
+	if (!bIsSystemCommand)
+	{
+		// Retry detection: same command name as last, and last returned error
+		if (Name == Metrics.LastCommandName && Metrics.bLastCommandWasError)
+		{
+			Metrics.RetryCount++;
+		}
+
+		Metrics.CallCount++;
+		Metrics.TotalRequestBytes += RequestBytes;
+		Metrics.TotalResponseBytes += ResponseBytes;
+		Metrics.TotalExecutionMs += ElapsedMs;
+
+		FSmithUEPerCommandMetrics& PerCmd = Metrics.PerCommand.FindOrAdd(Name);
+		PerCmd.Count++;
+		PerCmd.TotalResponseBytes += ResponseBytes;
+
+		const bool bWasError = Response.IsValid() && Response->HasField(TEXT("error"));
+		Metrics.bLastCommandWasError = bWasError;
+		Metrics.LastCommandName = Name;
+		Metrics.LastRequestBytes = RequestBytes;
+		Metrics.LastResponseBytes = ResponseBytes;
+		Metrics.LastExecutionMs = ElapsedMs;
+	}
+
+	return Response;
 }
 
 TArray<FSmithUEToolSchema> FSmithUEToolRegistry::GetAll() const
@@ -109,6 +193,8 @@ void FSmithUEToolRegistry::Reset()
 {
 	Tools.Empty();
 	Handlers.Empty();
+	NidSession.NidMap.Empty();
+	NidSession.StaleFlags.Empty();
 }
 
 void FSmithUEToolRegistry::RegisterBuiltinCommands()
@@ -247,6 +333,61 @@ void FSmithUEToolRegistry::RegisterBuiltinCommands()
 				TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 				Data->SetStringField(TEXT("message"), TEXT("session unregistered"));
 				Response->SetObjectField(TEXT("data"), Data);
+				return Response;
+			});
+	}
+
+	// --- Metrics commands ---
+	if (Registry.Find(TEXT("system_get_metrics")) == nullptr)
+	{
+		Registry.Register(
+			FSmithUEToolSchema(TEXT("system_get_metrics"), TEXT("System"), TEXT("Return current session command metrics")),
+			[](const TSharedPtr<FJsonObject>&) -> TSharedPtr<FJsonObject>
+			{
+				const FSmithUECommandMetrics& M = FSmithUEToolRegistry::Get().Metrics;
+
+				TSharedPtr<FJsonObject> MetricsObj = MakeShared<FJsonObject>();
+				MetricsObj->SetNumberField(TEXT("call_count"), M.CallCount);
+				MetricsObj->SetNumberField(TEXT("total_request_bytes"), static_cast<double>(M.TotalRequestBytes));
+				MetricsObj->SetNumberField(TEXT("total_response_bytes"), static_cast<double>(M.TotalResponseBytes));
+				MetricsObj->SetNumberField(TEXT("retry_count"), M.RetryCount);
+				const double AvgMs = M.CallCount > 0 ? M.TotalExecutionMs / M.CallCount : 0.0;
+				MetricsObj->SetNumberField(TEXT("avg_execution_ms"), AvgMs);
+
+				TSharedPtr<FJsonObject> PerCommandObj = MakeShared<FJsonObject>();
+				for (const TPair<FString, FSmithUEPerCommandMetrics>& Pair : M.PerCommand)
+				{
+					TSharedPtr<FJsonObject> CmdObj = MakeShared<FJsonObject>();
+					CmdObj->SetNumberField(TEXT("count"), Pair.Value.Count);
+					CmdObj->SetNumberField(TEXT("total_response_bytes"), static_cast<double>(Pair.Value.TotalResponseBytes));
+					PerCommandObj->SetObjectField(Pair.Key, CmdObj);
+				}
+				MetricsObj->SetObjectField(TEXT("per_command"), PerCommandObj);
+
+				TSharedPtr<FJsonObject> LastCmd = MakeShared<FJsonObject>();
+				LastCmd->SetStringField(TEXT("name"), M.LastCommandName);
+				LastCmd->SetNumberField(TEXT("request_bytes"), static_cast<double>(M.LastRequestBytes));
+				LastCmd->SetNumberField(TEXT("response_bytes"), static_cast<double>(M.LastResponseBytes));
+				LastCmd->SetNumberField(TEXT("execution_ms"), M.LastExecutionMs);
+				MetricsObj->SetObjectField(TEXT("last_command"), LastCmd);
+
+				TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+				Response->SetStringField(TEXT("status"), TEXT("success"));
+				Response->SetObjectField(TEXT("metrics"), MetricsObj);
+				return Response;
+			});
+	}
+
+	if (Registry.Find(TEXT("system_reset_metrics")) == nullptr)
+	{
+		Registry.Register(
+			FSmithUEToolSchema(TEXT("system_reset_metrics"), TEXT("System"), TEXT("Reset all command metrics counters")),
+			[](const TSharedPtr<FJsonObject>&) -> TSharedPtr<FJsonObject>
+			{
+				FSmithUEToolRegistry::Get().Metrics = FSmithUECommandMetrics{};
+
+				TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+				Response->SetStringField(TEXT("status"), TEXT("success"));
 				return Response;
 			});
 	}

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EdGraphSchema_K2.h"
 
 class FJsonObject;
 class UBlueprint;
@@ -14,15 +15,17 @@ class UFunction;
 namespace SmithUEBpAtomicAPIHelpers
 {
 	FString NormalizeObjectPath(const FString& AssetPath);
+	FString NormalizeStructPinValue(UEdGraphPin* Pin, const FString& Input);
 	UClass* ResolveClassByName(const FString& ClassName, UClass* RequiredBaseClass, TCHAR ExpectedPrefix);
 	FVector2D GetPositionFromJson(const TSharedPtr<FJsonObject>& Params);
 	bool ResolvePinType(const FString& TypeName, FEdGraphPinType& OutPinType);
 	UEdGraphNode* FindNodeByGuid(UEdGraph* Graph, const FString& GuidString);
-	UEdGraphPin* FindPin(UEdGraphNode* Node, const FString& PinName);
+	UEdGraphNode* ResolveNodeId(UEdGraph* Graph, const FString& GraphPath, const FString& NodeIdStr, FString& OutError);
+	UEdGraphPin* FindPin(UEdGraphNode* Node, const FString& PinName, TArray<FString>* OutSuggestions = nullptr);
 	UFunction* FindFunctionByName(const FString& FunctionPath);
 	UEdGraph* ResolveMacroGraph(const FString& MacroPath);
-	bool TryConnectPins(UBlueprint* Blueprint, UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName, FString& OutError);
-	bool TrySetPinDefault(UBlueprint* Blueprint, UEdGraph* Graph, const FString& NodeId, const FString& PinName, const FString& Value, FString& OutError);
+	bool TryConnectPins(UBlueprint* Blueprint, UEdGraph* Graph, const FString& GraphPath, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName, FString& OutError);
+	bool TrySetPinDefault(UBlueprint* Blueprint, UEdGraph* Graph, const FString& GraphPath, const FString& NodeId, const FString& PinName, const FString& Value, FString& OutError);
 	TSharedPtr<FJsonObject> MakeNodeResponse(const FString& NodeId);
 	bool GetNamedTypeField(const TSharedPtr<FJsonObject>& ParamObject, FString& OutName, FString& OutType);
 	void AppendJsonStringArray(TSharedPtr<FJsonObject> Data, const TCHAR* FieldName, const TArray<FString>& Strings);

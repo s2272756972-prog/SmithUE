@@ -5,6 +5,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/SmithUEBpAtomicAPIHelpers.h"
 #include "Components/ActorComponent.h"
+#include "Components/ChildActorComponent.h"
 #include "Components/PostProcessComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Camera/CameraComponent.h"
@@ -14,6 +15,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EdGraphUtilities.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -45,16 +47,23 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 {
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_create"), TEXT("Blueprint"), TEXT("Create a new Blueprint asset"), { FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Blueprint asset name"), true), FSmithUEToolParam(TEXT("parent_class"), TEXT("string"), TEXT("Parent class name"), true), FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Destination content path"), true) }), &HandleBpCreate);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_function"), TEXT("Blueprint"), TEXT("Add a function graph to a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("New function name"), true), FSmithUEToolParam(TEXT("inputs"), TEXT("array"), TEXT("Optional input pin definitions"), false, FString(), TEXT("object")), FSmithUEToolParam(TEXT("outputs"), TEXT("array"), TEXT("Optional output pin definitions"), false, FString(), TEXT("object")) }), &HandleBpAddFunction);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")) }), &HandleBpCreateNode);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function name or 'ClassName::FunctionName' for K2Node_CallFunction nodes"), false), FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable name for K2Node_VariableGet or K2Node_VariableSet nodes"), false), FSmithUEToolParam(TEXT("macro_path"), TEXT("string"), TEXT("Macro graph asset path for K2Node_MacroInstance nodes"), false), FSmithUEToolParam(TEXT("key"), TEXT("string"), TEXT("Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes"), false), FSmithUEToolParam(TEXT("input_action"), TEXT("string"), TEXT("InputAction asset path for K2Node_EnhancedInputAction nodes"), false), FSmithUEToolParam(TEXT("target_class"), TEXT("string"), TEXT("Target class path for K2Node_DynamicCast nodes"), false) }), &HandleBpCreateNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_connect_pins"), TEXT("Blueprint"), TEXT("Connect two Blueprint node pins"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpConnectPins);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_pin_default"), TEXT("Blueprint"), TEXT("Set a Blueprint node pin default value"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true), FSmithUEToolParam(TEXT("pin_name"), TEXT("string"), TEXT("Pin name"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Default value string"), true) }), &HandleBpSetPinDefault);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_variable"), TEXT("Blueprint"), TEXT("Remove a Blueprint member variable by name"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name to remove"), true) }), &HandleBpRemoveVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_override_function"), TEXT("Blueprint"), TEXT("Override a parent class function in a Blueprint (creates proper override graph with correct signature)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Parent function name to override"), true) }), &HandleBpOverrideFunction);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true) }), &HandleBpCompile);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_reparent"), TEXT("Blueprint"), TEXT("Change the parent class of a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("new_parent_class"), TEXT("string"), TEXT("New parent class name or Blueprint path"), true) }), &HandleBpReparent);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_copy_graph"), TEXT("Blueprint"), TEXT("Copy a function graph from one Blueprint to another"), { FSmithUEToolParam(TEXT("source_bp"), TEXT("string"), TEXT("Source Blueprint asset path"), true), FSmithUEToolParam(TEXT("target_bp"), TEXT("string"), TEXT("Target Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Function graph name to copy"), true), FSmithUEToolParam(TEXT("new_graph_name"), TEXT("string"), TEXT("Optional new name for the copied graph")), FSmithUEToolParam(TEXT("overwrite"), TEXT("boolean"), TEXT("If true, removes existing graph with same name before copying")) }), &HandleBpCopyGraph);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_graph"), TEXT("Blueprint"), TEXT("Remove a function graph or ubergraph page from a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name to remove"), true) }), &HandleBpRemoveGraph);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_rename_graph"), TEXT("Blueprint"), TEXT("Rename a function graph or event graph page in a Blueprint (updates all internal call references)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Current graph name"), true), FSmithUEToolParam(TEXT("new_name"), TEXT("string"), TEXT("New graph name"), true) }), &HandleBpRenameGraph);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_fixup_self_references"), TEXT("Blueprint"), TEXT("Fix variable/function/component nodes to reference Self instead of a foreign parent class (use after bp_copy_graph across different class hierarchies)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true) }), &HandleBpFixupSelfReferences);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_fix_local_var_scope"), TEXT("Blueprint"), TEXT("Fix stale local variable scope references in all function graphs (use after bp_rename_graph or bp_copy_graph when local variables show scope mismatch warnings)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true) }), &HandleBpFixLocalVarScope);
 }
 
 UBlueprint* FSmithUEBpAtomicAPI::LoadBlueprint(const FString& BpPath)
@@ -70,11 +79,30 @@ UEdGraph* FSmithUEBpAtomicAPI::FindGraph(UBlueprint* Blueprint, const FString& G
 	}
 	TArray<UEdGraph*> AllGraphs;
 	Blueprint->GetAllGraphs(AllGraphs);
+	// First pass: match by ObjectName (most common case)
 	for (UEdGraph* Graph : AllGraphs)
 	{
 		if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
 		{
 			return Graph;
+		}
+	}
+	// Second pass: match by FunctionEntry's FunctionReference name (handles cases where
+	// ObjectName differs from the logical function name, e.g. after CloneGraph renaming)
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!Graph) { continue; }
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (UK2Node_FunctionEntry* Entry = Cast<UK2Node_FunctionEntry>(Node))
+			{
+				FName FuncName = Entry->FunctionReference.GetMemberName();
+				if (!FuncName.IsNone() && FuncName.ToString().Equals(GraphName, ESearchCase::IgnoreCase))
+				{
+					return Graph;
+				}
+				break; // Only one FunctionEntry per graph
+			}
 		}
 	}
 	return nullptr;
@@ -188,13 +216,13 @@ FString FSmithUEBpAtomicAPI::CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, 
 bool FSmithUEBpAtomicAPI::ConnectPins(UBlueprint* Blueprint, UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName)
 {
 	FString Error;
-	return TryConnectPins(Blueprint, Graph, SourceNodeId, SourcePinName, TargetNodeId, TargetPinName, Error);
+	return TryConnectPins(Blueprint, Graph, FString(), SourceNodeId, SourcePinName, TargetNodeId, TargetPinName, Error);
 }
 
 bool FSmithUEBpAtomicAPI::SetPinDefault(UBlueprint* Blueprint, UEdGraph* Graph, const FString& NodeId, const FString& PinName, const FString& Value)
 {
 	FString Error;
-	return TrySetPinDefault(Blueprint, Graph, NodeId, PinName, Value, Error);
+	return TrySetPinDefault(Blueprint, Graph, FString(), NodeId, PinName, Value, Error);
 }
 
 bool FSmithUEBpAtomicAPI::CompileBlueprint(UBlueprint* Blueprint, TArray<FString>& OutErrors, bool bSkipGarbageCollection)
@@ -301,7 +329,17 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddFunction(const TSharedPt
 	const TArray<TSharedPtr<FJsonValue>>* Inputs = nullptr; const TArray<TSharedPtr<FJsonValue>>* Outputs = nullptr;
 	Params->TryGetArrayField(TEXT("inputs"), Inputs); Params->TryGetArrayField(TEXT("outputs"), Outputs);
 	if (Inputs && !EntryNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Function entry node not found")); }
-	if (Outputs && Outputs->Num() > 0 && !ResultNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Function result node not found")); }
+	// UE 5.x: void functions may not auto-create FunctionResult node. Create one if outputs are requested.
+	if (Outputs && Outputs->Num() > 0 && !ResultNode)
+	{
+		FGraphNodeCreator<UK2Node_FunctionResult> ResultCreator(*NewGraph);
+		ResultNode = ResultCreator.CreateNode();
+		if (!ResultNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create function result node")); }
+		ResultNode->NodePosX = 800;
+		ResultNode->NodePosY = 0;
+		ResultCreator.Finalize();
+		ResultNode->AllocateDefaultPins();
+	}
 	if (Inputs)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *Inputs)
@@ -340,7 +378,11 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCreateNode(const TSharedPtr
 	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph not found")); }
 	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpCreateNode", "SmithUE: Create Blueprint Node"));
 	const FString NodeId = CreateNode(Blueprint, Graph, NodeClass, GetPositionFromJson(Params), Params);
-	return NodeId.IsEmpty() ? FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create node")) : MakeNodeResponse(NodeId);
+	if (NodeId.IsEmpty()) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create node")); }
+	FSmithUEToolRegistry::Get().NidSession.MarkStale(BpPath + TEXT("::") + GraphName);
+	TSharedPtr<FJsonObject> Response = MakeNodeResponse(NodeId);
+	Response->SetBoolField(TEXT("nid_stale"), true);
+	return Response;
 }
 
 TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpConnectPins(const TSharedPtr<FJsonObject>& Params)
@@ -354,7 +396,15 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpConnectPins(const TSharedPt
 	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
 	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph not found")); }
 	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpConnectPins", "SmithUE: Connect Blueprint Pins"));
-	if (!TryConnectPins(Blueprint, Graph, SourceNodeId, SourcePin, TargetNodeId, TargetPin, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	const FString GraphPath = BpPath + TEXT("::") + GraphName;
+	if (!TryConnectPins(Blueprint, Graph, GraphPath, SourceNodeId, SourcePin, TargetNodeId, TargetPin, Error))
+	{
+		if (TSharedPtr<FJsonObject> StructuredError = FSmithUECommonUtils::ParseJson(Error); StructuredError.IsValid())
+		{
+			return StructuredError;
+		}
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetBoolField(TEXT("connected"), true);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
@@ -371,7 +421,15 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetPinDefault(const TShared
 	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
 	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph not found")); }
 	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpSetPinDefault", "SmithUE: Set Blueprint Pin Default"));
-	if (!TrySetPinDefault(Blueprint, Graph, NodeId, PinName, Value, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	const FString GraphPath = BpPath + TEXT("::") + GraphName;
+	if (!TrySetPinDefault(Blueprint, Graph, GraphPath, NodeId, PinName, Value, Error))
+	{
+		if (TSharedPtr<FJsonObject> StructuredError = FSmithUECommonUtils::ParseJson(Error); StructuredError.IsValid())
+		{
+			return StructuredError;
+		}
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetBoolField(TEXT("updated"), true);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
@@ -387,14 +445,17 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpDeleteNode(const TSharedPtr
 	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
 	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
 	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph not found")); }
-	UEdGraphNode* Node = FindNodeByGuid(Graph, NodeId);
-	if (!Node) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Node not found")); }
+	FString ResolveError;
+	UEdGraphNode* Node = ResolveNodeId(Graph, BpPath + TEXT("::") + GraphName, NodeId, ResolveError);
+	if (!Node) { return FSmithUECommonUtils::CreateErrorResponse(ResolveError.IsEmpty() ? TEXT("Node not found") : ResolveError); }
 	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpDeleteNode", "SmithUE: Delete Blueprint Node"));
 	Node->BreakAllNodeLinks();
 	Graph->RemoveNode(Node);
 	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+	FSmithUEToolRegistry::Get().NidSession.MarkStale(BpPath + TEXT("::") + GraphName);
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetBoolField(TEXT("deleted"), true);
+	Data->SetBoolField(TEXT("nid_stale"), true);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -414,6 +475,56 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddVariable(const TSharedPt
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("var_name"), VarName);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// bp_remove_variable
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveVariable(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("var_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath, VarName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("var_name"), VarName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path"));
+	}
+
+	// Find the variable in NewVariables
+	const FName VarFName(*VarName);
+	int32 FoundIndex = INDEX_NONE;
+	for (int32 i = 0; i < Blueprint->NewVariables.Num(); ++i)
+	{
+		if (Blueprint->NewVariables[i].VarName == VarFName)
+		{
+			FoundIndex = i;
+			break;
+		}
+	}
+
+	if (FoundIndex == INDEX_NONE)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Variable not found: '%s'"), *VarName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpRemoveVariable", "SmithUE: Remove Blueprint Variable"));
+	FBlueprintEditorUtils::RemoveMemberVariable(Blueprint, VarFName);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("var_name"), VarName);
+	Data->SetBoolField(TEXT("removed"), true);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -677,6 +788,69 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 		return FSmithUECommonUtils::CreateSuccessResponse(Data);
 	}
 
+	// --- Special handling: ChildActorClass on UChildActorComponent ---
+	if (PropertyName.Equals(TEXT("ChildActorClass"), ESearchCase::IgnoreCase))
+	{
+		UChildActorComponent* ChildActorComp = Cast<UChildActorComponent>(TargetComp);
+		if (!ChildActorComp)
+		{
+			return FSmithUECommonUtils::CreateErrorResponse(
+				FString::Printf(TEXT("Component '%s' is not a ChildActorComponent"), *ComponentName));
+		}
+
+		FString ClassPath;
+		Params->TryGetStringField(TEXT("value"), ClassPath);
+
+		// Try loading as a Blueprint asset first (most common case for BP classes)
+		UClass* ChildClass = nullptr;
+		UBlueprint* ChildBP = LoadObject<UBlueprint>(nullptr, *NormalizeObjectPath(ClassPath));
+		if (ChildBP)
+		{
+			// Ensure the child BP is compiled
+			if (ChildBP->Status == BS_Dirty || ChildBP->Status == BS_Unknown)
+			{
+				FKismetEditorUtilities::CompileBlueprint(ChildBP, EBlueprintCompileOptions::SkipGarbageCollection);
+			}
+			ChildClass = ChildBP->GeneratedClass;
+		}
+		else
+		{
+			// Try loading as a native class or already-generated class path
+			ChildClass = LoadObject<UClass>(nullptr, *NormalizeObjectPath(ClassPath));
+			if (!ChildClass)
+			{
+				// Try appending _C suffix for Blueprint GeneratedClass paths
+				FString GeneratedClassPath = ClassPath;
+				if (!GeneratedClassPath.EndsWith(TEXT("_C")))
+				{
+					GeneratedClassPath += TEXT("_C");
+				}
+				ChildClass = LoadObject<UClass>(nullptr, *NormalizeObjectPath(GeneratedClassPath));
+			}
+		}
+
+		if (!ChildClass)
+		{
+			return FSmithUECommonUtils::CreateErrorResponse(
+				FString::Printf(TEXT("Failed to resolve ChildActorClass: '%s'"), *ClassPath));
+		}
+
+		FString BeforeClass = ChildActorComp->GetChildActorClass() ? ChildActorComp->GetChildActorClass()->GetPathName() : TEXT("None");
+		ChildActorComp->SetChildActorClass(ChildClass);
+		FString AfterClass = ChildActorComp->GetChildActorClass() ? ChildActorComp->GetChildActorClass()->GetPathName() : TEXT("None");
+
+		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		Blueprint->MarkPackageDirty();
+
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("component_name"), ComponentName);
+		Data->SetStringField(TEXT("property_name"), TEXT("ChildActorClass"));
+		Data->SetStringField(TEXT("before"), BeforeClass);
+		Data->SetStringField(TEXT("after"), AfterClass);
+		Data->SetBoolField(TEXT("changed"), BeforeClass != AfterClass);
+		return FSmithUECommonUtils::CreateSuccessResponse(Data);
+	}
+
 	// --- General property setting ---
 	FProperty* Prop = TargetComp->GetClass()->FindPropertyByName(FName(*PropertyName));
 	if (!Prop)
@@ -703,7 +877,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 	bool bSuccess = false;
 	if (!ValueStr.IsEmpty())
 	{
-		const TCHAR* Result = Prop->ImportText(*ValueStr, PropAddr, 0, TargetComp);
+		const TCHAR* Result = Prop->ImportText_Direct(*ValueStr, PropAddr, TargetComp, 0);
 		bSuccess = (Result != nullptr);
 	}
 
@@ -881,5 +1055,612 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCompile(const TSharedPtr<FJ
 	Data->SetBoolField(TEXT("compiled"), bCompiled);
 	Data->SetBoolField(TEXT("has_errors"), CompileErrors.Num() > 0);
 	AppendJsonStringArray(Data, TEXT("errors"), CompileErrors);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// bp_reparent — Change the parent class of a Blueprint
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpReparent(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("new_parent_class") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath, NewParentClassName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("new_parent_class"), NewParentClassName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+
+	// Resolve the new parent class (try native class first, then Blueprint path)
+	UClass* NewParentClass = ResolveClassByName(NewParentClassName, UObject::StaticClass(), TEXT('A'));
+	if (!NewParentClass) { NewParentClass = ResolveClassByName(NewParentClassName, UObject::StaticClass(), TEXT('U')); }
+	// Fallback: Blueprint path
+	if (!NewParentClass && NewParentClassName.Contains(TEXT("/")))
+	{
+		FString BpPathToLoad = NewParentClassName;
+		if (BpPathToLoad.EndsWith(TEXT("_C")))
+		{
+			int32 DotIdx;
+			if (BpPathToLoad.FindLastChar(TEXT('.'), DotIdx)) { BpPathToLoad = BpPathToLoad.Left(DotIdx); }
+		}
+		if (UBlueprint* ParentBP = LoadBlueprint(BpPathToLoad))
+		{
+			NewParentClass = ParentBP->GeneratedClass;
+		}
+	}
+	if (!NewParentClass)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("New parent class not found: %s"), *NewParentClassName));
+	}
+
+	// Validate: new parent must be compatible (Actor-based BP needs Actor parent, etc.)
+	UClass* OldParentClass = Blueprint->ParentClass;
+	if (NewParentClass == OldParentClass)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("New parent class is the same as current parent"));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpReparent", "SmithUE: Reparent Blueprint"));
+	Blueprint->ParentClass = NewParentClass;
+	FBlueprintEditorUtils::RefreshAllNodes(Blueprint);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	Data->SetStringField(TEXT("old_parent"), OldParentClass ? OldParentClass->GetName() : TEXT("None"));
+	Data->SetStringField(TEXT("new_parent"), NewParentClass->GetName());
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// bp_copy_graph — Copy a function/event graph from one Blueprint to another
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCopyGraph(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("source_bp"), TEXT("target_bp"), TEXT("graph_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString SourceBpPath, TargetBpPath, GraphName, NewGraphName;
+	Params->TryGetStringField(TEXT("source_bp"), SourceBpPath);
+	Params->TryGetStringField(TEXT("target_bp"), TargetBpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+	Params->TryGetStringField(TEXT("new_graph_name"), NewGraphName);
+	if (NewGraphName.IsEmpty()) { NewGraphName = GraphName; }
+
+	UBlueprint* SourceBP = LoadBlueprint(SourceBpPath);
+	if (!SourceBP) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid source_bp path")); }
+	UBlueprint* TargetBP = LoadBlueprint(TargetBpPath);
+	if (!TargetBP) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid target_bp path")); }
+
+	// Find source graph
+	UEdGraph* SourceGraph = FindGraph(SourceBP, GraphName);
+	if (!SourceGraph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Graph '%s' not found in source Blueprint"), *GraphName));
+	}
+
+	// Check if target already has a graph with this name
+	bool bOverwrite = Params->HasField(TEXT("overwrite")) && Params->GetBoolField(TEXT("overwrite"));
+	UEdGraph* ExistingGraph = FindGraph(TargetBP, NewGraphName);
+	if (ExistingGraph && !bOverwrite)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Graph '%s' already exists in target Blueprint. Use overwrite=true to replace it."), *NewGraphName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpCopyGraph", "SmithUE: Copy Blueprint Graph"));
+
+	// Determine graph type and clone accordingly
+	bool bIsFunctionGraph = SourceBP->FunctionGraphs.Contains(SourceGraph);
+	bool bIsUbergraph = SourceBP->UbergraphPages.Contains(SourceGraph);
+
+	UEdGraph* ClonedGraph = nullptr;
+
+	if (ExistingGraph && bOverwrite)
+	{
+		// OVERWRITE PATH: Preserve the existing graph object (maintains editor references)
+		// and replace its CONTENTS with nodes from the source graph.
+		// This avoids RemoveGraph re-outering the graph to the Package, which causes
+		// FindBlueprintForNodeChecked assertions when the editor opens the graph.
+		ExistingGraph->Modify();
+
+		// 1. Clear all existing nodes from the target graph
+		TArray<UEdGraphNode*> OldNodes = ExistingGraph->Nodes;
+		for (UEdGraphNode* OldNode : OldNodes)
+		{
+			if (OldNode)
+			{
+				OldNode->Modify();
+				OldNode->DestroyNode();
+			}
+		}
+		ExistingGraph->Nodes.Empty();
+
+		// 2. Export source graph's nodes to text (clipboard format preserves pin connections)
+		TSet<UObject*> NodesToExport;
+		for (UEdGraphNode* Node : SourceGraph->Nodes)
+		{
+			if (Node)
+			{
+				NodesToExport.Add(Node);
+			}
+		}
+		FString ExportedText;
+		FEdGraphUtilities::ExportNodesToText(NodesToExport, ExportedText);
+
+		// 3. Import nodes into the existing graph (nodes get correct Outer = ExistingGraph)
+		TSet<UEdGraphNode*> ImportedNodes;
+		FEdGraphUtilities::ImportNodesFromText(ExistingGraph, ExportedText, ImportedNodes);
+
+		ClonedGraph = ExistingGraph;
+	}
+	else
+	{
+		// NEW GRAPH PATH: No existing graph — clone normally
+		ClonedGraph = FEdGraphUtilities::CloneGraph(SourceGraph, TargetBP, nullptr, false);
+		if (!ClonedGraph)
+		{
+			return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to clone graph"));
+		}
+
+		// Ensure the cloned graph has the correct name (CloneGraph may auto-rename on collision)
+		if (!ClonedGraph->GetName().Equals(NewGraphName, ESearchCase::CaseSensitive))
+		{
+			ClonedGraph->Rename(*NewGraphName, TargetBP, REN_DontCreateRedirectors | REN_ForceNoResetLoaders);
+		}
+
+		// Add to the appropriate graph array in the target Blueprint
+		if (bIsFunctionGraph)
+		{
+			TargetBP->FunctionGraphs.Add(ClonedGraph);
+		}
+		else if (bIsUbergraph)
+		{
+			TargetBP->UbergraphPages.Add(ClonedGraph);
+		}
+		else
+		{
+			// Default: treat as function graph
+			TargetBP->FunctionGraphs.Add(ClonedGraph);
+		}
+	}
+
+	// Verify the graph's Outer chain is correct (diagnostic ensure)
+	ensure(ClonedGraph->GetOuter() == TargetBP);
+	ensure(FBlueprintEditorUtils::FindBlueprintForGraph(ClonedGraph) == TargetBP);
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(TargetBP);
+
+	// Post-mark verification: ensure MarkBlueprintAsStructurallyModified didn't disrupt the Outer
+	if (ClonedGraph->GetOuter() != TargetBP)
+	{
+		// Recovery: force re-outer the graph back to the Blueprint
+		ClonedGraph->Rename(*ClonedGraph->GetName(), TargetBP, REN_DontCreateRedirectors | REN_ForceNoResetLoaders);
+	}
+
+	// Count nodes for response
+	int32 NodeCount = ClonedGraph->Nodes.Num();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("graph_name"), NewGraphName);
+	Data->SetNumberField(TEXT("node_count"), NodeCount);
+	Data->SetStringField(TEXT("source_bp"), SourceBpPath);
+	Data->SetStringField(TEXT("target_bp"), TargetBpPath);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveGraph(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath, GraphName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	if (!Graph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Graph '%s' not found in Blueprint"), *GraphName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpRemoveGraph", "SmithUE: Remove Blueprint Graph"));
+
+	Blueprint->FunctionGraphs.Remove(Graph);
+	Blueprint->UbergraphPages.Remove(Graph);
+	FBlueprintEditorUtils::RemoveGraph(Blueprint, Graph);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("removed_graph"), GraphName);
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRenameGraph(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name"), TEXT("new_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath, GraphName, NewName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+	Params->TryGetStringField(TEXT("new_name"), NewName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	if (!Graph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Graph '%s' not found in Blueprint"), *GraphName));
+	}
+
+	// Check if new name already exists
+	FName NewFName(*NewName);
+	UEdGraph* Existing = FindGraph(Blueprint, NewName);
+	if (Existing && Existing != Graph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("A graph named '%s' already exists"), *NewName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpRenameGraph", "SmithUE: Rename Blueprint Graph"));
+
+	FName OldFName = Graph->GetFName();
+
+	// Rename the graph UObject
+	Graph->Rename(*NewName, Graph->GetOuter(), REN_DontCreateRedirectors);
+
+	// Update the FunctionEntry node's FunctionReference if this is a function graph
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (UK2Node_FunctionEntry* Entry = Cast<UK2Node_FunctionEntry>(Node))
+		{
+			FMemberReference& Ref = Entry->FunctionReference;
+			if (Ref.GetMemberName() == OldFName)
+			{
+				Ref.SetSelfMember(NewFName);
+			}
+			break;
+		}
+	}
+
+	// Update all K2Node_CallFunction nodes in this Blueprint that reference the old function name
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	int32 UpdatedCallers = 0;
+	for (UEdGraph* OtherGraph : AllGraphs)
+	{
+		if (!OtherGraph) { continue; }
+		for (UEdGraphNode* Node : OtherGraph->Nodes)
+		{
+			UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node);
+			if (!CallNode) { continue; }
+
+			FMemberReference& FuncRef = CallNode->FunctionReference;
+			if (FuncRef.GetMemberName() == OldFName)
+			{
+				// Check if it references Self or the generated class
+				UClass* MemberParent = FuncRef.GetMemberParentClass();
+				if (MemberParent == nullptr || MemberParent == Blueprint->SkeletonGeneratedClass || MemberParent == Blueprint->GeneratedClass)
+				{
+					FuncRef.SetSelfMember(NewFName);
+					UpdatedCallers++;
+				}
+			}
+		}
+	}
+
+	// Fix local variable scope references in the renamed graph
+	// Local var Get/Set nodes store scope as a string (old graph name); update to new name.
+	int32 FixedLocalVarScopes = 0;
+	FString OldNameStr = OldFName.ToString();
+	FString NewNameStr = NewFName.ToString();
+
+	// Build GUID map from FunctionEntry's LocalVariables
+	TMap<FName, FGuid> LocalVarGuids;
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (UK2Node_FunctionEntry* Entry = Cast<UK2Node_FunctionEntry>(Node))
+		{
+			for (const FBPVariableDescription& LocalVar : Entry->LocalVariables)
+			{
+				LocalVarGuids.Add(LocalVar.VarName, LocalVar.VarGuid);
+			}
+			break;
+		}
+	}
+
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		UK2Node_Variable* VarNode = Cast<UK2Node_Variable>(Node);
+		if (!VarNode) { continue; }
+		FMemberReference& VarRef = VarNode->VariableReference;
+		if (!VarRef.IsLocalScope()) { continue; }
+		if (VarRef.GetMemberScopeName() == OldNameStr)
+		{
+			FName VarName = VarRef.GetMemberName();
+			FGuid VarGuid = VarRef.GetMemberGuid();
+			if (!VarGuid.IsValid())
+			{
+				if (FGuid* Found = LocalVarGuids.Find(VarName))
+				{
+					VarGuid = *Found;
+				}
+			}
+			VarRef.SetLocalMember(VarName, NewNameStr, VarGuid);
+			FixedLocalVarScopes++;
+		}
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("old_name"), GraphName);
+	Data->SetStringField(TEXT("new_name"), NewName);
+	Data->SetNumberField(TEXT("updated_callers"), UpdatedCallers);
+	Data->SetNumberField(TEXT("fixed_local_var_scopes"), FixedLocalVarScopes);
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpFixupSelfReferences(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpFixupSelf", "SmithUE: Fixup Self References"));
+
+	// STEP 1: Force skeleton regeneration so all variables and functions are available
+	// This is critical because bp_add_variable and bp_copy_graph add entries without refreshing the skeleton
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	EBlueprintCompileOptions CompileOpts = EBlueprintCompileOptions::SkipGarbageCollection | EBlueprintCompileOptions::RegenerateSkeletonOnly;
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, CompileOpts);
+
+	UClass* SkeletonClass = Blueprint->SkeletonGeneratedClass;
+	if (!SkeletonClass) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Cannot get SkeletonGeneratedClass after regeneration")); }
+
+	// Collect all function graph names in this Blueprint for function call fixup
+	TSet<FName> LocalFunctionNames;
+	for (UEdGraph* FuncGraph : Blueprint->FunctionGraphs)
+	{
+		if (FuncGraph) { LocalFunctionNames.Add(FuncGraph->GetFName()); }
+	}
+
+	// Collect all variable names available via the skeleton class + SCS components + NewVariables
+	TSet<FName> LocalVariableNames;
+	for (TFieldIterator<FProperty> It(SkeletonClass); It; ++It)
+	{
+		LocalVariableNames.Add(It->GetFName());
+	}
+	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
+	{
+		LocalVariableNames.Add(Var.VarName);
+	}
+	if (Blueprint->SimpleConstructionScript)
+	{
+		for (USCS_Node* SCSNode : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (SCSNode)
+			{
+				LocalVariableNames.Add(SCSNode->GetVariableName());
+			}
+		}
+	}
+
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+
+	int32 FixedVarNodes = 0;
+	int32 FixedFuncNodes = 0;
+	int32 FixedEntryNodes = 0;
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!Graph) { continue; }
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) { continue; }
+
+		// Fix UK2Node_FunctionEntry - set FunctionReference to Self for NEW functions only.
+		// After CloneGraph, entry nodes retain stale GUIDs from the source BP.
+		// GetMemberParentClass() may return NULL (unresolvable GUID) or a foreign class.
+		// SetSelfMember ensures pins reconstruct from the local skeleton.
+		// BUT: skip override functions (e.g. UserConstructionScript) — calling SetSelfMember
+		// on an override entry tells UE "I define this function" which conflicts with the parent.
+		if (UK2Node_FunctionEntry* EntryNode = Cast<UK2Node_FunctionEntry>(Node))
+		{
+			FName GraphFName = Graph->GetFName();
+			if (LocalFunctionNames.Contains(GraphFName))
+			{
+				// Check if this function is an override of a parent class function
+				UFunction* ParentFunc = nullptr;
+				if (UClass* SuperClass = SkeletonClass->GetSuperClass())
+				{
+					ParentFunc = SuperClass->FindFunctionByName(GraphFName);
+				}
+				if (!ParentFunc)
+				{
+					// Not an override — safe to fix
+					EntryNode->FunctionReference.SetSelfMember(GraphFName);
+					FixedEntryNodes++;
+				}
+			}
+		}
+		// Fix UK2Node_VariableGet
+		if (UK2Node_VariableGet* VarGetNode = Cast<UK2Node_VariableGet>(Node))
+		{
+			FName VarName = VarGetNode->VariableReference.GetMemberName();
+			if (LocalVariableNames.Contains(VarName) && !VarGetNode->VariableReference.IsLocalScope())
+			{
+				// ALWAYS force SetSelfMember for any variable get referencing a local variable.
+				// After CloneGraph, self-context nodes retain stale GUIDs from the source BP.
+				// This clears the GUID and forces name-based resolution.
+				VarGetNode->VariableReference.SetSelfMember(VarName);
+				FixedVarNodes++;
+			}
+		}
+		// Fix UK2Node_VariableSet
+		else if (UK2Node_VariableSet* VarSetNode = Cast<UK2Node_VariableSet>(Node))
+		{
+			FName VarName = VarSetNode->VariableReference.GetMemberName();
+			if (LocalVariableNames.Contains(VarName) && !VarSetNode->VariableReference.IsLocalScope())
+			{
+				VarSetNode->VariableReference.SetSelfMember(VarName);
+				FixedVarNodes++;
+			}
+		}
+		// Fix UK2Node_CallFunction targeting self functions
+		else if (UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node))
+		{
+			FName FuncName = CallNode->FunctionReference.GetMemberName();
+			if (LocalFunctionNames.Contains(FuncName))
+			{
+				// ALWAYS force SetSelfMember for any call to a local function.
+				// After CloneGraph, self-context nodes retain stale GUIDs from the source BP.
+				// GetMemberParentClass() may resolve to SkeletonClass (appearing correct),
+				// but the internal GUID won't match local function GUIDs, causing compile failures.
+				// SetSelfMember clears the GUID and forces name-based resolution which always works.
+				CallNode->FunctionReference.SetSelfMember(FuncName);
+				FixedFuncNodes++;
+			}
+		}
+		}
+	}
+
+	// STEP 2: Regenerate skeleton AGAIN after fixing references.
+	// The first skeleton regen (before fixup) may have generated incorrect function signatures
+	// because entry nodes still pointed to foreign classes. Now that entries are fixed,
+	// regenerating the skeleton produces correct function signatures (including TMap parameters).
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, CompileOpts);
+
+	// STEP 3: Now refresh all nodes with the CORRECT skeleton - this reconstructs pins properly
+	FBlueprintEditorUtils::RefreshAllNodes(Blueprint);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	Data->SetNumberField(TEXT("fixed_entry_nodes"), FixedEntryNodes);
+	Data->SetNumberField(TEXT("fixed_variable_nodes"), FixedVarNodes);
+	Data->SetNumberField(TEXT("fixed_function_nodes"), FixedFuncNodes);
+	Data->SetNumberField(TEXT("total_fixed"), FixedEntryNodes + FixedVarNodes + FixedFuncNodes);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpFixLocalVarScope(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString BpPath;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpFixLocalVarScope", "SmithUE: Fix Local Variable Scopes"));
+
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+
+	int32 TotalFixed = 0;
+	TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!Graph) { continue; }
+
+		FName GraphFName = Graph->GetFName();
+		FString GraphNameStr = GraphFName.ToString();
+
+		// Build GUID map from FunctionEntry's LocalVariables for this graph
+		TMap<FName, FGuid> LocalVarGuids;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (UK2Node_FunctionEntry* Entry = Cast<UK2Node_FunctionEntry>(Node))
+			{
+				for (const FBPVariableDescription& LocalVar : Entry->LocalVariables)
+				{
+					LocalVarGuids.Add(LocalVar.VarName, LocalVar.VarGuid);
+				}
+				break;
+			}
+		}
+		if (LocalVarGuids.Num() == 0) { continue; } // No local vars declared here
+
+		int32 FixedInGraph = 0;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			UK2Node_Variable* VarNode = Cast<UK2Node_Variable>(Node);
+			if (!VarNode) { continue; }
+			FMemberReference& VarRef = VarNode->VariableReference;
+			if (!VarRef.IsLocalScope()) { continue; }
+
+			FName VarName = VarRef.GetMemberName();
+			// Only fix if this variable is actually declared as local in THIS graph
+			if (!LocalVarGuids.Contains(VarName)) { continue; }
+
+			if (VarRef.GetMemberScopeName() != GraphNameStr)
+			{
+				FGuid VarGuid = VarRef.GetMemberGuid();
+				if (!VarGuid.IsValid())
+				{
+					if (FGuid* Found = LocalVarGuids.Find(VarName))
+					{
+						VarGuid = *Found;
+					}
+				}
+				VarRef.SetLocalMember(VarName, GraphNameStr, VarGuid);
+				FixedInGraph++;
+			}
+		}
+
+		if (FixedInGraph > 0)
+		{
+			Details->SetNumberField(GraphNameStr, FixedInGraph);
+			TotalFixed += FixedInGraph;
+		}
+	}
+
+	if (TotalFixed > 0)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	Data->SetNumberField(TEXT("total_fixed"), TotalFixed);
+	Data->SetObjectField(TEXT("details"), Details);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

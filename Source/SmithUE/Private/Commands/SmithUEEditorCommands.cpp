@@ -5,6 +5,7 @@
 #include "ToolRegistry/SmithUEToolSchema.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "SmithUEModule.h"
+#include "ComponentReregisterContext.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "Engine/PostProcessVolume.h"
@@ -239,7 +240,15 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleSpawnActor(const TSharedPt
     }
 
     // --- find UClass by name ---
-    UClass* ActorClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
+    UClass* ActorClass = nullptr;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        if (It->GetName() == ClassName && It->IsChildOf(AActor::StaticClass()))
+        {
+            ActorClass = *It;
+            break;
+        }
+    }
     if (!ActorClass)
     {
         // Try loading it (handles short names like "StaticMeshActor")

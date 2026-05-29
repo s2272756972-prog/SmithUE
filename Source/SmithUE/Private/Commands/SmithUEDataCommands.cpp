@@ -69,7 +69,7 @@ namespace SmithUEData
         FARFilter Filter;
         Filter.PackagePaths.Add(FName(TEXT("/Game")));
         Filter.bRecursivePaths = true;
-        Filter.ClassNames.Add(UUserDefinedStruct::StaticClass()->GetFName());
+        Filter.ClassPaths.Add(UUserDefinedStruct::StaticClass()->GetClassPathName());
 
         TArray<FAssetData> Assets;
         AssetRegistryModule.Get().GetAssets(Filter, Assets);
