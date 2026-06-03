@@ -692,19 +692,19 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleOpenMap(const TSharedPtr<F
         return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Invalid map path: %s"), *MapPath));
     }
 
-    if (!FEditorFileUtils::LoadMap(FilePath))
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to open map: %s"), *MapPath));
-    }
-
-    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-    if (!World)
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to get editor world after opening map"));
-    }
+    // LoadMap destroys the current world — calling it from inside a Tick-dispatched
+    // TaskGraph task causes a TickTaskLevel assertion crash. Defer to next frame.
+    FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateLambda([FilePath](float) -> bool
+        {
+            FEditorFileUtils::LoadMap(FilePath);
+            return false; // one-shot
+        }),
+        0.0f);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("map_name"), World->GetMapName());
+    Data->SetStringField(TEXT("map_path"), MapPath);
+    Data->SetStringField(TEXT("status"), TEXT("pending — map will open next frame"));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
