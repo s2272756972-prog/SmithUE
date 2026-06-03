@@ -160,7 +160,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Blueprint"),
             TEXT("Get Blueprint metadata summary"),
             {
-                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true)
             }),
         &HandleBpGetSummary);
 
@@ -170,7 +170,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Blueprint"),
             TEXT("Describe all nodes and connections in a Blueprint graph"),
             {
-                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
                 FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name"), true)
             }),
         &HandleBpDescribeGraph);
@@ -181,7 +181,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Blueprint"),
             TEXT("Compile Blueprint DSL into a Blueprint"),
             {
-                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
                 FSmithUEToolParam(TEXT("code"), TEXT("string"), TEXT("Blueprint DSL text"), true)
             }),
         &HandleBpCompileCode);

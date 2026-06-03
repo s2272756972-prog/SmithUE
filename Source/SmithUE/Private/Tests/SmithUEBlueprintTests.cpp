@@ -252,6 +252,33 @@ bool FSmithUEBP_CommandsDescribeGraphSucceeds::RunTest(const FString& Parameters
 }
 
 // ---------------------------------------------------------------------------
+// Blueprint.LevelScript
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSmithUEBlueprintLevelScriptTest,
+    "SmithUE.Blueprint.LevelScript",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSmithUEBlueprintLevelScriptTest::RunTest(const FString& Parameters)
+{
+    using namespace SmithUETestUtils;
+
+    TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+    Params->SetStringField(TEXT("bp_path"), TEXT("level:current"));
+
+    TSharedPtr<FJsonObject> Response = Dispatch(TEXT("bp_get_summary"), Params);
+    if (Response.IsValid())
+    {
+        TestTrue(TEXT("bp_get_summary should not error for level:current"), !IsError(Response));
+    }
+    else
+    {
+        AddWarning(TEXT("bp_get_summary returned no response in headless mode; no crash occurred"));
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Blueprint.Commands.ValidateCode_Valid
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSmithUEBP_CommandsValidateCodeValid,

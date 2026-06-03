@@ -29,7 +29,9 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "FileHelpers.h"
 #include "Materials/MaterialExpression.h"
+#include "Misc/PackageName.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Engine/Blueprint.h"
 
@@ -182,6 +184,17 @@ void FSmithUEEditorCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("weight"),        TEXT("number"), TEXT("Blend weight (0.0-1.0, default 1.0)"))
             }),
         &HandleAddPostProcessMaterial);
+
+    // open_map
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("open_map"),
+            TEXT("Editor"),
+            TEXT("Open a map asset in the Unreal Editor"),
+            {
+                FSmithUEToolParam(TEXT("map_path"), TEXT("string"), TEXT("Map asset path (e.g. /Game/Maps/MyMap)"), true)
+            }),
+        &HandleOpenMap);
 
     // get_project_setting
     Registry.Register(
@@ -655,6 +668,45 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleAddPostProcessMaterial(con
      Data->SetNumberField(TEXT("blendable_count"), PPV->Settings.WeightedBlendables.Array.Num());
      return FSmithUECommonUtils::CreateSuccessResponse(Data);
  }
+
+// ---------------------------------------------------------------------------
+// Command 7: open_map
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleOpenMap(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid parameters"));
+    }
+
+    FString MapPath;
+    if (!Params->TryGetStringField(TEXT("map_path"), MapPath) || MapPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required param: 'map_path'"));
+    }
+
+    FString FilePath;
+    if (!FPackageName::TryConvertLongPackageNameToFilename(MapPath, FilePath, FPackageName::GetMapPackageExtension()))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Invalid map path: %s"), *MapPath));
+    }
+
+    if (!FEditorFileUtils::LoadMap(FilePath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to open map: %s"), *MapPath));
+    }
+
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!World)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to get editor world after opening map"));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("map_name"), World->GetMapName());
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
 
  // ---------------------------------------------------------------------------
  // Command 7: get_project_setting

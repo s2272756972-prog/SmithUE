@@ -19,8 +19,10 @@
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/LevelScriptBlueprint.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
+#include "Editor.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_EnhancedInputAction.h"
@@ -46,18 +48,18 @@ using namespace SmithUEBpAtomicAPIHelpers;
 void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 {
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_create"), TEXT("Blueprint"), TEXT("Create a new Blueprint asset"), { FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Blueprint asset name"), true), FSmithUEToolParam(TEXT("parent_class"), TEXT("string"), TEXT("Parent class name"), true), FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Destination content path"), true) }), &HandleBpCreate);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_function"), TEXT("Blueprint"), TEXT("Add a function graph to a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("New function name"), true), FSmithUEToolParam(TEXT("inputs"), TEXT("array"), TEXT("Optional input pin definitions"), false, FString(), TEXT("object")), FSmithUEToolParam(TEXT("outputs"), TEXT("array"), TEXT("Optional output pin definitions"), false, FString(), TEXT("object")) }), &HandleBpAddFunction);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function name or 'ClassName::FunctionName' for K2Node_CallFunction nodes"), false), FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable name for K2Node_VariableGet or K2Node_VariableSet nodes"), false), FSmithUEToolParam(TEXT("macro_path"), TEXT("string"), TEXT("Macro graph asset path for K2Node_MacroInstance nodes"), false), FSmithUEToolParam(TEXT("key"), TEXT("string"), TEXT("Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes"), false), FSmithUEToolParam(TEXT("input_action"), TEXT("string"), TEXT("InputAction asset path for K2Node_EnhancedInputAction nodes"), false), FSmithUEToolParam(TEXT("target_class"), TEXT("string"), TEXT("Target class path for K2Node_DynamicCast nodes"), false) }), &HandleBpCreateNode);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_connect_pins"), TEXT("Blueprint"), TEXT("Connect two Blueprint node pins"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpConnectPins);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_pin_default"), TEXT("Blueprint"), TEXT("Set a Blueprint node pin default value"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true), FSmithUEToolParam(TEXT("pin_name"), TEXT("string"), TEXT("Pin name"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Default value string"), true) }), &HandleBpSetPinDefault);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_function"), TEXT("Blueprint"), TEXT("Add a function graph to a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("New function name"), true), FSmithUEToolParam(TEXT("inputs"), TEXT("array"), TEXT("Optional input pin definitions"), false, FString(), TEXT("object")), FSmithUEToolParam(TEXT("outputs"), TEXT("array"), TEXT("Optional output pin definitions"), false, FString(), TEXT("object")) }), &HandleBpAddFunction);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function name or 'ClassName::FunctionName' for K2Node_CallFunction nodes"), false), FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable name for K2Node_VariableGet or K2Node_VariableSet nodes"), false), FSmithUEToolParam(TEXT("macro_path"), TEXT("string"), TEXT("Macro graph asset path for K2Node_MacroInstance nodes"), false), FSmithUEToolParam(TEXT("key"), TEXT("string"), TEXT("Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes"), false), FSmithUEToolParam(TEXT("input_action"), TEXT("string"), TEXT("InputAction asset path for K2Node_EnhancedInputAction nodes"), false), FSmithUEToolParam(TEXT("target_class"), TEXT("string"), TEXT("Target class path for K2Node_DynamicCast nodes"), false) }), &HandleBpCreateNode);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_connect_pins"), TEXT("Blueprint"), TEXT("Connect two Blueprint node pins"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpConnectPins);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_pin_default"), TEXT("Blueprint"), TEXT("Set a Blueprint node pin default value"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true), FSmithUEToolParam(TEXT("pin_name"), TEXT("string"), TEXT("Pin name"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Default value string"), true) }), &HandleBpSetPinDefault);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_variable"), TEXT("Blueprint"), TEXT("Remove a Blueprint member variable by name"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name to remove"), true) }), &HandleBpRemoveVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_override_function"), TEXT("Blueprint"), TEXT("Override a parent class function in a Blueprint (creates proper override graph with correct signature)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Parent function name to override"), true) }), &HandleBpOverrideFunction);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true) }), &HandleBpCompile);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true) }), &HandleBpCompile);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_reparent"), TEXT("Blueprint"), TEXT("Change the parent class of a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("new_parent_class"), TEXT("string"), TEXT("New parent class name or Blueprint path"), true) }), &HandleBpReparent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_copy_graph"), TEXT("Blueprint"), TEXT("Copy a function graph from one Blueprint to another"), { FSmithUEToolParam(TEXT("source_bp"), TEXT("string"), TEXT("Source Blueprint asset path"), true), FSmithUEToolParam(TEXT("target_bp"), TEXT("string"), TEXT("Target Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Function graph name to copy"), true), FSmithUEToolParam(TEXT("new_graph_name"), TEXT("string"), TEXT("Optional new name for the copied graph")), FSmithUEToolParam(TEXT("overwrite"), TEXT("boolean"), TEXT("If true, removes existing graph with same name before copying")) }), &HandleBpCopyGraph);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_graph"), TEXT("Blueprint"), TEXT("Remove a function graph or ubergraph page from a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name to remove"), true) }), &HandleBpRemoveGraph);
@@ -68,6 +70,43 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 
 UBlueprint* FSmithUEBpAtomicAPI::LoadBlueprint(const FString& BpPath)
 {
+	if (BpPath.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	if (BpPath.StartsWith(TEXT("level:"), ESearchCase::IgnoreCase))
+	{
+		const FString LevelPath = BpPath.Mid(6);
+		if (LevelPath.Equals(TEXT("current"), ESearchCase::IgnoreCase))
+		{
+			if (!GEditor)
+			{
+				UE_LOG(LogSmithUE, Warning, TEXT("LoadBlueprint failed: GEditor is null for level:current"));
+				return nullptr;
+			}
+
+			UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+			if (!EditorWorld || !EditorWorld->PersistentLevel)
+			{
+				UE_LOG(LogSmithUE, Warning, TEXT("LoadBlueprint failed: editor world or persistent level is null for level:current"));
+				return nullptr;
+			}
+
+			return Cast<UBlueprint>(EditorWorld->PersistentLevel->GetLevelScriptBlueprint(true));
+		}
+
+		const FString NormalizedPath = NormalizeObjectPath(LevelPath);
+		UWorld* MapWorld = FindObject<UWorld>(nullptr, *NormalizedPath);
+		if (!MapWorld || !MapWorld->PersistentLevel)
+		{
+			UE_LOG(LogSmithUE, Warning, TEXT("LoadBlueprint failed: level map not found in memory: %s"), *NormalizedPath);
+			return nullptr;
+		}
+
+		return Cast<UBlueprint>(MapWorld->PersistentLevel->GetLevelScriptBlueprint(true));
+	}
+
 	return BpPath.IsEmpty() ? nullptr : LoadObject<UBlueprint>(nullptr, *NormalizeObjectPath(BpPath));
 }
 
