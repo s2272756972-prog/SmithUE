@@ -698,6 +698,10 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleOpenMap(const TSharedPtr<F
         FTickerDelegate::CreateLambda([FilePath](float) -> bool
         {
             FEditorFileUtils::LoadMap(FilePath);
+            if (GEditor)
+            {
+                GEditor->RedrawAllViewports();
+            }
             return false; // one-shot
         }),
         0.0f);

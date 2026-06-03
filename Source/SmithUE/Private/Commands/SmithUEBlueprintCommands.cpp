@@ -2,6 +2,7 @@
 
 #include "Commands/SmithUEBlueprintCommands.h"
 #include "Blueprint/SmithUEBpAtomicAPI.h"
+#include "Blueprint/SmithUEBpAtomicAPIHelpers.h"
 #include "Blueprint/SmithUEBpCompiler.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "ToolRegistry/SmithUEToolSchema.h"
@@ -168,10 +169,11 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_describe_graph"),
             TEXT("Blueprint"),
-            TEXT("Describe all nodes and connections in a Blueprint graph"),
+            TEXT("Describe nodes in a Blueprint graph. mode: full(default)/compact/summary/node_pins/exec_chain. exec_chain mode follows exec pins from entry points (add entry_node param to start from specific N-id)."),
             {
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
-                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name"), true)
+                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name"), true),
+                FSmithUEToolParam(TEXT("entry_node"), TEXT("string"), TEXT("For exec_chain mode: N-id to start BFS from (default: all entry points)"))
             }),
         &HandleBpDescribeGraph);
 
@@ -470,7 +472,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
     Params->TryGetStringField(TEXT("bp_path"), BpPath);
     Params->TryGetStringField(TEXT("graph_name"), GraphName);
 
-    // Mode parameter: "full" (default), "compact", "summary", "node_pins"
+    // Mode parameter: "full" (default), "compact", "summary", "node_pins", "exec_chain"
     FString Mode = TEXT("full");
     Params->TryGetStringField(TEXT("mode"), Mode);
 
@@ -532,6 +534,78 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
             }
         }
         FSmithUEToolRegistry::Get().NidSession.StoreNids(GraphPath, IndexToGuid);
+    }
+
+    // For exec_chain mode: collect only exec-reachable nodes via BFS.
+    // IMPORTANT: placed after StoreNids so entry_node N-id resolution works.
+    TSet<UEdGraphNode*> ExecChainNodes;
+    if (Mode == TEXT("exec_chain"))
+    {
+        TQueue<UEdGraphNode*> BfsQueue;
+
+        // Optional: start from a specific node.
+        FString EntryNodeId;
+        if (Params->TryGetStringField(TEXT("entry_node"), EntryNodeId) && !EntryNodeId.IsEmpty())
+        {
+            FString DummyError;
+            const FString GraphPath = BpPath + TEXT("::") + GraphName;
+            UEdGraphNode* StartNode = SmithUEBpAtomicAPIHelpers::ResolveNodeId(Graph, GraphPath, EntryNodeId, DummyError);
+            if (StartNode)
+            {
+                BfsQueue.Enqueue(StartNode);
+            }
+        }
+        else
+        {
+            // Find all entry point nodes (events, function entries, input key nodes).
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (!Node)
+                {
+                    continue;
+                }
+                const FString NodeClass = Node->GetClass()->GetName();
+                if (NodeClass.Contains(TEXT("K2Node_FunctionEntry")) ||
+                    NodeClass.Contains(TEXT("K2Node_Event")) ||
+                    NodeClass.Contains(TEXT("K2Node_InputKey")) ||
+                    NodeClass.Contains(TEXT("K2Node_InputAction")) ||
+                    NodeClass.Contains(TEXT("K2Node_EnhancedInputAction")) ||
+                    NodeClass.Contains(TEXT("K2Node_CustomEvent")))
+                {
+                    BfsQueue.Enqueue(Node);
+                }
+            }
+        }
+
+        // BFS following exec output pins only.
+        while (!BfsQueue.IsEmpty())
+        {
+            UEdGraphNode* Current = nullptr;
+            BfsQueue.Dequeue(Current);
+            if (!Current || ExecChainNodes.Contains(Current))
+            {
+                continue;
+            }
+            ExecChainNodes.Add(Current);
+            for (UEdGraphPin* Pin : Current->Pins)
+            {
+                if (!Pin || Pin->Direction != EGPD_Output)
+                {
+                    continue;
+                }
+                if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+                {
+                    continue;
+                }
+                for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                {
+                    if (LinkedPin && LinkedPin->GetOwningNode())
+                    {
+                        BfsQueue.Enqueue(LinkedPin->GetOwningNode());
+                    }
+                }
+            }
+        }
     }
 
     // Helper: resolve a linked pin to "ShortId.PinName"
@@ -659,6 +733,12 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
             continue;
         }
 
+        // exec_chain mode: skip nodes not on the exec path.
+        if (Mode == TEXT("exec_chain") && !ExecChainNodes.Contains(Node))
+        {
+            continue;
+        }
+
         // node_pins mode: skip nodes not in the requested list
         if (Mode == TEXT("node_pins") && !NodeIdsFilter.Contains(*ShortId))
         {
@@ -673,7 +753,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
         // summary mode: no pins
         if (Mode != TEXT("summary"))
         {
-            const bool bCompact = (Mode == TEXT("compact"));
+            const bool bCompact = (Mode == TEXT("compact") || Mode == TEXT("exec_chain"));
             TArray<TSharedPtr<FJsonValue>> Inputs;
             TArray<TSharedPtr<FJsonValue>> Outputs;
             BuildPinArrays(Node, Inputs, Outputs, bCompact);

@@ -46,12 +46,67 @@
 
 using namespace SmithUEBpAtomicAPIHelpers;
 
+namespace
+{
+	bool DisconnectPinsImpl(UBlueprint* Blueprint, UEdGraph* Graph, const FString& GraphPath, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName, FString& OutError)
+	{
+		UEdGraphNode* SourceNode = ResolveNodeId(Graph, GraphPath, SourceNodeId, OutError);
+		if (!SourceNode && !OutError.IsEmpty()) { return false; }
+		UEdGraphNode* TargetNode = ResolveNodeId(Graph, GraphPath, TargetNodeId, OutError);
+		if (!TargetNode && !OutError.IsEmpty()) { return false; }
+		if (!SourceNode || !TargetNode) { OutError = TEXT("Source or target node not found"); return false; }
+
+		TArray<FString> SourceSuggestions;
+		UEdGraphPin* SourcePin = FindPin(SourceNode, SourcePinName, &SourceSuggestions);
+		if (!SourcePin)
+		{
+			if (SourceSuggestions.Num() > 0)
+			{
+				TSharedPtr<FJsonObject> Err = FSmithUECommonUtils::CreateErrorResponse(
+					FString::Printf(TEXT("Pin '%s' is ambiguous on node %s. Did you mean one of the suggestions?"),
+						*SourcePinName, *SourceNode->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+				AppendJsonStringArray(Err, TEXT("suggestions"), SourceSuggestions);
+				Err->SetStringField(TEXT("hint"), TEXT("Use exact pin name from suggestions list"));
+				OutError = FSmithUECommonUtils::SerializeJson(Err);
+				return false;
+			}
+			OutError = TEXT("Source or target pin not found");
+			return false;
+		}
+
+		TArray<FString> TargetSuggestions;
+		UEdGraphPin* TargetPin = FindPin(TargetNode, TargetPinName, &TargetSuggestions);
+		if (!TargetPin)
+		{
+			if (TargetSuggestions.Num() > 0)
+			{
+				TSharedPtr<FJsonObject> Err = FSmithUECommonUtils::CreateErrorResponse(
+					FString::Printf(TEXT("Pin '%s' is ambiguous on node %s. Did you mean one of the suggestions?"),
+						*TargetPinName, *TargetNode->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+				AppendJsonStringArray(Err, TEXT("suggestions"), TargetSuggestions);
+				Err->SetStringField(TEXT("hint"), TEXT("Use exact pin name from suggestions list"));
+				OutError = FSmithUECommonUtils::SerializeJson(Err);
+				return false;
+			}
+			OutError = TEXT("Source or target pin not found");
+			return false;
+		}
+
+		if (!SourcePin->LinkedTo.Contains(TargetPin)) { OutError = TEXT("Pins are not connected"); return false; }
+		SourcePin->BreakLinkTo(TargetPin);
+		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		OutError.Reset();
+		return true;
+	}
+}
+
 void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 {
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_create"), TEXT("Blueprint"), TEXT("Create a new Blueprint asset"), { FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Blueprint asset name"), true), FSmithUEToolParam(TEXT("parent_class"), TEXT("string"), TEXT("Parent class name"), true), FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Destination content path"), true) }), &HandleBpCreate);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_function"), TEXT("Blueprint"), TEXT("Add a function graph to a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("New function name"), true), FSmithUEToolParam(TEXT("inputs"), TEXT("array"), TEXT("Optional input pin definitions"), false, FString(), TEXT("object")), FSmithUEToolParam(TEXT("outputs"), TEXT("array"), TEXT("Optional output pin definitions"), false, FString(), TEXT("object")) }), &HandleBpAddFunction);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function name or 'ClassName::FunctionName' for K2Node_CallFunction nodes"), false), FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable name for K2Node_VariableGet or K2Node_VariableSet nodes"), false), FSmithUEToolParam(TEXT("macro_path"), TEXT("string"), TEXT("Macro graph asset path for K2Node_MacroInstance nodes"), false), FSmithUEToolParam(TEXT("key"), TEXT("string"), TEXT("Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes"), false), FSmithUEToolParam(TEXT("input_action"), TEXT("string"), TEXT("InputAction asset path for K2Node_EnhancedInputAction nodes"), false), FSmithUEToolParam(TEXT("target_class"), TEXT("string"), TEXT("Target class path for K2Node_DynamicCast nodes"), false) }), &HandleBpCreateNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_connect_pins"), TEXT("Blueprint"), TEXT("Connect two Blueprint node pins"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpConnectPins);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_disconnect_pins"), TEXT("Blueprint"), TEXT("Disconnect two Blueprint node pins"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID or N-id"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID or N-id"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpDisconnectPins);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_pin_default"), TEXT("Blueprint"), TEXT("Set a Blueprint node pin default value"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true), FSmithUEToolParam(TEXT("pin_name"), TEXT("string"), TEXT("Pin name"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Default value string"), true) }), &HandleBpSetPinDefault);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
@@ -269,6 +324,14 @@ bool FSmithUEBpAtomicAPI::ConnectPins(UBlueprint* Blueprint, UEdGraph* Graph, co
 	return TryConnectPins(Blueprint, Graph, FString(), SourceNodeId, SourcePinName, TargetNodeId, TargetPinName, Error);
 }
 
+bool FSmithUEBpAtomicAPI::DisconnectPins(UBlueprint* Blueprint, UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName)
+{
+	using namespace SmithUEBpAtomicAPIHelpers;
+	const FString GraphPath = FString();
+	FString Error;
+	return DisconnectPinsImpl(Blueprint, Graph, GraphPath, SourceNodeId, SourcePinName, TargetNodeId, TargetPinName, Error);
+}
+
 bool FSmithUEBpAtomicAPI::SetPinDefault(UBlueprint* Blueprint, UEdGraph* Graph, const FString& NodeId, const FString& PinName, const FString& Value)
 {
 	FString Error;
@@ -457,6 +520,31 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpConnectPins(const TSharedPt
 	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetBoolField(TEXT("connected"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpDisconnectPins(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name"), TEXT("source_node_id"), TEXT("source_pin"), TEXT("target_node_id"), TEXT("target_pin") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BpPath; FString GraphName; FString SourceNodeId; FString SourcePin; FString TargetNodeId; FString TargetPin;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath); Params->TryGetStringField(TEXT("graph_name"), GraphName); Params->TryGetStringField(TEXT("source_node_id"), SourceNodeId); Params->TryGetStringField(TEXT("source_pin"), SourcePin); Params->TryGetStringField(TEXT("target_node_id"), TargetNodeId); Params->TryGetStringField(TEXT("target_pin"), TargetPin);
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph not found")); }
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpDisconnectPins", "SmithUE: Disconnect Blueprint Pins"));
+	const FString GraphPath = BpPath + TEXT("::") + GraphName;
+	if (!DisconnectPinsImpl(Blueprint, Graph, GraphPath, SourceNodeId, SourcePin, TargetNodeId, TargetPin, Error))
+	{
+		if (TSharedPtr<FJsonObject> StructuredError = FSmithUECommonUtils::ParseJson(Error); StructuredError.IsValid())
+		{
+			return StructuredError;
+		}
+		return FSmithUECommonUtils::CreateErrorResponse(Error.IsEmpty() ? TEXT("Failed to disconnect pins") : Error);
+	}
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("disconnected"), true);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
