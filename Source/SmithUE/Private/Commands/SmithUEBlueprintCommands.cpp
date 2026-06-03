@@ -1091,6 +1091,35 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedP
             continue;
         }
         const FString GraphName = Graph->GetName();
+        const FString GraphPath = BpPath + TEXT("::") + GraphName;
+
+        // --- Build / refresh GuidToShortId for this graph (mirrors bp_describe_graph) ---
+        // Always rebuild: ensures the session is fresh and consistent with current node order.
+        TMap<FGuid, FString> GuidToShortId;
+        {
+            int32 NodeIndex = 0;
+            for (UEdGraphNode* N : Graph->Nodes)
+            {
+                if (N)
+                {
+                    GuidToShortId.Add(N->NodeGuid, FString::Printf(TEXT("N%d"), NodeIndex++));
+                }
+            }
+
+            // Store into NidSession so subsequent commands (bp_connect_pins etc.) can resolve.
+            TMap<int32, FGuid> IndexToGuid;
+            IndexToGuid.Reserve(GuidToShortId.Num());
+            for (const TPair<FGuid, FString>& Pair : GuidToShortId)
+            {
+                const FString& NidStr = Pair.Value;
+                if (NidStr.Len() >= 2 && NidStr[0] == TEXT('N'))
+                {
+                    const int32 Idx = FCString::Atoi(*NidStr.Mid(1));
+                    IndexToGuid.Add(Idx, Pair.Key);
+                }
+            }
+            FSmithUEToolRegistry::Get().NidSession.StoreNids(GraphPath, IndexToGuid);
+        }
 
         for (UEdGraphNode* Node : Graph->Nodes)
         {
@@ -1122,9 +1151,13 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedP
                 }
             }
 
+            // Resolve N-id from session map (guaranteed present after StoreNids above).
+            const FString* ShortId = GuidToShortId.Find(Node->NodeGuid);
+            const FString NidStr = ShortId ? *ShortId : Node->NodeGuid.ToString();
+
             // --- Build node object ---
             TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
-            NodeObj->SetStringField(TEXT("nid"),      Node->NodeGuid.ToString());
+            NodeObj->SetStringField(TEXT("nid"),      NidStr);
             NodeObj->SetStringField(TEXT("title"),    Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
             NodeObj->SetStringField(TEXT("type"),     Node->GetClass()->GetName());
             NodeObj->SetStringField(TEXT("graph"),    GraphName);
