@@ -93,8 +93,13 @@ UBlueprint* FSmithUEBpAtomicAPI::LoadBlueprint(const FString& BpPath)
 				return nullptr;
 			}
 
-			return Cast<UBlueprint>(EditorWorld->PersistentLevel->GetLevelScriptBlueprint(true));
+		UBlueprint* LevelBP = Cast<UBlueprint>(EditorWorld->PersistentLevel->GetLevelScriptBlueprint(true));
+		if (!LevelBP)
+		{
+			UE_LOG(LogSmithUE, Warning, TEXT("LoadBlueprint failed: no level script blueprint found for level:current"));
 		}
+		return LevelBP;
+	}
 
 		const FString NormalizedPath = NormalizeObjectPath(LevelPath);
 		UWorld* MapWorld = FindObject<UWorld>(nullptr, *NormalizedPath);
@@ -104,10 +109,15 @@ UBlueprint* FSmithUEBpAtomicAPI::LoadBlueprint(const FString& BpPath)
 			return nullptr;
 		}
 
-		return Cast<UBlueprint>(MapWorld->PersistentLevel->GetLevelScriptBlueprint(true));
+		UBlueprint* MapLevelBP = Cast<UBlueprint>(MapWorld->PersistentLevel->GetLevelScriptBlueprint(true));
+		if (!MapLevelBP)
+		{
+			UE_LOG(LogSmithUE, Warning, TEXT("LoadBlueprint failed: no level script blueprint found for map: %s"), *NormalizedPath);
+		}
+		return MapLevelBP;
 	}
 
-	return BpPath.IsEmpty() ? nullptr : LoadObject<UBlueprint>(nullptr, *NormalizeObjectPath(BpPath));
+	return LoadObject<UBlueprint>(nullptr, *NormalizeObjectPath(BpPath));
 }
 
 UEdGraph* FSmithUEBpAtomicAPI::FindGraph(UBlueprint* Blueprint, const FString& GraphName)
