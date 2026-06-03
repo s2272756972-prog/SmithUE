@@ -209,6 +209,20 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("code"), TEXT("string"), TEXT("Blueprint DSL text"), true)
             }),
         &HandleBpValidateCode);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_search"),
+            TEXT("Blueprint"),
+            TEXT("Search nodes in a Blueprint by name (substring, case-insensitive) and/or type (exact class name). Searches all graphs (event, function, macro)."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
+                FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Substring to match against node title (case-insensitive). Empty = no filter.")),
+                FSmithUEToolParam(TEXT("type"), TEXT("string"), TEXT("Exact node class name to match (e.g. 'K2Node_CallFunction'). Empty = no filter.")),
+                FSmithUEToolParam(TEXT("verbose"), TEXT("boolean"), TEXT("If true, include pins (in/out) for each matched node. Default false.")),
+                FSmithUEToolParam(TEXT("limit"), TEXT("integer"), TEXT("Maximum number of nodes to return. Default 100."))
+            }),
+        &HandleBpSearch);
 }
 
 TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetSummary(const TSharedPtr<FJsonObject>& Params)
@@ -1022,5 +1036,155 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpValidateCode(const TS
     {
         Data->SetStringField(TEXT("error"), SyntaxError);
     }
+    return WrapSuccess(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path")}, Error))
+    {
+        return MakeErrResp(Error);
+    }
+
+    FString BpPath;
+    Params->TryGetStringField(TEXT("bp_path"), BpPath);
+
+    UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+    if (!BP)
+    {
+        return MakeErrResp(FString::Printf(TEXT("Failed to load blueprint: %s"), *BpPath));
+    }
+
+    // --- Filter params ---
+    FString NameFilter;
+    Params->TryGetStringField(TEXT("name"), NameFilter);
+    const FString NameFilterLower = NameFilter.ToLower();
+
+    FString TypeFilter;
+    Params->TryGetStringField(TEXT("type"), TypeFilter);
+
+    bool bVerbose = false;
+    Params->TryGetBoolField(TEXT("verbose"), bVerbose);
+
+    int32 Limit = 100;
+    {
+        int32 LimitParam = 0;
+        if (Params->TryGetNumberField(TEXT("limit"), LimitParam) && LimitParam > 0)
+        {
+            Limit = LimitParam;
+        }
+    }
+
+    // --- Collect all graphs ---
+    TArray<UEdGraph*> AllGraphs;
+    BP->GetAllGraphs(AllGraphs);
+
+    // --- Search nodes ---
+    TArray<TSharedPtr<FJsonValue>> ResultNodes;
+    int32 MatchCount = 0;
+
+    for (UEdGraph* Graph : AllGraphs)
+    {
+        if (!Graph)
+        {
+            continue;
+        }
+        const FString GraphName = Graph->GetName();
+
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (!Node)
+            {
+                continue;
+            }
+            if (MatchCount >= Limit)
+            {
+                break;
+            }
+
+            // --- Type filter (exact class name match) ---
+            if (!TypeFilter.IsEmpty())
+            {
+                if (!Node->GetClass()->GetName().Equals(TypeFilter, ESearchCase::IgnoreCase))
+                {
+                    continue;
+                }
+            }
+
+            // --- Name filter (case-insensitive substring of full title) ---
+            if (!NameFilterLower.IsEmpty())
+            {
+                const FString TitleLower = Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString().ToLower();
+                if (!TitleLower.Contains(NameFilterLower))
+                {
+                    continue;
+                }
+            }
+
+            // --- Build node object ---
+            TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
+            NodeObj->SetStringField(TEXT("nid"),      Node->NodeGuid.ToString());
+            NodeObj->SetStringField(TEXT("title"),    Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+            NodeObj->SetStringField(TEXT("type"),     Node->GetClass()->GetName());
+            NodeObj->SetStringField(TEXT("graph"),    GraphName);
+            NodeObj->SetObjectField(TEXT("position"), [&]()
+            {
+                TSharedPtr<FJsonObject> Pos = MakeShared<FJsonObject>();
+                Pos->SetNumberField(TEXT("x"), Node->NodePosX);
+                Pos->SetNumberField(TEXT("y"), Node->NodePosY);
+                return Pos;
+            }());
+
+            // --- Verbose: include pins ---
+            if (bVerbose)
+            {
+                TArray<TSharedPtr<FJsonValue>> PinsIn;
+                TArray<TSharedPtr<FJsonValue>> PinsOut;
+
+                for (UEdGraphPin* Pin : Node->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+                    TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+                    PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+                    PinObj->SetStringField(TEXT("type"), PinTypeToString(Pin->PinType));
+
+                    if (Pin->Direction == EGPD_Input)
+                    {
+                        PinsIn.Add(MakeShared<FJsonValueObject>(PinObj));
+                    }
+                    else
+                    {
+                        PinsOut.Add(MakeShared<FJsonValueObject>(PinObj));
+                    }
+                }
+
+                if (PinsIn.Num() > 0)
+                {
+                    NodeObj->SetArrayField(TEXT("in"), PinsIn);
+                }
+                if (PinsOut.Num() > 0)
+                {
+                    NodeObj->SetArrayField(TEXT("out"), PinsOut);
+                }
+            }
+
+            ResultNodes.Add(MakeShared<FJsonValueObject>(NodeObj));
+            ++MatchCount;
+        }
+
+        if (MatchCount >= Limit)
+        {
+            break;
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("bp_path"), BpPath);
+    Data->SetArrayField(TEXT("nodes"), ResultNodes);
+    Data->SetNumberField(TEXT("count"), ResultNodes.Num());
     return WrapSuccess(Data);
 }
