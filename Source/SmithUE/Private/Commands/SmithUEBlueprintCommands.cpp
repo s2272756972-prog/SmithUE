@@ -1140,10 +1140,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpBatchOp(const TShared
                 DispatchResult->TryGetStringField(TEXT("status"), OpStatus);
                 if (OpStatus.Equals(TEXT("error"), ESearchCase::IgnoreCase))
                 {
-                    if (GEditor)
-                    {
-                        GEditor->UndoTransaction();
-                    }
+                    AtomicTxn.Cancel();
                     return MakeErrResp(FString::Printf(TEXT("op[%d] '%s' failed: %s"), Op.Index, *Op.OpName, *ExtractDispatchError(DispatchResult, Op.OpName)));
                 }
 
@@ -1391,6 +1388,18 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedP
         const FString GraphName = Graph->GetName();
         const FString GraphPath = BpPath + TEXT("::") + GraphName;
 
+        TMap<FGuid, FString> GuidToNid;
+        {
+            int32 NidIdx = 0;
+            for (UEdGraphNode* N : Graph->Nodes)
+            {
+                if (N)
+                {
+                    GuidToNid.Add(N->NodeGuid, FString::Printf(TEXT("N%d"), NidIdx++));
+                }
+            }
+        }
+
         // --- Build / refresh GuidToShortId for this graph (mirrors bp_describe_graph) ---
         // Always rebuild: ensures the session is fresh and consistent with current node order.
         TMap<FGuid, FString> GuidToShortId;
@@ -1482,6 +1491,18 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedP
                     TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
                     PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
                     PinObj->SetStringField(TEXT("type"), PinTypeToString(Pin->PinType));
+                    PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+
+                    TArray<TSharedPtr<FJsonValue>> ConnectedTo;
+                    for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                    {
+                        if (!LinkedPin) continue;
+                        UEdGraphNode* LinkedNode = LinkedPin->GetOwningNode();
+                        if (!LinkedNode) continue;
+                        const FString* Nid = GuidToNid.Find(LinkedNode->NodeGuid);
+                        if (Nid) ConnectedTo.Add(MakeShared<FJsonValueString>(*Nid));
+                    }
+                    PinObj->SetArrayField(TEXT("connected_to"), ConnectedTo);
 
                     if (Pin->Direction == EGPD_Input)
                     {
