@@ -2,6 +2,7 @@
 
 #include "Blueprint/SmithUEBpAtomicAPI.h"
 
+#include "SmithUEModule.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/SmithUEBpAtomicAPIHelpers.h"
 #include "Components/ActorComponent.h"
