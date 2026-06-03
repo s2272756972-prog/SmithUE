@@ -14,7 +14,6 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
-#include "Editor.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -1127,7 +1126,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpBatchOp(const TShared
 
         TSet<FString> StaleGraphPaths;
         {
-            const FScopedTransaction AtomicTxn(FText::FromString(TEXT("SmithUE Atomic Batch")));
+            FScopedTransaction AtomicTxn(FText::FromString(TEXT("SmithUE Atomic Batch")));
             for (const FAtomicBatchOp& Op : AtomicOps)
             {
                 TSharedPtr<FJsonObject> DispatchResult = FSmithUEToolRegistry::Get().DispatchCommand(Op.OpName, Op.Params);
@@ -1388,18 +1387,6 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedP
         const FString GraphName = Graph->GetName();
         const FString GraphPath = BpPath + TEXT("::") + GraphName;
 
-        TMap<FGuid, FString> GuidToNid;
-        {
-            int32 NidIdx = 0;
-            for (UEdGraphNode* N : Graph->Nodes)
-            {
-                if (N)
-                {
-                    GuidToNid.Add(N->NodeGuid, FString::Printf(TEXT("N%d"), NidIdx++));
-                }
-            }
-        }
-
         // --- Build / refresh GuidToShortId for this graph (mirrors bp_describe_graph) ---
         // Always rebuild: ensures the session is fresh and consistent with current node order.
         TMap<FGuid, FString> GuidToShortId;
@@ -1499,7 +1486,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedP
                         if (!LinkedPin) continue;
                         UEdGraphNode* LinkedNode = LinkedPin->GetOwningNode();
                         if (!LinkedNode) continue;
-                        const FString* Nid = GuidToNid.Find(LinkedNode->NodeGuid);
+                        const FString* Nid = GuidToShortId.Find(LinkedNode->NodeGuid);
                         if (Nid) ConnectedTo.Add(MakeShared<FJsonValueString>(*Nid));
                     }
                     PinObj->SetArrayField(TEXT("connected_to"), ConnectedTo);
