@@ -14,6 +14,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
+#include "Editor.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -890,6 +891,303 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpBatchOp(const TShared
     Params->TryGetStringField(TEXT("bp_path"), BatchBpPath);
     FString BatchGraphName;
     Params->TryGetStringField(TEXT("graph_name"), BatchGraphName);
+
+    bool bAtomic = false;
+    Params->TryGetBoolField(TEXT("atomic"), bAtomic);
+    if (bAtomic)
+    {
+        auto MakeAtomicDryRunError = [](const TArray<FString>& Errors) -> TSharedPtr<FJsonObject>
+        {
+            TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+            Response->SetStringField(TEXT("status"), TEXT("error"));
+            Response->SetStringField(TEXT("error"), TEXT("atomic dry-run failed"));
+            TArray<TSharedPtr<FJsonValue>> ErrorValues;
+            for (const FString& Item : Errors)
+            {
+                ErrorValues.Add(MakeShared<FJsonValueString>(Item));
+            }
+            Response->SetArrayField(TEXT("errors"), ErrorValues);
+            return Response;
+        };
+
+        auto BuildOpParams = [&BatchBpPath, &BatchGraphName](const TSharedPtr<FJsonObject>& OpObj) -> TSharedPtr<FJsonObject>
+        {
+            TSharedPtr<FJsonObject> OpParams = MakeShared<FJsonObject>();
+            if (!BatchBpPath.IsEmpty())
+            {
+                OpParams->SetStringField(TEXT("bp_path"), BatchBpPath);
+            }
+            if (!BatchGraphName.IsEmpty())
+            {
+                OpParams->SetStringField(TEXT("graph_name"), BatchGraphName);
+            }
+            for (const auto& KV : OpObj->Values)
+            {
+                if (!KV.Key.Equals(TEXT("op"), ESearchCase::IgnoreCase) &&
+                    !KV.Key.Equals(TEXT("atomic"), ESearchCase::IgnoreCase))
+                {
+                    OpParams->Values.Add(KV.Key, KV.Value);
+                }
+            }
+            const TSharedPtr<FJsonObject>* OpParamsPtr = nullptr;
+            if (OpObj->TryGetObjectField(TEXT("params"), OpParamsPtr) && OpParamsPtr && OpParamsPtr->IsValid())
+            {
+                for (const auto& KV : (*OpParamsPtr)->Values)
+                {
+                    OpParams->Values.Add(KV.Key, KV.Value);
+                }
+            }
+            return OpParams;
+        };
+
+        auto FindNodeById = [](UEdGraph* Graph, const FString& GraphPath, const FString& NodeId, FString& Error) -> UEdGraphNode*
+        {
+            if (!Graph)
+            {
+                Error = TEXT("Graph not found");
+                return nullptr;
+            }
+
+            bool bIsStale = false;
+            const FGuid NodeGuid = FSmithUEToolRegistry::Get().NidSession.ResolveNid(GraphPath, NodeId, bIsStale);
+            if (bIsStale)
+            {
+                Error = FString::Printf(TEXT("N-id session is stale for graph '%s'"), *GraphPath);
+                return nullptr;
+            }
+            if (!NodeGuid.IsValid())
+            {
+                Error = FString::Printf(TEXT("Node id '%s' not found in N-id session for graph '%s'"), *NodeId, *GraphPath);
+                return nullptr;
+            }
+
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (Node && Node->NodeGuid == NodeGuid)
+                {
+                    return Node;
+                }
+            }
+
+            Error = FString::Printf(TEXT("Node id '%s' resolved to missing node in graph '%s'"), *NodeId, *GraphPath);
+            return nullptr;
+        };
+
+        auto ValidateNodeAndPin = [&FindNodeById](UEdGraph* Graph, const FString& GraphPath, const FString& NodeField, const FString& NodeId, const FString& PinField, const FString& PinName, FString& Error) -> bool
+        {
+            UEdGraphNode* Node = FindNodeById(Graph, GraphPath, NodeId, Error);
+            if (!Node)
+            {
+                Error = FString::Printf(TEXT("%s: %s"), *NodeField, *Error);
+                return false;
+            }
+
+            if (!PinName.IsEmpty())
+            {
+                for (UEdGraphPin* Pin : Node->Pins)
+                {
+                    if (Pin && Pin->PinName.ToString() == PinName)
+                    {
+                        return true;
+                    }
+                }
+                Error = FString::Printf(TEXT("%s '%s' not found on %s '%s'"), *PinField, *PinName, *NodeField, *NodeId);
+                return false;
+            }
+
+            return true;
+        };
+
+        auto ExtractDispatchError = [](const TSharedPtr<FJsonObject>& DispatchResult, const FString& OpName) -> FString
+        {
+            FString OpError;
+            if (DispatchResult.IsValid())
+            {
+                DispatchResult->TryGetStringField(TEXT("error"), OpError);
+            }
+            return OpError.IsEmpty() ? FString::Printf(TEXT("Op '%s' failed"), *OpName) : OpError;
+        };
+
+        struct FAtomicBatchOp
+        {
+            int32 Index = INDEX_NONE;
+            FString OpName;
+            TSharedPtr<FJsonObject> Params;
+        };
+
+        TArray<FAtomicBatchOp> AtomicOps;
+        TArray<FAtomicBatchOp> CompileOps;
+        TArray<FString> DryRunErrors;
+
+        for (int32 OpIndex = 0; OpIndex < Operations->Num(); ++OpIndex)
+        {
+            const TSharedPtr<FJsonValue>& OpValue = (*Operations)[OpIndex];
+            TSharedPtr<FJsonObject> OpObj = OpValue.IsValid() ? OpValue->AsObject() : nullptr;
+            if (!OpObj.IsValid())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d]: Each operation must be an object"), OpIndex));
+                continue;
+            }
+
+            FString OpName;
+            if (!OpObj->TryGetStringField(TEXT("op"), OpName) || OpName.IsEmpty())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d]: Operation missing 'op'"), OpIndex));
+                continue;
+            }
+            if (const FString* Resolved = OpAliases.Find(OpName))
+            {
+                OpName = *Resolved;
+            }
+
+            TSharedPtr<FJsonObject> OpParams = BuildOpParams(OpObj);
+            FAtomicBatchOp BatchOp{OpIndex, OpName, OpParams};
+            if (OpName.Equals(TEXT("bp_compile"), ESearchCase::IgnoreCase))
+            {
+                CompileOps.Add(BatchOp);
+                continue;
+            }
+
+            AtomicOps.Add(BatchOp);
+
+            FString BpPath;
+            FString GraphName;
+            const bool bNeedsGraph = OpParams->HasField(TEXT("node_id")) ||
+                                     OpParams->HasField(TEXT("source_node_id")) ||
+                                     OpParams->HasField(TEXT("target_node_id"));
+            if (!bNeedsGraph)
+            {
+                continue;
+            }
+
+            if (!OpParams->TryGetStringField(TEXT("bp_path"), BpPath) || BpPath.IsEmpty())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Missing required param: 'bp_path'"), OpIndex, *OpName));
+                continue;
+            }
+            if (!OpParams->TryGetStringField(TEXT("graph_name"), GraphName) || GraphName.IsEmpty())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Missing required param: 'graph_name'"), OpIndex, *OpName));
+                continue;
+            }
+
+            UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+            if (!BP)
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Failed to load blueprint: %s"), OpIndex, *OpName, *BpPath));
+                continue;
+            }
+            UEdGraph* Graph = FSmithUEBpAtomicAPI::FindGraph(BP, GraphName);
+            if (!Graph)
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Graph not found: %s"), OpIndex, *OpName, *GraphName));
+                continue;
+            }
+
+            const FString GraphPath = BpPath + TEXT("::") + GraphName;
+            FString ValidationError;
+            FString NodeId;
+            if (OpParams->TryGetStringField(TEXT("node_id"), NodeId) && !NodeId.IsEmpty())
+            {
+                FString PinName;
+                OpParams->TryGetStringField(TEXT("pin_name"), PinName);
+                if (!ValidateNodeAndPin(Graph, GraphPath, TEXT("node_id"), NodeId, TEXT("pin_name"), PinName, ValidationError))
+                {
+                    DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': %s"), OpIndex, *OpName, *ValidationError));
+                }
+            }
+
+            FString SourceNodeId;
+            if (OpParams->TryGetStringField(TEXT("source_node_id"), SourceNodeId) && !SourceNodeId.IsEmpty())
+            {
+                FString SourcePin;
+                OpParams->TryGetStringField(TEXT("source_pin"), SourcePin);
+                if (!ValidateNodeAndPin(Graph, GraphPath, TEXT("source_node_id"), SourceNodeId, TEXT("source_pin"), SourcePin, ValidationError))
+                {
+                    DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': %s"), OpIndex, *OpName, *ValidationError));
+                }
+            }
+
+            FString TargetNodeId;
+            if (OpParams->TryGetStringField(TEXT("target_node_id"), TargetNodeId) && !TargetNodeId.IsEmpty())
+            {
+                FString TargetPin;
+                OpParams->TryGetStringField(TEXT("target_pin"), TargetPin);
+                if (!ValidateNodeAndPin(Graph, GraphPath, TEXT("target_node_id"), TargetNodeId, TEXT("target_pin"), TargetPin, ValidationError))
+                {
+                    DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': %s"), OpIndex, *OpName, *ValidationError));
+                }
+            }
+        }
+
+        if (DryRunErrors.Num() > 0)
+        {
+            return MakeAtomicDryRunError(DryRunErrors);
+        }
+
+        TSet<FString> StaleGraphPaths;
+        {
+            const FScopedTransaction AtomicTxn(FText::FromString(TEXT("SmithUE Atomic Batch")));
+            for (const FAtomicBatchOp& Op : AtomicOps)
+            {
+                TSharedPtr<FJsonObject> DispatchResult = FSmithUEToolRegistry::Get().DispatchCommand(Op.OpName, Op.Params);
+                if (!DispatchResult.IsValid())
+                {
+                    DispatchResult = MakeErrResp(FString::Printf(TEXT("Unknown command: %s"), *Op.OpName));
+                }
+
+                FString OpStatus;
+                DispatchResult->TryGetStringField(TEXT("status"), OpStatus);
+                if (OpStatus.Equals(TEXT("error"), ESearchCase::IgnoreCase))
+                {
+                    if (GEditor)
+                    {
+                        GEditor->UndoTransaction();
+                    }
+                    return MakeErrResp(FString::Printf(TEXT("op[%d] '%s' failed: %s"), Op.Index, *Op.OpName, *ExtractDispatchError(DispatchResult, Op.OpName)));
+                }
+
+                if (Op.OpName.Equals(TEXT("bp_create_node"), ESearchCase::IgnoreCase) ||
+                    Op.OpName.Equals(TEXT("bp_delete_node"), ESearchCase::IgnoreCase))
+                {
+                    FString OpBpPath;
+                    FString OpGraphName;
+                    if (Op.Params->TryGetStringField(TEXT("bp_path"), OpBpPath) &&
+                        Op.Params->TryGetStringField(TEXT("graph_name"), OpGraphName) &&
+                        !OpBpPath.IsEmpty() && !OpGraphName.IsEmpty())
+                    {
+                        StaleGraphPaths.Add(OpBpPath + TEXT("::") + OpGraphName);
+                    }
+                }
+            }
+        }
+
+        for (const FString& GraphPath : StaleGraphPaths)
+        {
+            FSmithUEToolRegistry::Get().NidSession.MarkStale(GraphPath);
+        }
+
+        for (const FAtomicBatchOp& Op : CompileOps)
+        {
+            TSharedPtr<FJsonObject> DispatchResult = FSmithUEToolRegistry::Get().DispatchCommand(Op.OpName, Op.Params);
+            if (!DispatchResult.IsValid())
+            {
+                DispatchResult = MakeErrResp(FString::Printf(TEXT("Unknown command: %s"), *Op.OpName));
+            }
+
+            FString OpStatus;
+            DispatchResult->TryGetStringField(TEXT("status"), OpStatus);
+            if (OpStatus.Equals(TEXT("error"), ESearchCase::IgnoreCase))
+            {
+                return MakeErrResp(FString::Printf(TEXT("op[%d] '%s' failed: %s"), Op.Index, *Op.OpName, *ExtractDispatchError(DispatchResult, Op.OpName)));
+            }
+        }
+
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetBoolField(TEXT("atomic"), true);
+        Data->SetNumberField(TEXT("operations_executed"), Operations->Num());
+        return WrapSuccess(Data);
+    }
 
     // --- Single transaction wrapping the entire batch ---
     const FScopedTransaction Transaction(FText::FromString(TEXT("SmithUE: Blueprint Batch Op")));
