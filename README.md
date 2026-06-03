@@ -231,6 +231,12 @@ curl -X POST http://localhost:13721/api/v1/execute \
 
 ## 更新日志
 
+### v0.7.0，蓝图节点搜索与批量原子事务
+
+**新增功能：**
+- `bp_search`：按名称（子字符串，大小写不敏感）和/或节点类型搜索蓝图图表中的节点，支持 `verbose`（返回完整 pin 信息）和 `limit` 参数，搜索覆盖所有图表（事件图、函数图、宏图）。
+- `bp_batch_op` 新增 `atomic` 模式（opt-in，`"atomic": true`）：先进行 dry-run 静态验证，再以单一 `FScopedTransaction` 执行全部操作，任一步骤失败时自动全量回滚，蓝图状态恢复原样。`bp_compile` 不纳入回滚范围。
+
 ### v0.6.0，N-id 会话、度量、蓝图预览与编辑器保护
 
 **新增功能：**
