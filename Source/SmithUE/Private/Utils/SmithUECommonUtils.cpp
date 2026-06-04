@@ -25,11 +25,32 @@ TSharedPtr<FJsonObject> FSmithUECommonUtils::CreateSuccessResponse(const FString
 	return CreateSuccessResponse(Data);
 }
 
-TSharedPtr<FJsonObject> FSmithUECommonUtils::CreateErrorResponse(const FString& ErrorMessage)
+TSharedPtr<FJsonObject> FSmithUECommonUtils::CreateErrorResponse(const FString& ErrorMessage, const FString& ErrorCode)
 {
 	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
 	Response->SetStringField(TEXT("status"), TEXT("error"));
 	Response->SetStringField(TEXT("error"), ErrorMessage);
+	FString ResolvedCode = ErrorCode;
+	if (ResolvedCode == TEXT("INTERNAL_ERROR"))
+	{
+		if (ErrorMessage.Contains(TEXT("N-id map is stale")))
+		{
+			ResolvedCode = TEXT("STALE_NID");
+		}
+		else if (ErrorMessage.Contains(TEXT("PIE running")) || ErrorMessage.Contains(TEXT("PIE is not running")) || ErrorMessage.Contains(TEXT("Editor is busy: PIE running")))
+		{
+			ResolvedCode = TEXT("PIE_LOCKED");
+		}
+		else if (ErrorMessage.Contains(TEXT("Asset not found")) || ErrorMessage.Contains(TEXT("asset not found")))
+		{
+			ResolvedCode = TEXT("ASSET_NOT_FOUND");
+		}
+		else if (ErrorMessage.Contains(TEXT("Invalid JSON body")) || ErrorMessage.Contains(TEXT("Invalid parameters")) || ErrorMessage.Contains(TEXT("Invalid params")) || ErrorMessage.Contains(TEXT("Missing required parameter")) || ErrorMessage.Contains(TEXT("Missing required param")) || ErrorMessage.Contains(TEXT("Missing 'command' field")) || ErrorMessage.Contains(TEXT("Failed to parse HTTP request")))
+		{
+			ResolvedCode = TEXT("INVALID_REQUEST");
+		}
+	}
+	Response->SetStringField(TEXT("error_code"), ResolvedCode);
 	return Response;
 }
 

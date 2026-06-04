@@ -8,7 +8,7 @@ class SMITHUE_API FSmithUECommonUtils
 public:
 	static TSharedPtr<FJsonObject> CreateSuccessResponse(TSharedPtr<FJsonObject> Data);
 	static TSharedPtr<FJsonObject> CreateSuccessResponse(const FString& SimpleMessage);
-	static TSharedPtr<FJsonObject> CreateErrorResponse(const FString& ErrorMessage);
+	static TSharedPtr<FJsonObject> CreateErrorResponse(const FString& ErrorMessage, const FString& ErrorCode = TEXT("INTERNAL_ERROR"));
 	static FString SerializeJson(const TSharedPtr<FJsonObject>& JsonObject);
 	static TSharedPtr<FJsonObject> ParseJson(const FString& JsonString);
 	static FVector GetVectorFromJson(const TSharedPtr<FJsonObject>& Obj, const FString& FieldName, FVector Default = FVector::ZeroVector);

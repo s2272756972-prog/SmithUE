@@ -1,12 +1,17 @@
 ﻿#include "Transport/SmithUEHttpServerRunnable.h"
 
+#include "Async/Async.h"
+#include "Async/Future.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+#include "Editor.h"
 #include "HAL/PlatformProcess.h"
+#include "Interfaces/IPluginManager.h"
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 #include "Transport/SmithUEHttpServer.h"
-#include "Transport/SmithUEConnectionManager.h"
 #include "SmithUEModule.h"
+#include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "Utils/SmithUEDispatcher.h"
 
@@ -20,7 +25,14 @@ namespace SmithUEHttpServer::Private
 		FString Protocol;
 		TMap<FString, FString> Headers;
 		FString Body;
-		int32 ContentLength = 0;
+		int64 ContentLength = 0;
+	};
+
+	enum class EHttpRequestReceiveResult
+	{
+		Success,
+		ParseError,
+		PayloadTooLarge,
 	};
 
 	int32 FindHeaderTerminator(const TArray<uint8>& Data)
@@ -85,28 +97,29 @@ namespace SmithUEHttpServer::Private
 
 		if (const FString* ContentLengthValue = OutRequest.Headers.Find(TEXT("content-length")))
 		{
-			OutRequest.ContentLength = FMath::Max(FCString::Atoi(**ContentLengthValue), 0);
+			OutRequest.ContentLength = FMath::Max(FCString::Atoi64(**ContentLengthValue), 0LL);
 		}
 
 		return true;
 	}
 
-	bool ReceiveHttpRequest(FSocket& ClientSocket, const bool& bStopping, FParsedHttpRequest& OutRequest)
+	EHttpRequestReceiveResult ReceiveHttpRequest(FSocket& ClientSocket, const bool& bStopping, FParsedHttpRequest& OutRequest)
 	{
 		TArray<uint8> ReceivedData;
 		TArray<uint8> Chunk;
 		Chunk.SetNumUninitialized(ReceiveBufferSize);
 
 		int32 HeaderEndIndex = INDEX_NONE;
-		int32 ExpectedTotalBytes = INDEX_NONE;
+		int64 ExpectedTotalBytes = INDEX_NONE;
 		const double TimeoutSeconds = 30.0;
 		const double StartTime = FPlatformTime::Seconds();
+		constexpr int64 MaxBodyBytes = 10LL * 1024LL * 1024LL;
 
 		while (!bStopping)
 		{
 			if (FPlatformTime::Seconds() - StartTime > TimeoutSeconds)
 			{
-				return false;
+				return EHttpRequestReceiveResult::ParseError;
 			}
 
 			int32 BytesRead = 0;
@@ -118,19 +131,19 @@ namespace SmithUEHttpServer::Private
 					FPlatformProcess::Sleep(0.01f);
 					continue;
 				}
-				return false;
+				return EHttpRequestReceiveResult::ParseError;
 			}
 
 			if (BytesRead <= 0)
 			{
 				// On non-blocking sockets, BytesRead==0 may mean "no data yet" rather than "closed"
 				// If we're still expecting more data (body after 100-continue), keep waiting
-				if (ExpectedTotalBytes != INDEX_NONE && ReceivedData.Num() < ExpectedTotalBytes)
+			if (ExpectedTotalBytes != INDEX_NONE && static_cast<int64>(ReceivedData.Num()) < ExpectedTotalBytes)
 				{
 					FPlatformProcess::Sleep(0.01f);
 					continue;
 				}
-				return false;
+				return EHttpRequestReceiveResult::ParseError;
 			}
 
 			ReceivedData.Append(Chunk.GetData(), BytesRead);
@@ -143,7 +156,11 @@ namespace SmithUEHttpServer::Private
 					const FString HeadText = BytesToString(ReceivedData.GetData(), HeaderEndIndex);
 					if (!ParseRequestHead(HeadText, OutRequest))
 					{
-						return false;
+						return EHttpRequestReceiveResult::ParseError;
+					}
+					if (OutRequest.ContentLength > MaxBodyBytes)
+					{
+						return EHttpRequestReceiveResult::PayloadTooLarge;
 					}
 					// Handle Expect: 100-continue (PowerShell, curl etc.)
 					if (const FString* ExpectValue = OutRequest.Headers.Find(TEXT("expect")))
@@ -160,17 +177,17 @@ namespace SmithUEHttpServer::Private
 				}
 			}
 
-			if (ExpectedTotalBytes != INDEX_NONE && ReceivedData.Num() >= ExpectedTotalBytes)
+			if (ExpectedTotalBytes != INDEX_NONE && static_cast<int64>(ReceivedData.Num()) >= ExpectedTotalBytes)
 			{
 				if (OutRequest.ContentLength > 0)
 				{
 					OutRequest.Body = BytesToString(ReceivedData.GetData() + HeaderEndIndex + 4, OutRequest.ContentLength);
 				}
-				return true;
+				return EHttpRequestReceiveResult::Success;
 			}
 		}
 
-		return false;
+		return EHttpRequestReceiveResult::ParseError;
 	}
 
 	FString BuildHttpResponse(const int32 StatusCode, const FString& StatusText, const FString& Body)
@@ -180,7 +197,6 @@ namespace SmithUEHttpServer::Private
 			TEXT("HTTP/1.1 %d %s\r\n")
 			TEXT("Content-Type: application/json; charset=utf-8\r\n")
 			TEXT("Content-Length: %d\r\n")
-			TEXT("Access-Control-Allow-Origin: *\r\n")
 			TEXT("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
 			TEXT("Access-Control-Allow-Headers: Content-Type\r\n")
 			TEXT("Connection: close\r\n")
@@ -196,16 +212,83 @@ namespace SmithUEHttpServer::Private
 	{
 		return TEXT("HTTP/1.1 204 No Content\r\n"
 			"Content-Length: 0\r\n"
-			"Access-Control-Allow-Origin: *\r\n"
 			"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
 			"Access-Control-Allow-Headers: Content-Type\r\n"
 			"Connection: close\r\n"
 			"\r\n");
 	}
 
-	FString MakeErrorBody(const FString& Message)
+	FString MakeErrorBody(const FString& Message, const FString& ErrorCode = TEXT("INTERNAL_ERROR"))
 	{
-		return FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(Message));
+		return FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(Message, ErrorCode));
+	}
+
+	bool IsNidString(const FString& Value)
+	{
+		return Value.StartsWith(TEXT("N")) && Value.Mid(1).IsNumeric();
+	}
+
+	bool JsonValueContainsNid(const TSharedPtr<FJsonValue>& Value);
+
+	bool JsonObjectContainsNid(const TSharedPtr<FJsonObject>& Object)
+	{
+		if (!Object.IsValid())
+		{
+			return false;
+		}
+
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Object->Values)
+		{
+			if (JsonValueContainsNid(Pair.Value))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool JsonValueContainsNid(const TSharedPtr<FJsonValue>& Value)
+	{
+		if (!Value.IsValid())
+		{
+			return false;
+		}
+
+		switch (Value->Type)
+		{
+		case EJson::String:
+			return IsNidString(Value->AsString());
+		case EJson::Array:
+			for (const TSharedPtr<FJsonValue>& Item : Value->AsArray())
+			{
+				if (JsonValueContainsNid(Item))
+				{
+					return true;
+				}
+			}
+			return false;
+		case EJson::Object:
+			return JsonObjectContainsNid(Value->AsObject());
+		default:
+			return false;
+		}
+	}
+
+	FString DispatchNidCommandSyncOnGameThread(const FString& CommandName, const TSharedPtr<FJsonObject>& Params)
+	{
+		check(!IsInGameThread());
+
+		TPromise<FString> Promise;
+		TFuture<FString> Future = Promise.GetFuture();
+		AsyncTask(ENamedThreads::GameThread, [CommandName, Params, Promise = MoveTemp(Promise)]() mutable
+		{
+			check(IsInGameThread());
+			TSharedPtr<FJsonObject> Result = FSmithUEToolRegistry::Get().DispatchCommand(CommandName, Params);
+			Promise.SetValue(FSmithUECommonUtils::SerializeJson(Result));
+		});
+
+		return Future.Get();
 	}
 
 	FString ExtractTaskIdFromPath(const FString& Path)
@@ -245,7 +328,7 @@ namespace SmithUEHttpServer::Private
 		FString Body;
 	};
 
-	FRouteResult RouteRequest(const FParsedHttpRequest& Request)
+	FRouteResult RouteRequest(const FParsedHttpRequest& Request, USmithUEHttpServer* InServer)
 	{
 		FRouteResult Result;
 
@@ -253,6 +336,46 @@ namespace SmithUEHttpServer::Private
 		{
 			Result.StatusCode = 204;
 			Result.StatusText = TEXT("No Content");
+			return Result;
+		}
+
+		// ------------------------------------------------------------------
+		//  GET /ready  — startup guard probe; non-blocking atomic read
+		// ------------------------------------------------------------------
+		if (Request.Method.Equals(TEXT("GET"), ESearchCase::IgnoreCase) && Request.Path == TEXT("/ready"))
+		{
+			const bool bReady = InServer ? static_cast<bool>(InServer->bIsReady) : false;
+			if (!bReady)
+			{
+				Result.StatusCode = 503;
+				Result.StatusText = TEXT("Service Unavailable");
+				Result.Body       = TEXT("{\"ready\":false}");
+				return Result;
+			}
+
+			// Plugin version — safe to query from any thread
+			FString PluginVersion = TEXT("unknown");
+			if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
+			{
+				PluginVersion = Plugin->GetDescriptor().VersionName;
+			}
+
+			// pie_active must be read on the GameThread
+			check(!IsInGameThread());
+			TPromise<bool> PiePromise;
+			TFuture<bool>  PieFuture = PiePromise.GetFuture();
+			AsyncTask(ENamedThreads::GameThread, [Promise = MoveTemp(PiePromise)]() mutable
+			{
+				check(IsInGameThread());
+				const bool bPie = GEditor != nullptr && GEditor->PlayWorld != nullptr;
+				Promise.SetValue(bPie);
+			});
+			const bool bPieActive = PieFuture.Get();
+
+			Result.Body = FString::Printf(
+				TEXT("{\"ready\":true,\"version\":\"%s\",\"pie_active\":%s}"),
+				*PluginVersion,
+				bPieActive ? TEXT("true") : TEXT("false"));
 			return Result;
 		}
 
@@ -303,6 +426,21 @@ namespace SmithUEHttpServer::Private
 				return Result;
 			}
 
+			// ------------------------------------------------------------------
+			//  Startup guard: block non-ping commands until editor is ready
+			// ------------------------------------------------------------------
+			if (Request.Path == TEXT("/api/v1/execute"))
+			{
+				const bool bReady = InServer ? static_cast<bool>(InServer->bIsReady) : false;
+				if (!bReady && !CommandName.Equals(TEXT("ping"), ESearchCase::IgnoreCase))
+				{
+					Result.StatusCode = 503;
+					Result.StatusText = TEXT("Service Unavailable");
+					Result.Body       = MakeErrorBody(TEXT("Editor not ready"), TEXT("EDITOR_NOT_READY"));
+					return Result;
+				}
+			}
+
 			TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
 			const TSharedPtr<FJsonObject>* ParamsField = nullptr;
 			if (RequestJson->TryGetObjectField(TEXT("params"), ParamsField) && ParamsField != nullptr && ParamsField->IsValid())
@@ -310,9 +448,18 @@ namespace SmithUEHttpServer::Private
 				Params = *ParamsField;
 			}
 
-			Result.Body = Request.Path == TEXT("/api/v1/async")
-				? FSmithUEDispatcher::Get().DispatchAsync(CommandName, Params)
-				: FSmithUEDispatcher::Get().DispatchSync(CommandName, Params);
+			if (Request.Path == TEXT("/api/v1/async"))
+			{
+				Result.Body = FSmithUEDispatcher::Get().DispatchAsync(CommandName, Params);
+			}
+			else if (JsonObjectContainsNid(Params) && !IsInGameThread())
+			{
+				Result.Body = DispatchNidCommandSyncOnGameThread(CommandName, Params);
+			}
+			else
+			{
+				Result.Body = FSmithUEDispatcher::Get().DispatchSync(CommandName, Params);
+			}
 			return Result;
 		}
 
@@ -368,19 +515,18 @@ uint32 FSmithUEHttpServerRunnable::Run()
 
 		SmithUEHttpServer::Private::FParsedHttpRequest Request;
 		FString Response;
-		if (SmithUEHttpServer::Private::ReceiveHttpRequest(*ClientSocket, bStopping, Request))
+		const SmithUEHttpServer::Private::EHttpRequestReceiveResult ReceiveResult = SmithUEHttpServer::Private::ReceiveHttpRequest(*ClientSocket, bStopping, Request);
+		if (ReceiveResult == SmithUEHttpServer::Private::EHttpRequestReceiveResult::Success)
 		{
-			// Touch session heartbeat if header is present
-			const FString* SessionHeader = Request.Headers.Find(TEXT("x-smithue-session"));
-			if (SessionHeader != nullptr && !SessionHeader->IsEmpty())
-			{
-				FSmithUEConnectionManager::Get().TouchSession(*SessionHeader);
-			}
-
-			const SmithUEHttpServer::Private::FRouteResult RouteResult = SmithUEHttpServer::Private::RouteRequest(Request);
+			const SmithUEHttpServer::Private::FRouteResult RouteResult = SmithUEHttpServer::Private::RouteRequest(Request, Server);
 			Response = RouteResult.StatusCode == 204
 				? SmithUEHttpServer::Private::BuildNoContentResponse()
 				: SmithUEHttpServer::Private::BuildHttpResponse(RouteResult.StatusCode, RouteResult.StatusText, RouteResult.Body);
+		}
+		else if (ReceiveResult == SmithUEHttpServer::Private::EHttpRequestReceiveResult::PayloadTooLarge)
+		{
+			Response = SmithUEHttpServer::Private::BuildHttpResponse(413, TEXT("Payload Too Large"),
+				FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(TEXT("payload too large"), TEXT("PAYLOAD_TOO_LARGE"))));
 		}
 		else
 		{

@@ -9,6 +9,7 @@ using FSmithUECommandHandler = TFunction<TSharedPtr<FJsonObject>(const TSharedPt
 /** Per-graph N-id → GUID session map. Stored in ToolRegistry singleton (in-memory only). */
 struct FSmithUENidSession
 {
+	// All NidSession methods MUST be called from GameThread only
 	/** GraphPath → (NidIndex → NodeGuid) */
 	TMap<FString, TMap<int32, FGuid>> NidMap;
 	/** GraphPath → bIsStale */
@@ -16,6 +17,7 @@ struct FSmithUENidSession
 
 	void StoreNids(const FString& GraphPath, const TMap<int32, FGuid>& Nids)
 	{
+		check(IsInGameThread());
 		TMap<int32, FGuid>& Entry = NidMap.FindOrAdd(GraphPath);
 		Entry.Empty();
 		int32 Count = 0;
@@ -30,6 +32,7 @@ struct FSmithUENidSession
 
 	FGuid ResolveNid(const FString& GraphPath, const FString& NidStr, bool& bOutIsStale) const
 	{
+		check(IsInGameThread());
 		bOutIsStale = false;
 		if (!NidStr.StartsWith(TEXT("N")) || !NidStr.Mid(1).IsNumeric())
 		{
@@ -53,17 +56,20 @@ struct FSmithUENidSession
 
 	void MarkStale(const FString& GraphPath)
 	{
+		check(IsInGameThread());
 		StaleFlags.FindOrAdd(GraphPath) = true;
 	}
 
 	bool IsStale(const FString& GraphPath) const
 	{
+		check(IsInGameThread());
 		const bool* bStale = StaleFlags.Find(GraphPath);
 		return bStale && *bStale;
 	}
 
 	void ClearGraph(const FString& GraphPath)
 	{
+		check(IsInGameThread());
 		NidMap.Remove(GraphPath);
 		StaleFlags.Remove(GraphPath);
 	}

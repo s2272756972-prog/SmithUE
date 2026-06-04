@@ -8,7 +8,24 @@
   <a href="README.md">简体中文</a> | <a href="README.en.md">English</a>
 </p>
 
-一款高性能虚幻引擎编辑器插件，通过命令协议与 MCP 集成公开编辑器的全部功能，将重复的手动操作转变为可脚本化、AI 驱动的工作流。
+一款高性能虚幻引擎编辑器插件，通过命令协议公开编辑器的全部功能，将重复的手动操作转变为可脚本化、AI 驱动的工作流。
+
+---
+
+## For AI Agents
+
+### 快速部署（Windows）
+```bash
+# 确认编辑器已启动并启用 SmithUE 插件
+npx smithue-cli status
+npx smithue-cli exec ping '{}'
+npx smithue-cli list
+```
+
+### 故障树
+1. 编辑器未运行 → 启动虚幻引擎编辑器并等待完全加载
+2. 多实例 → 使用 `npx smithue-cli status --pid <pid>` 指定实例
+3. 端口文件已过期 → 运行 `npx smithue-cli prune` 清理
 
 ---
 
@@ -16,15 +33,14 @@
 
 1. [快速入门](#快速入门)
 2. [架构](#架构)
-3. [MCP 服务](#mcp-服务)
-4. [命令参考](#命令参考)
-5. [连接状态指示器](#连接状态指示器)
-6. [AI 纹理生成](#ai-纹理生成)
-7. [更新日志](#更新日志)
-8. [路线图](#路线图)
-9. [已知限制](#已知限制)
-10. [贡献](#贡献)
-11. [许可证](#许可证)
+3. [命令参考](#命令参考)
+4. [连接状态指示器](#连接状态指示器)
+5. [AI 纹理生成](#ai-纹理生成)
+6. [更新日志](#更新日志)
+7. [路线图](#路线图)
+8. [已知限制](#已知限制)
+9. [贡献](#贡献)
+10. [许可证](#许可证)
 
 ---
 
@@ -38,14 +54,14 @@
 
 2. 使用虚幻引擎 5.2 构建项目。
 
-3. 启动编辑器。SmithUE 将在 13721 端口自动启动 HTTP 服务器。
+3. 启动编辑器。SmithUE 将自动启动 HTTP 服务器并分配动态端口。
 
 4. 验证连接：
    ```bash
-   curl -X POST http://localhost:13721/api/v1/execute -H "Content-Type: application/json" -d "{\"command\":\"ping\"}"
+   npx smithue-cli status
    ```
 
-**注意**：MCP 服务已预构建于 `Scripts/SmithUE-MCP/dist/bundle.js`。仅需 Node.js 18+ 运行环境，无需额外编译。
+**注意**：SmithUE 现在使用 `smithue-cli` 进行交互。详情请访问：https://github.com/123dx-svg/smithue-cli
 
 ---
 
@@ -53,112 +69,17 @@
 
 ```
 AI 工具 (OpenCode / Claude Code / Cline / GitHub Copilot)
-     ↕ MCP stdio
-SmithUE MCP 服务 (Scripts/SmithUE-MCP/)
-     ↕ HTTP :13721
-SmithUE UE5 插件
+     ↕ smithue-cli (npx smithue-cli exec/list/search/status)
+SmithUE UE5 插件 (HTTP :动态端口)
      ↕ UE 反射 API
 虚幻引擎 5.2 编辑器
 ```
 
 ---
 
-## MCP 服务
-
-SmithUE 包含一个基于 TypeScript 的 MCP (Model Context Protocol) 服务，用于连接 AI 工具与 UE5 插件。它采用了元工具架构，仅注册 3 个固定工具，而非逐个注册每个命令。这使得无论命令数量如何增加，AI 上下文占用始终保持在约 300 tokens。
-
-### 上下文占用对比
-
-| 方案 | N 个工具 | 200 个工具 | 1000 个工具 |
-|---|---|---|---|
-| 全量注册 | 约 6.5K tokens | 约 20K tokens | 约 100K tokens |
-| 元工具 (SmithUE) | 约 300 tokens | 约 300 tokens | 约 300 tokens |
-
-### 3 个元工具
-
-| 工具名称 | 描述 |
-|---|---|
-| `smithue_list_domain` | 列出域或获取特定域的完整命令模式 |
-| `smithue_search` | 按关键词搜索命令 |
-| `smithue_execute` | 执行带有参数的任意命令 |
-
-### 安装与运行
-
-MCP 服务已预构建，开箱即用。使用以下命令启动（需确保虚幻编辑器已运行并启用 SmithUE 插件）：
-
-```bash
-node Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js serve
-```
-
-环境变量：
-- `SMITHUE_PORT`：HTTP 端口（默认：`13721`）
-- `SMITHUE_HOST`：主机地址（默认：`localhost`）
-- `SMITHUE_CLIENT_NAME`：连接指示器显示的客户端名称（默认：`OpenCode`）
-
-### AI 工具配置
-
-#### OpenCode
-
-在项目根目录的 `opencode.json` 中添加：
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "smithue": {
-      "type": "local",
-      "command": ["node", "{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
-    }
-  }
-}
-```
-
-#### Claude Code
-
-```bash
-claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js serve
-```
-
-#### GitHub Copilot
-
-创建或更新 `.github/copilot-mcp.json`：
-
-```json
-{
-  "mcpServers": {
-    "smithue": {
-      "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
-    }
-  }
-}
-```
-
-#### Cline
-
-在 VSCode 设置中的 `cline.mcpServers` 下添加：
-
-```json
-{
-  "smithue": {
-    "command": "node",
-    "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
-  }
-}
-```
-
-### 工作流示例
-
-1. `smithue_list_domain()`：查看全部 19 个功能域。
-2. `smithue_list_domain("Material")`：获取材质相关的命令模式。
-3. `smithue_search("blueprint")`：搜索蓝图相关命令。
-4. `smithue_execute("create_material", {"name": "M_Test", "path": "/Game/Materials"})`：执行命令。
-
----
-
 ## 命令参考
 
-SmithUE 提供了分布在 **19 个功能域** 中的 **178 个工具**。命令集正在持续扩展。请使用 `smithue_list_domain()` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **19 个功能域** 中的 **178 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 
@@ -188,31 +109,23 @@ SmithUE 提供了分布在 **19 个功能域** 中的 **178 个工具**。命令
 
 ## 连接状态指示器
 
-SmithUE 在编辑器状态栏显示一个圆形指示器，实时反映连接健康状态。
+SmithUE 在编辑器状态栏显示一个圆形指示器，实时反映 CLI 连接状态。
 
 ### 指示器颜色
 
 | 颜色 | 状态 |
 |---|---|
-| 🟢 绿色 | 已连接 — 至少一个 MCP 客户端会话活跃 |
-| 🔴 红色 | 未连接 — 无活跃会话 |
-| 🟡 红/黄闪烁 | 状态变更中 — 会话正在连接或断开（持续 3 秒） |
-| 🔵 青/绿脉冲 | 有新版本可用 — 检测到更新的 SmithUE 版本 |
+| 🟢 绿色 | 就绪 — HTTP 服务器已启动并分配端口，可通过 CLI 连接 |
+| 🔴 灰色 | 未就绪 — 服务器未启动或正在初始化 |
 
-### Tooltip 悬停详情
+### 交互功能
 
-将鼠标悬停在指示器上可查看：
-
-- **SmithUE 版本**（从 `.uplugin` 读取）
-- **连接数** — 当前活跃的 MCP 会话数量
-- **工具数** — 已注册的命令总数
-- **客户端列表** — 每个已连接 AI 工具的名称及会话时长（分钟）
-- **更新提示** — 有新版本时显示当前版本 → 最新版本
-
-### 会话管理
-
-- 超过 20 秒无心跳的过期会话会每 5 秒自动清理。
-- 每当会话数量发生变化（连接或断开）时，指示器会闪烁 3 秒。
+- **Tooltip 悬停详情**：
+  - **SmithUE 版本**（从 `.uplugin` 读取）
+  - **端口号** — 当前动态分配的 HTTP 端口
+  - **PID** — 当前编辑器进程 ID
+  - **状态** — Ready 状态确认
+- **一键复制**：点击指示器可直接复制当前实例的 `smithue-cli` 基础命令。
 
 ---
 
@@ -222,14 +135,20 @@ SmithUE 在编辑器状态栏显示一个圆形指示器，实时反映连接健
 
 **使用示例：**
 ```bash
-curl -X POST http://localhost:13721/api/v1/execute \
-  -H "Content-Type: application/json" \
-  -d '{"command":"generate_texture","params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
+npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
 ```
 
 ---
 
 ## 更新日志
+
+### v0.8.0，CLI 迁移
+- 移除 TCP Server / ConnectionManager / SessionManager
+- HTTP Server 改为动态端口 + 端口文件发现
+- `/ready` 端点 + 启动期 503 守卫
+- StatusIndicator 重写为 CLI-aware 小圆点 + 复制 CLI 命令按钮
+- 新 smithue-cli npm 包替代 MCP：`npm install -g smithue-cli`
+- 参见：https://github.com/123dx-svg/smithue-cli
 
 ### v0.6.0，N-id 会话、度量、蓝图预览与编辑器保护
 
@@ -324,6 +243,11 @@ cp -r Plugins/SmithUE/Docs/smithue-dev ~/.agents/skills/
 # Claude Code
 cp -r Plugins/SmithUE/Docs/smithue-dev ~/.claude/skills/
 ```
+
+---
+
+## 历史：MCP 服务已停用
+MCP 服务已在 v0.8.0 中移除，由 `smithue-cli` 替代。迁移指南请参见 [smithue-cli MIGRATION.md](https://github.com/123dx-svg/smithue-cli/blob/main/MIGRATION.md)。
 
 ---
 

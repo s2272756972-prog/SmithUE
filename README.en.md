@@ -8,7 +8,24 @@
   <a href="README.md">简体中文</a> | <a href="README.en.md">English</a>
 </p>
 
-A high-performance Unreal Engine editor plugin that exposes the editor's full capabilities through a command protocol and MCP integration, turning repetitive manual operations into scriptable, AI-driven workflows.
+A high-performance Unreal Engine editor plugin that exposes the editor's full capabilities through a command protocol, turning repetitive manual operations into scriptable, AI-driven workflows.
+
+---
+
+## For AI Agents
+
+### Quick Deployment (Windows)
+```bash
+# Verify editor is running and SmithUE plugin is enabled
+npx smithue-cli status
+npx smithue-cli exec ping '{}'
+npx smithue-cli list
+```
+
+### Troubleshooting Tree
+1. Editor not running → Start Unreal Engine Editor and wait for full load
+2. Multiple instances → Use `npx smithue-cli status --pid <pid>` to specify instance
+3. Stale portfiles → Run `npx smithue-cli prune` to clean up
 
 ---
 
@@ -16,15 +33,14 @@ A high-performance Unreal Engine editor plugin that exposes the editor's full ca
 
 1. [Quick Start](#quick-start)
 2. [Architecture](#architecture)
-3. [MCP Server](#mcp-server)
-4. [Command Reference](#command-reference)
-5. [Connection Status Indicator](#connection-status-indicator)
-6. [AI Texture Generation](#ai-texture-generation)
-7. [Changelog](#changelog)
-8. [Roadmap](#roadmap)
-9. [Known Limitations](#known-limitations)
-10. [Contributing](#contributing)
-11. [License](#license)
+3. [Command Reference](#command-reference)
+4. [Connection Status Indicator](#connection-status-indicator)
+5. [AI Texture Generation](#ai-texture-generation)
+6. [Changelog](#changelog)
+7. [Roadmap](#roadmap)
+8. [Known Limitations](#known-limitations)
+9. [Contributing](#contributing)
+10. [License](#license)
 
 ---
 
@@ -38,14 +54,14 @@ A high-performance Unreal Engine editor plugin that exposes the editor's full ca
 
 2. Build your project with Unreal Engine 5.2.
 
-3. Launch the editor. SmithUE automatically starts the HTTP server on port 13721.
+3. Launch the editor. SmithUE automatically starts the HTTP server and assigns a dynamic port.
 
 4. Verify the connection:
    ```bash
-   curl -X POST http://localhost:13721/api/v1/execute -H "Content-Type: application/json" -d "{\"command\":\"ping\"}"
+   npx smithue-cli status
    ```
 
-**Note**: The MCP Server is pre-built at `Scripts/SmithUE-MCP/dist/bundle.js`. Only Node.js 18+ is required.
+**Note**: SmithUE now uses `smithue-cli` for interaction. Details at: https://github.com/123dx-svg/smithue-cli
 
 ---
 
@@ -53,112 +69,17 @@ A high-performance Unreal Engine editor plugin that exposes the editor's full ca
 
 ```
 AI Tool (OpenCode / Claude Code / Cline / GitHub Copilot)
-     ↕ MCP stdio
-SmithUE MCP Server (Scripts/SmithUE-MCP/)
-     ↕ HTTP :13721
-SmithUE UE5 Plugin
+     ↕ smithue-cli (npx smithue-cli exec/list/search/status)
+SmithUE UE5 Plugin (HTTP :dynamic port)
      ↕ UE Reflection API
 Unreal Engine 5.2 Editor
 ```
 
 ---
 
-## MCP Server
-
-SmithUE includes a TypeScript MCP (Model Context Protocol) Server that bridges AI tools to the UE5 plugin. It uses a meta-tool architecture, using 3 fixed tools instead of registering every command individually. This keeps AI context usage constant at approximately 300 tokens regardless of command count.
-
-### Context Impact
-
-| Approach | N tools | 200 tools | 1000 tools |
-|---|---|---|---|
-| Full registration | ~6.5K tokens | ~20K tokens | ~100K tokens |
-| Meta-tool (SmithUE) | ~300 tokens | ~300 tokens | ~300 tokens |
-
-### 3 Meta-Tools
-
-| Tool | Description |
-|---|---|
-| `smithue_list_domain` | List domains or get full command schemas for a domain |
-| `smithue_search` | Search commands by keyword |
-| `smithue_execute` | Execute any command with parameters |
-
-### Install & Run
-
-The MCP Server is pre-built and ready to use. Start it using the following command (requires UE Editor running with SmithUE plugin):
-
-```bash
-node Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js serve
-```
-
-Environment variables:
-- `SMITHUE_PORT`: HTTP port (default: `13721`)
-- `SMITHUE_HOST`: Host address (default: `localhost`)
-- `SMITHUE_CLIENT_NAME`: Client display name for connection indicator (default: `OpenCode`)
-
-### AI Tool Configuration
-
-#### OpenCode
-
-Add to `opencode.json` in your project root:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "smithue": {
-      "type": "local",
-      "command": ["node", "{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
-    }
-  }
-}
-```
-
-#### Claude Code
-
-```bash
-claude mcp add smithue -- node {YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js serve
-```
-
-#### GitHub Copilot
-
-Create or update `.github/copilot-mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "smithue": {
-      "command": "node",
-      "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
-    }
-  }
-}
-```
-
-#### Cline
-
-Add to VSCode settings under `cline.mcpServers`:
-
-```json
-{
-  "smithue": {
-    "command": "node",
-    "args": ["{YourProject}/Plugins/SmithUE/Scripts/SmithUE-MCP/dist/bundle.js", "serve"]
-  }
-}
-```
-
-### Workflow Example
-
-1. `smithue_list_domain()`: See all 19 domains.
-2. `smithue_list_domain("Material")`: Get Material command schemas.
-3. `smithue_search("blueprint")`: Find blueprint-related commands.
-4. `smithue_execute("create_material", {"name": "M_Test", "path": "/Game/Materials"})`: Execute command.
-
----
-
 ## Command Reference
 
-SmithUE provides **178 tools** organized across **19 functional domains**. The command set is continuously growing. Use `smithue_list_domain()` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **178 tools** organized across **19 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
 ### Domain Overview
 
@@ -188,31 +109,23 @@ SmithUE provides **178 tools** organized across **19 functional domains**. The c
 
 ## Connection Status Indicator
 
-SmithUE displays a circular status indicator in the editor status bar showing real-time connection health.
+SmithUE displays a circular status indicator in the editor status bar showing real-time CLI connection state.
 
 ### Indicator Colors
 
 | Color | State |
 |---|---|
-| 🟢 Green | Connected — at least one MCP client session active |
-| 🔴 Red | Disconnected — no active sessions |
-| 🟡 Red/Yellow blink | Transitioning — session connecting or disconnecting (3 s) |
-| 🔵 Cyan/Green pulse | Update available — a newer SmithUE version was detected |
+| 🟢 Green | Ready — HTTP server started and port assigned, reachable via CLI |
+| 🔴 Gray | Not Ready — Server not started or initializing |
 
-### Tooltip Details
+### Interactive Features
 
-Hover over the indicator to see:
-
-- **SmithUE version** (read from `.uplugin`)
-- **Connection count** — number of active MCP sessions
-- **Tool count** — total registered commands
-- **Client list** — each connected AI tool name and session duration in minutes
-- **Update notice** — current vs. latest version when an update is available
-
-### Session Management
-
-- Stale sessions (no heartbeat for 20 seconds) are automatically purged every 5 seconds.
-- The indicator blinks for 3 seconds whenever the session count changes (connect or disconnect).
+- **Tooltip Details**:
+  - **SmithUE version** (read from `.uplugin`)
+  - **Port** — Current dynamically assigned HTTP port
+  - **PID** — Current editor process ID
+  - **Status** — Ready state confirmation
+- **One-Click Copy**: Click the indicator to copy the base `smithue-cli` command for the current instance.
 
 ---
 
@@ -222,14 +135,20 @@ The `generate_texture` command bridges the editor with modern generative AI. It 
 
 **Example Usage:**
 ```bash
-curl -X POST http://localhost:13721/api/v1/execute \
-  -H "Content-Type: application/json" \
-  -d '{"command":"generate_texture","params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
+npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
 ```
 
 ---
 
 ## Changelog
+
+### v0.8.0, CLI Migration
+- Removed TCP Server / ConnectionManager / SessionManager
+- HTTP Server changed to dynamic port + portfile discovery
+- `/ready` endpoint + 503 guard during startup
+- StatusIndicator rewritten as CLI-aware dot + copy-CLI-command button
+- New smithue-cli npm package replaces MCP: `npm install -g smithue-cli`
+- See: https://github.com/123dx-svg/smithue-cli
 
 ### v0.6.0, N-id Sessions, Metrics, Blueprint Preview & Editor Guards
 
@@ -307,13 +226,10 @@ curl -X POST http://localhost:13721/api/v1/execute \
 See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions on adding new commands.
 
 ### AI-Assisted Development Skill
-
 SmithUE provides an AI development skill file at `Docs/smithue-dev/SKILL.md`. This file teaches AI coding assistants how to contribute to the project.
 
 **Install:**
-
 Copy the skill directory to your AI tool's skill location:
-
 ```bash
 # OpenCode (project-level)
 cp -r Plugins/SmithUE/Docs/smithue-dev {YourProject}/.agents/skills/
@@ -324,6 +240,11 @@ cp -r Plugins/SmithUE/Docs/smithue-dev ~/.agents/skills/
 # Claude Code
 cp -r Plugins/SmithUE/Docs/smithue-dev ~/.claude/skills/
 ```
+
+---
+
+## Historical: MCP Server Deprecated
+The MCP Server was removed in v0.8.0 and replaced by `smithue-cli`. See [smithue-cli MIGRATION.md](https://github.com/123dx-svg/smithue-cli/blob/main/MIGRATION.md) for the migration guide.
 
 ---
 

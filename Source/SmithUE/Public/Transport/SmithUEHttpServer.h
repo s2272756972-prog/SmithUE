@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "EditorSubsystem.h"
+#include "HAL/ThreadSafeBool.h"
 #include "SmithUEHttpServer.generated.h"
 
 class FSocket;
@@ -23,10 +24,19 @@ public:
 	void StartServer();
 	void StopServer();
 	bool IsRunning() const { return bIsRunning; }
+	uint16 GetBoundPort() const { return BoundPort; }
+
+	/** Set to true on the GameThread once AssetRegistry finishes loading. Safe to read from any thread. */
+	FThreadSafeBool bIsReady;
 
 private:
 	TSharedPtr<FSocket> ListenerSocket;
 	FRunnableThread* ServerThread;
 	bool bIsRunning;
 	uint16 Port;
+	uint16 BoundPort = 0;
+	FString PortFilePath;
+
+	/** Handle for the FTSTicker delegate that polls asset-registry readiness. */
+	FDelegateHandle ReadyTickerHandle;
 };

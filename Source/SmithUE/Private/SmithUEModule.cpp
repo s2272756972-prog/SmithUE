@@ -1,7 +1,6 @@
 ﻿// Copyright 2026, 123dx-svg. MIT License.
 
 #include "SmithUEModule.h"
-#include "Transport/SmithUETcpServer.h"
 #include "Transport/SmithUEHttpServer.h"
 #include "Utils/SmithUEUpdateChecker.h"
 
@@ -76,7 +75,6 @@ void FSmithUEModule::StartupModule()
 
 	if (GEditor != nullptr)
 	{
-		GEditor->GetEditorSubsystem<USmithUETcpServer>();
 		GEditor->GetEditorSubsystem<USmithUEHttpServer>();
 	}
 	else

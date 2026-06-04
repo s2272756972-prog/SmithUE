@@ -35,6 +35,7 @@ public class SmithUE : ModuleRules
 				"Sockets",
 				"Networking",
 				"HTTP",
+				"ApplicationCore",
 			"RenderCore",
 			"RHI",
 			"Landscape",

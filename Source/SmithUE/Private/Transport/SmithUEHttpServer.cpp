@@ -1,19 +1,229 @@
 ﻿#include "Transport/SmithUEHttpServer.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Containers/Ticker.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformMisc.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "HAL/RunnableThread.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Interfaces/IPv4/IPv4Endpoint.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
+#include "Misc/CoreDelegates.h"
+#include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 #include "Transport/SmithUEHttpServerRunnable.h"
 #include "SmithUEModule.h"
 
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <windows.h>
+#include <aclapi.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
+
+// ============================================================
+//  Portfile helpers (file-scope statics)
+// ============================================================
+
+/** Returns true if something is actively listening on 127.0.0.1:Port (500 ms timeout). */
+static bool SmithUE_IsPortListening(ISocketSubsystem* SS, uint16 Port)
+{
+	check(SS);
+	FSocket* Probe = SS->CreateSocket(NAME_Stream, TEXT("SmithUEProbe"), false);
+	if (!Probe)
+	{
+		return false;
+	}
+
+	Probe->SetNonBlocking(true);
+
+	FIPv4Address LoopbackAddr;
+	FIPv4Address::Parse(TEXT("127.0.0.1"), LoopbackAddr);
+	TSharedRef<FInternetAddr> IA = SS->CreateInternetAddr();
+	IA->SetIp(LoopbackAddr.Value);
+	IA->SetPort(Port);
+
+	// Non-blocking connect — returns false immediately on EINPROGRESS
+	Probe->Connect(*IA);
+
+	const double Deadline = FPlatformTime::Seconds() + 0.5;
+	bool bConnected = false;
+	while (FPlatformTime::Seconds() < Deadline)
+	{
+		const ESocketConnectionState State = Probe->GetConnectionState();
+		if (State == SCS_Connected)
+		{
+			bConnected = true;
+			break;
+		}
+		if (State == SCS_ConnectionError)
+		{
+			break; // refused or reset — definitively not alive
+		}
+		// SCS_NotConnected = still pending; keep polling
+		FPlatformProcess::SleepNoStats(0.01f);
+	}
+
+	Probe->Close();
+	SS->DestroySocket(Probe);
+	return bConnected;
+}
+
+/** Scan DirPath for *.port files; delete any whose recorded port is not responding. */
+static void SmithUE_PruneStalePortFiles(const FString& DirPath, ISocketSubsystem* SS)
+{
+	TArray<FString> FileNames;
+	IFileManager::Get().FindFiles(FileNames, *(DirPath + TEXT("\\*.port")), true, false);
+
+	for (const FString& FileName : FileNames)
+	{
+		const FString FullPath = DirPath + TEXT("\\") + FileName;
+		FString Content;
+		if (!FFileHelper::LoadFileToString(Content, *FullPath))
+		{
+			continue;
+		}
+
+		// Extract port value: find "port":N without pulling in full JSON parser
+		const int32 KeyIdx = Content.Find(TEXT("\"port\":"));
+		if (KeyIdx < 0)
+		{
+			IFileManager::Get().Delete(*FullPath); // malformed — remove
+			continue;
+		}
+		const FString AfterKey = Content.Mid(KeyIdx + 7).TrimStart();
+		const int32 FilePort = FCString::Atoi(*AfterKey);
+		if (FilePort <= 0 || FilePort > 65535)
+		{
+			IFileManager::Get().Delete(*FullPath);
+			continue;
+		}
+
+		if (!SmithUE_IsPortListening(SS, static_cast<uint16>(FilePort)))
+		{
+			IFileManager::Get().Delete(*FullPath);
+			UE_LOG(LogSmithUE, Log, TEXT("SmithUE: pruned stale portfile %s (port %d not responding)"),
+				*FullPath, FilePort);
+		}
+	}
+}
+
+#if PLATFORM_WINDOWS
+/**
+ * Set the DACL on FilePath so only the current user's SID has access.
+ * Uses PROTECTED_DACL_SECURITY_INFORMATION to block inherited parent ACEs.
+ */
+static void SmithUE_SetPortFileAclCurrentUserOnly(const FString& FilePath)
+{
+	HANDLE hToken = nullptr;
+	if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &hToken))
+	{
+		UE_LOG(LogSmithUE, Warning, TEXT("SmithUE portfile ACL: OpenProcessToken failed (%u)"), ::GetLastError());
+		return;
+	}
+
+	// First call: obtain required buffer size
+	DWORD dwSize = 0;
+	::GetTokenInformation(hToken, TokenUser, nullptr, 0, &dwSize);
+
+	TArray<uint8> TokenUserBuf;
+	TokenUserBuf.SetNumUninitialized(static_cast<int32>(dwSize));
+	TOKEN_USER* pTokenUser = reinterpret_cast<TOKEN_USER*>(TokenUserBuf.GetData());
+
+	if (!::GetTokenInformation(hToken, TokenUser, pTokenUser, dwSize, &dwSize))
+	{
+		UE_LOG(LogSmithUE, Warning, TEXT("SmithUE portfile ACL: GetTokenInformation failed (%u)"), ::GetLastError());
+		::CloseHandle(hToken);
+		return;
+	}
+
+	EXPLICIT_ACCESS ea = {};
+	ea.grfAccessPermissions = GENERIC_ALL;
+	ea.grfAccessMode        = SET_ACCESS;
+	ea.grfInheritance       = NO_INHERITANCE;
+	ea.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+	ea.Trustee.TrusteeType  = TRUSTEE_IS_USER;
+	ea.Trustee.ptstrName    = reinterpret_cast<LPTSTR>(pTokenUser->User.Sid);
+
+	PACL pACL = nullptr;
+	const DWORD AclErr = ::SetEntriesInAcl(1, &ea, nullptr, &pACL);
+	if (AclErr != ERROR_SUCCESS)
+	{
+		UE_LOG(LogSmithUE, Warning, TEXT("SmithUE portfile ACL: SetEntriesInAcl failed (%u)"), AclErr);
+		::CloseHandle(hToken);
+		return;
+	}
+
+	// PROTECTED_DACL_SECURITY_INFORMATION prevents inheriting ACEs from parent directory
+	const DWORD SecErr = ::SetNamedSecurityInfoW(
+		const_cast<LPWSTR>(*FilePath),
+		SE_FILE_OBJECT,
+		DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+		nullptr, nullptr, pACL, nullptr
+	);
+	if (SecErr != ERROR_SUCCESS)
+	{
+		UE_LOG(LogSmithUE, Warning, TEXT("SmithUE portfile ACL: SetNamedSecurityInfo failed (%u)"), SecErr);
+	}
+
+	::LocalFree(pACL);
+	::CloseHandle(hToken);
+}
+#endif // PLATFORM_WINDOWS
+
+/**
+ * Atomically write Content to FinalPath:
+ *   1. Write to <FinalPath>.tmp
+ *   2. MoveFileExW (MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+ *   3. Apply current-user-only ACL (Windows)
+ */
+static void SmithUE_WritePortFileAtomic(const FString& FinalPath, const FString& Content)
+{
+	const FString TmpPath = FinalPath + TEXT(".tmp");
+
+	if (!FFileHelper::SaveStringToFile(Content, *TmpPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		UE_LOG(LogSmithUE, Warning, TEXT("SmithUE: failed to write tmp portfile %s"), *TmpPath);
+		return;
+	}
+
+#if PLATFORM_WINDOWS
+	// Atomic rename — MOVEFILE_WRITE_THROUGH ensures data is flushed before rename returns
+	const BOOL bMoved = ::MoveFileExW(
+		*TmpPath,
+		*FinalPath,
+		MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+	);
+	if (!bMoved)
+	{
+		UE_LOG(LogSmithUE, Warning, TEXT("SmithUE: MoveFileExW failed (%u) — portfile not written"), ::GetLastError());
+		IFileManager::Get().Delete(*TmpPath);
+		return;
+	}
+
+	SmithUE_SetPortFileAclCurrentUserOnly(FinalPath);
+#else
+	// Non-Windows fallback (not expected; plugin is Win64-only)
+	IFileManager::Get().Move(*FinalPath, *TmpPath, /*bReplace=*/true, /*bEvenReadOnly=*/false);
+#endif
+}
+
+// ============================================================
+//  USmithUEHttpServer
+// ============================================================
+
 USmithUEHttpServer::USmithUEHttpServer()
 	: ServerThread(nullptr)
 	, bIsRunning(false)
-	, Port(13721)
+	, Port(0)
+	, BoundPort(0)
 {
 }
 
@@ -30,10 +240,15 @@ void USmithUEHttpServer::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-	int32 OverridePort = 0;
-	if (FParse::Value(FCommandLine::Get(), TEXT("SmithUEhttpport="), OverridePort) && OverridePort > 0 && OverridePort <= MAX_uint16)
+	// Support SMITHUE_BIND_PORT env var override; default 0 = OS-assigned
+	FString EnvPort = FPlatformMisc::GetEnvironmentVariable(TEXT("SMITHUE_BIND_PORT"));
+	if (!EnvPort.IsEmpty())
 	{
-		Port = static_cast<uint16>(OverridePort);
+		int32 ParsedPort = FCString::Atoi(*EnvPort);
+		if (ParsedPort > 0 && ParsedPort <= MAX_uint16)
+		{
+			Port = static_cast<uint16>(ParsedPort);
+		}
 	}
 
 	StartServer();
@@ -85,6 +300,11 @@ void USmithUEHttpServer::StartServer()
 		return;
 	}
 
+	// Retrieve OS-assigned port after successful bind
+	TSharedRef<FInternetAddr> BoundAddr = SocketSubsystem->CreateInternetAddr();
+	NewListenerSocket->GetAddress(*BoundAddr);
+	BoundPort = static_cast<uint16>(BoundAddr->GetPort());
+
 	ListenerSocket = NewListenerSocket;
 	bIsRunning = true;
 	ServerThread = FRunnableThread::Create(new FSmithUEHttpServerRunnable(this, ListenerSocket), TEXT("SmithUEHttpServerThread"));
@@ -95,7 +315,81 @@ void USmithUEHttpServer::StartServer()
 		return;
 	}
 
-	UE_LOG(LogSmithUE, Log, TEXT("SmithUE HTTP server listening on 127.0.0.1:%d"), Port);
+	UE_LOG(LogSmithUE, Log, TEXT("SmithUE HTTP listening on 127.0.0.1:%d"), BoundPort);
+
+	// ---- Readiness: poll AssetRegistry every 0.5 s on the GameThread ----
+	{
+		// Reset in case StartServer is called more than once (shouldn't happen, but be safe)
+		bIsReady = false;
+
+		ReadyTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float /*DeltaTime*/) -> bool
+			{
+				check(IsInGameThread());
+
+				FAssetRegistryModule* AssetRegistryModule =
+					FModuleManager::GetModulePtr<FAssetRegistryModule>("AssetRegistry");
+
+				if (AssetRegistryModule && !AssetRegistryModule->Get().IsLoadingAssets())
+				{
+					bIsReady = true;
+					UE_LOG(LogSmithUE, Log, TEXT("SmithUE: editor ready (AssetRegistry finished loading)"));
+					return false; // Unregister ticker
+				}
+				return true; // Keep ticking
+			}),
+			0.5f);
+	}
+
+	// ---- Portfile: prune stale files, then write new one atomically ----
+	{
+		const FString LocalAppData = FPlatformMisc::GetEnvironmentVariable(TEXT("LOCALAPPDATA"));
+		if (LocalAppData.IsEmpty())
+		{
+			UE_LOG(LogSmithUE, Warning, TEXT("SmithUE: LOCALAPPDATA not set; portfile skipped"));
+		}
+		else
+		{
+			const FString DirPath = LocalAppData + TEXT("\\.smithue");
+			IFileManager::Get().MakeDirectory(*DirPath, true);
+
+			// Remove portfiles whose server is no longer responding
+			SmithUE_PruneStalePortFiles(DirPath, SocketSubsystem);
+
+			// Build portfile path and store for later cleanup
+			PortFilePath = DirPath + FString::Printf(TEXT("\\%u.port"), FPlatformProcess::GetCurrentProcessId());
+
+			// Resolve plugin version from descriptor
+			FString PluginVersion = TEXT("unknown");
+			if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
+			{
+				PluginVersion = Plugin->GetDescriptor().VersionName;
+			}
+
+			// Project file path — normalise to forward slashes for JSON
+			FString ProjectPath = FPaths::GetProjectFilePath();
+			ProjectPath.ReplaceInline(TEXT("\\"), TEXT("/"));
+
+			const FString JsonContent = FString::Printf(
+				TEXT("{\"port\":%d,\"pid\":%u,\"project\":\"%s\",\"project_name\":\"%s\",\"started_at\":\"%s\",\"plugin_version\":\"%s\"}"),
+				static_cast<int32>(BoundPort),
+				FPlatformProcess::GetCurrentProcessId(),
+				*ProjectPath,
+				FApp::GetProjectName(),
+				*FDateTime::UtcNow().ToIso8601(),
+				*PluginVersion
+			);
+
+			SmithUE_WritePortFileAtomic(PortFilePath, JsonContent);
+			UE_LOG(LogSmithUE, Log, TEXT("SmithUE: portfile written to %s"), *PortFilePath);
+
+			// OnExit handles crash / abnormal termination paths
+			FCoreDelegates::OnExit.AddLambda([PortFilePathCopy = PortFilePath]()
+			{
+				IFileManager::Get().Delete(*PortFilePathCopy);
+			});
+		}
+	}
 }
 
 void USmithUEHttpServer::StopServer()
@@ -106,6 +400,21 @@ void USmithUEHttpServer::StopServer()
 	}
 
 	bIsRunning = false;
+	bIsReady   = false;
+
+	// Remove readiness ticker if still pending
+	if (ReadyTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(ReadyTickerHandle);
+		ReadyTickerHandle.Reset();
+	}
+
+	// Graceful shutdown: delete portfile so the slot is freed immediately
+	if (!PortFilePath.IsEmpty())
+	{
+		IFileManager::Get().Delete(*PortFilePath);
+		PortFilePath.Empty();
+	}
 
 	if (ServerThread != nullptr)
 	{

@@ -7,7 +7,6 @@
 #include "Async/Async.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
-#include "Transport/SmithUEConnectionManager.h"
 #include "UnrealEdMisc.h"
 
 // Static member definition
@@ -261,15 +260,9 @@ void FSmithUEUpdateChecker::ShowUpdateNotification()
 		*GCachedUpdateInfo.BranchName
 	);
 
-	// Build SubText with current version + agent reminder
+	// Build SubText with current version + restart reminder
 	FString SubTextStr = FString::Printf(TEXT("Current: v%s\n"), *GCachedUpdateInfo.CurrentVersion);
-
-	// Build agent reminder by iterating active sessions
-	const TArray<FSmithUEConnectionManager::FClientSession> Sessions = FSmithUEConnectionManager::Get().GetSessions();
-	for (const FSmithUEConnectionManager::FClientSession& Session : Sessions)
-	{
-		SubTextStr += FString::Printf(TEXT("• Restart %s to reconnect MCP\n"), *Session.ClientName);
-	}
+	SubTextStr += TEXT("• Restart connected SmithUE clients after updating\n");
 
 	FNotificationInfo Info(FText::FromString(MainText));
 	Info.SubText = FText::FromString(SubTextStr);
