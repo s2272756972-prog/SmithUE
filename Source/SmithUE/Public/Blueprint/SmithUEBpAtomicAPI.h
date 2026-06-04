@@ -16,6 +16,7 @@ public:
 	static UEdGraph* FindGraph(UBlueprint* Blueprint, const FString& GraphName);
 	static FString CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, const FString& NodeClass, FVector2D Position, const TSharedPtr<FJsonObject>& ExtraParams);
 	static bool ConnectPins(UBlueprint* Blueprint, UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName);
+	static bool DisconnectPins(UBlueprint* Blueprint, UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName);
 	static bool SetPinDefault(UBlueprint* Blueprint, UEdGraph* Graph, const FString& NodeId, const FString& PinName, const FString& Value);
 	static bool CompileBlueprint(UBlueprint* Blueprint, TArray<FString>& OutErrors, bool bSkipGarbageCollection = false);
 
@@ -24,6 +25,7 @@ private:
 	static TSharedPtr<FJsonObject> HandleBpAddFunction(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpCreateNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpConnectPins(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpDisconnectPins(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpSetPinDefault(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpDeleteNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpAddVariable(const TSharedPtr<FJsonObject>& Params);

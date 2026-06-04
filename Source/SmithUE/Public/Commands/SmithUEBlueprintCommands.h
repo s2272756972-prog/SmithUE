@@ -15,4 +15,5 @@ private:
     static TSharedPtr<FJsonObject> HandleBpCompileCode(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleBpBatchOp(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleBpValidateCode(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleBpSearch(const TSharedPtr<FJsonObject>& Params);
 };

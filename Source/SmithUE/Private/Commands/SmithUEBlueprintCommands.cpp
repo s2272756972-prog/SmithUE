@@ -2,6 +2,7 @@
 
 #include "Commands/SmithUEBlueprintCommands.h"
 #include "Blueprint/SmithUEBpAtomicAPI.h"
+#include "Blueprint/SmithUEBpAtomicAPIHelpers.h"
 #include "Blueprint/SmithUEBpCompiler.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "ToolRegistry/SmithUEToolSchema.h"
@@ -160,7 +161,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Blueprint"),
             TEXT("Get Blueprint metadata summary"),
             {
-                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true)
             }),
         &HandleBpGetSummary);
 
@@ -168,10 +169,11 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_describe_graph"),
             TEXT("Blueprint"),
-            TEXT("Describe all nodes and connections in a Blueprint graph"),
+            TEXT("Describe nodes in a Blueprint graph. mode: full(default)/compact/summary/node_pins/exec_chain. exec_chain mode follows exec pins from entry points (add entry_node param to start from specific N-id)."),
             {
-                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
-                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name"), true)
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
+                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name"), true),
+                FSmithUEToolParam(TEXT("entry_node"), TEXT("string"), TEXT("For exec_chain mode: N-id to start BFS from (default: all entry points)"))
             }),
         &HandleBpDescribeGraph);
 
@@ -181,7 +183,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Blueprint"),
             TEXT("Compile Blueprint DSL into a Blueprint"),
             {
-                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
                 FSmithUEToolParam(TEXT("code"), TEXT("string"), TEXT("Blueprint DSL text"), true)
             }),
         &HandleBpCompileCode);
@@ -207,6 +209,20 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("code"), TEXT("string"), TEXT("Blueprint DSL text"), true)
             }),
         &HandleBpValidateCode);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_search"),
+            TEXT("Blueprint"),
+            TEXT("Search nodes in a Blueprint by name (substring, case-insensitive) and/or type (exact class name). Searches all graphs (event, function, macro)."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
+                FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Substring to match against node title (case-insensitive). Empty = no filter.")),
+                FSmithUEToolParam(TEXT("type"), TEXT("string"), TEXT("Exact node class name to match (e.g. 'K2Node_CallFunction'). Empty = no filter.")),
+                FSmithUEToolParam(TEXT("verbose"), TEXT("boolean"), TEXT("If true, include pins (in/out) for each matched node. Default false.")),
+                FSmithUEToolParam(TEXT("limit"), TEXT("integer"), TEXT("Maximum number of nodes to return. Default 100."))
+            }),
+        &HandleBpSearch);
 }
 
 TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetSummary(const TSharedPtr<FJsonObject>& Params)
@@ -470,7 +486,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
     Params->TryGetStringField(TEXT("bp_path"), BpPath);
     Params->TryGetStringField(TEXT("graph_name"), GraphName);
 
-    // Mode parameter: "full" (default), "compact", "summary", "node_pins"
+    // Mode parameter: "full" (default), "compact", "summary", "node_pins", "exec_chain"
     FString Mode = TEXT("full");
     Params->TryGetStringField(TEXT("mode"), Mode);
 
@@ -532,6 +548,78 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
             }
         }
         FSmithUEToolRegistry::Get().NidSession.StoreNids(GraphPath, IndexToGuid);
+    }
+
+    // For exec_chain mode: collect only exec-reachable nodes via BFS.
+    // IMPORTANT: placed after StoreNids so entry_node N-id resolution works.
+    TSet<UEdGraphNode*> ExecChainNodes;
+    if (Mode == TEXT("exec_chain"))
+    {
+        TQueue<UEdGraphNode*> BfsQueue;
+
+        // Optional: start from a specific node.
+        FString EntryNodeId;
+        if (Params->TryGetStringField(TEXT("entry_node"), EntryNodeId) && !EntryNodeId.IsEmpty())
+        {
+            FString DummyError;
+            const FString GraphPath = BpPath + TEXT("::") + GraphName;
+            UEdGraphNode* StartNode = SmithUEBpAtomicAPIHelpers::ResolveNodeId(Graph, GraphPath, EntryNodeId, DummyError);
+            if (StartNode)
+            {
+                BfsQueue.Enqueue(StartNode);
+            }
+        }
+        else
+        {
+            // Find all entry point nodes (events, function entries, input key nodes).
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (!Node)
+                {
+                    continue;
+                }
+                const FString NodeClass = Node->GetClass()->GetName();
+                if (NodeClass.Contains(TEXT("K2Node_FunctionEntry")) ||
+                    NodeClass.Contains(TEXT("K2Node_Event")) ||
+                    NodeClass.Contains(TEXT("K2Node_InputKey")) ||
+                    NodeClass.Contains(TEXT("K2Node_InputAction")) ||
+                    NodeClass.Contains(TEXT("K2Node_EnhancedInputAction")) ||
+                    NodeClass.Contains(TEXT("K2Node_CustomEvent")))
+                {
+                    BfsQueue.Enqueue(Node);
+                }
+            }
+        }
+
+        // BFS following exec output pins only.
+        while (!BfsQueue.IsEmpty())
+        {
+            UEdGraphNode* Current = nullptr;
+            BfsQueue.Dequeue(Current);
+            if (!Current || ExecChainNodes.Contains(Current))
+            {
+                continue;
+            }
+            ExecChainNodes.Add(Current);
+            for (UEdGraphPin* Pin : Current->Pins)
+            {
+                if (!Pin || Pin->Direction != EGPD_Output)
+                {
+                    continue;
+                }
+                if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+                {
+                    continue;
+                }
+                for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                {
+                    if (LinkedPin && LinkedPin->GetOwningNode())
+                    {
+                        BfsQueue.Enqueue(LinkedPin->GetOwningNode());
+                    }
+                }
+            }
+        }
     }
 
     // Helper: resolve a linked pin to "ShortId.PinName"
@@ -659,6 +747,12 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
             continue;
         }
 
+        // exec_chain mode: skip nodes not on the exec path.
+        if (Mode == TEXT("exec_chain") && !ExecChainNodes.Contains(Node))
+        {
+            continue;
+        }
+
         // node_pins mode: skip nodes not in the requested list
         if (Mode == TEXT("node_pins") && !NodeIdsFilter.Contains(*ShortId))
         {
@@ -673,7 +767,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
         // summary mode: no pins
         if (Mode != TEXT("summary"))
         {
-            const bool bCompact = (Mode == TEXT("compact"));
+            const bool bCompact = (Mode == TEXT("compact") || Mode == TEXT("exec_chain"));
             TArray<TSharedPtr<FJsonValue>> Inputs;
             TArray<TSharedPtr<FJsonValue>> Outputs;
             BuildPinArrays(Node, Inputs, Outputs, bCompact);
@@ -796,6 +890,300 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpBatchOp(const TShared
     Params->TryGetStringField(TEXT("bp_path"), BatchBpPath);
     FString BatchGraphName;
     Params->TryGetStringField(TEXT("graph_name"), BatchGraphName);
+
+    bool bAtomic = false;
+    Params->TryGetBoolField(TEXT("atomic"), bAtomic);
+    if (bAtomic)
+    {
+        auto MakeAtomicDryRunError = [](const TArray<FString>& Errors) -> TSharedPtr<FJsonObject>
+        {
+            TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+            Response->SetStringField(TEXT("status"), TEXT("error"));
+            Response->SetStringField(TEXT("error"), TEXT("atomic dry-run failed"));
+            TArray<TSharedPtr<FJsonValue>> ErrorValues;
+            for (const FString& Item : Errors)
+            {
+                ErrorValues.Add(MakeShared<FJsonValueString>(Item));
+            }
+            Response->SetArrayField(TEXT("errors"), ErrorValues);
+            return Response;
+        };
+
+        auto BuildOpParams = [&BatchBpPath, &BatchGraphName](const TSharedPtr<FJsonObject>& OpObj) -> TSharedPtr<FJsonObject>
+        {
+            TSharedPtr<FJsonObject> OpParams = MakeShared<FJsonObject>();
+            if (!BatchBpPath.IsEmpty())
+            {
+                OpParams->SetStringField(TEXT("bp_path"), BatchBpPath);
+            }
+            if (!BatchGraphName.IsEmpty())
+            {
+                OpParams->SetStringField(TEXT("graph_name"), BatchGraphName);
+            }
+            for (const auto& KV : OpObj->Values)
+            {
+                if (!KV.Key.Equals(TEXT("op"), ESearchCase::IgnoreCase) &&
+                    !KV.Key.Equals(TEXT("atomic"), ESearchCase::IgnoreCase))
+                {
+                    OpParams->Values.Add(KV.Key, KV.Value);
+                }
+            }
+            const TSharedPtr<FJsonObject>* OpParamsPtr = nullptr;
+            if (OpObj->TryGetObjectField(TEXT("params"), OpParamsPtr) && OpParamsPtr && OpParamsPtr->IsValid())
+            {
+                for (const auto& KV : (*OpParamsPtr)->Values)
+                {
+                    OpParams->Values.Add(KV.Key, KV.Value);
+                }
+            }
+            return OpParams;
+        };
+
+        auto FindNodeById = [](UEdGraph* Graph, const FString& GraphPath, const FString& NodeId, FString& Error) -> UEdGraphNode*
+        {
+            if (!Graph)
+            {
+                Error = TEXT("Graph not found");
+                return nullptr;
+            }
+
+            bool bIsStale = false;
+            const FGuid NodeGuid = FSmithUEToolRegistry::Get().NidSession.ResolveNid(GraphPath, NodeId, bIsStale);
+            if (bIsStale)
+            {
+                Error = FString::Printf(TEXT("N-id session is stale for graph '%s'"), *GraphPath);
+                return nullptr;
+            }
+            if (!NodeGuid.IsValid())
+            {
+                Error = FString::Printf(TEXT("Node id '%s' not found in N-id session for graph '%s'"), *NodeId, *GraphPath);
+                return nullptr;
+            }
+
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (Node && Node->NodeGuid == NodeGuid)
+                {
+                    return Node;
+                }
+            }
+
+            Error = FString::Printf(TEXT("Node id '%s' resolved to missing node in graph '%s'"), *NodeId, *GraphPath);
+            return nullptr;
+        };
+
+        auto ValidateNodeAndPin = [&FindNodeById](UEdGraph* Graph, const FString& GraphPath, const FString& NodeField, const FString& NodeId, const FString& PinField, const FString& PinName, FString& Error) -> bool
+        {
+            UEdGraphNode* Node = FindNodeById(Graph, GraphPath, NodeId, Error);
+            if (!Node)
+            {
+                Error = FString::Printf(TEXT("%s: %s"), *NodeField, *Error);
+                return false;
+            }
+
+            if (!PinName.IsEmpty())
+            {
+                for (UEdGraphPin* Pin : Node->Pins)
+                {
+                    if (Pin && Pin->PinName.ToString() == PinName)
+                    {
+                        return true;
+                    }
+                }
+                Error = FString::Printf(TEXT("%s '%s' not found on %s '%s'"), *PinField, *PinName, *NodeField, *NodeId);
+                return false;
+            }
+
+            return true;
+        };
+
+        auto ExtractDispatchError = [](const TSharedPtr<FJsonObject>& DispatchResult, const FString& OpName) -> FString
+        {
+            FString OpError;
+            if (DispatchResult.IsValid())
+            {
+                DispatchResult->TryGetStringField(TEXT("error"), OpError);
+            }
+            return OpError.IsEmpty() ? FString::Printf(TEXT("Op '%s' failed"), *OpName) : OpError;
+        };
+
+        struct FAtomicBatchOp
+        {
+            int32 Index = INDEX_NONE;
+            FString OpName;
+            TSharedPtr<FJsonObject> Params;
+        };
+
+        TArray<FAtomicBatchOp> AtomicOps;
+        TArray<FAtomicBatchOp> CompileOps;
+        TArray<FString> DryRunErrors;
+
+        for (int32 OpIndex = 0; OpIndex < Operations->Num(); ++OpIndex)
+        {
+            const TSharedPtr<FJsonValue>& OpValue = (*Operations)[OpIndex];
+            TSharedPtr<FJsonObject> OpObj = OpValue.IsValid() ? OpValue->AsObject() : nullptr;
+            if (!OpObj.IsValid())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d]: Each operation must be an object"), OpIndex));
+                continue;
+            }
+
+            FString OpName;
+            if (!OpObj->TryGetStringField(TEXT("op"), OpName) || OpName.IsEmpty())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d]: Operation missing 'op'"), OpIndex));
+                continue;
+            }
+            if (const FString* Resolved = OpAliases.Find(OpName))
+            {
+                OpName = *Resolved;
+            }
+
+            TSharedPtr<FJsonObject> OpParams = BuildOpParams(OpObj);
+            FAtomicBatchOp BatchOp{OpIndex, OpName, OpParams};
+            if (OpName.Equals(TEXT("bp_compile"), ESearchCase::IgnoreCase))
+            {
+                CompileOps.Add(BatchOp);
+                continue;
+            }
+
+            AtomicOps.Add(BatchOp);
+
+            FString BpPath;
+            FString GraphName;
+            const bool bNeedsGraph = OpParams->HasField(TEXT("node_id")) ||
+                                     OpParams->HasField(TEXT("source_node_id")) ||
+                                     OpParams->HasField(TEXT("target_node_id"));
+            if (!bNeedsGraph)
+            {
+                continue;
+            }
+
+            if (!OpParams->TryGetStringField(TEXT("bp_path"), BpPath) || BpPath.IsEmpty())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Missing required param: 'bp_path'"), OpIndex, *OpName));
+                continue;
+            }
+            if (!OpParams->TryGetStringField(TEXT("graph_name"), GraphName) || GraphName.IsEmpty())
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Missing required param: 'graph_name'"), OpIndex, *OpName));
+                continue;
+            }
+
+            UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+            if (!BP)
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Failed to load blueprint: %s"), OpIndex, *OpName, *BpPath));
+                continue;
+            }
+            UEdGraph* Graph = FSmithUEBpAtomicAPI::FindGraph(BP, GraphName);
+            if (!Graph)
+            {
+                DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': Graph not found: %s"), OpIndex, *OpName, *GraphName));
+                continue;
+            }
+
+            const FString GraphPath = BpPath + TEXT("::") + GraphName;
+            FString ValidationError;
+            FString NodeId;
+            if (OpParams->TryGetStringField(TEXT("node_id"), NodeId) && !NodeId.IsEmpty())
+            {
+                FString PinName;
+                OpParams->TryGetStringField(TEXT("pin_name"), PinName);
+                if (!ValidateNodeAndPin(Graph, GraphPath, TEXT("node_id"), NodeId, TEXT("pin_name"), PinName, ValidationError))
+                {
+                    DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': %s"), OpIndex, *OpName, *ValidationError));
+                }
+            }
+
+            FString SourceNodeId;
+            if (OpParams->TryGetStringField(TEXT("source_node_id"), SourceNodeId) && !SourceNodeId.IsEmpty())
+            {
+                FString SourcePin;
+                OpParams->TryGetStringField(TEXT("source_pin"), SourcePin);
+                if (!ValidateNodeAndPin(Graph, GraphPath, TEXT("source_node_id"), SourceNodeId, TEXT("source_pin"), SourcePin, ValidationError))
+                {
+                    DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': %s"), OpIndex, *OpName, *ValidationError));
+                }
+            }
+
+            FString TargetNodeId;
+            if (OpParams->TryGetStringField(TEXT("target_node_id"), TargetNodeId) && !TargetNodeId.IsEmpty())
+            {
+                FString TargetPin;
+                OpParams->TryGetStringField(TEXT("target_pin"), TargetPin);
+                if (!ValidateNodeAndPin(Graph, GraphPath, TEXT("target_node_id"), TargetNodeId, TEXT("target_pin"), TargetPin, ValidationError))
+                {
+                    DryRunErrors.Add(FString::Printf(TEXT("op[%d] '%s': %s"), OpIndex, *OpName, *ValidationError));
+                }
+            }
+        }
+
+        if (DryRunErrors.Num() > 0)
+        {
+            return MakeAtomicDryRunError(DryRunErrors);
+        }
+
+        TSet<FString> StaleGraphPaths;
+        {
+            FScopedTransaction AtomicTxn(FText::FromString(TEXT("SmithUE Atomic Batch")));
+            for (const FAtomicBatchOp& Op : AtomicOps)
+            {
+                TSharedPtr<FJsonObject> DispatchResult = FSmithUEToolRegistry::Get().DispatchCommand(Op.OpName, Op.Params);
+                if (!DispatchResult.IsValid())
+                {
+                    DispatchResult = MakeErrResp(FString::Printf(TEXT("Unknown command: %s"), *Op.OpName));
+                }
+
+                FString OpStatus;
+                DispatchResult->TryGetStringField(TEXT("status"), OpStatus);
+                if (OpStatus.Equals(TEXT("error"), ESearchCase::IgnoreCase))
+                {
+                    AtomicTxn.Cancel();
+                    return MakeErrResp(FString::Printf(TEXT("op[%d] '%s' failed: %s"), Op.Index, *Op.OpName, *ExtractDispatchError(DispatchResult, Op.OpName)));
+                }
+
+                if (Op.OpName.Equals(TEXT("bp_create_node"), ESearchCase::IgnoreCase) ||
+                    Op.OpName.Equals(TEXT("bp_delete_node"), ESearchCase::IgnoreCase))
+                {
+                    FString OpBpPath;
+                    FString OpGraphName;
+                    if (Op.Params->TryGetStringField(TEXT("bp_path"), OpBpPath) &&
+                        Op.Params->TryGetStringField(TEXT("graph_name"), OpGraphName) &&
+                        !OpBpPath.IsEmpty() && !OpGraphName.IsEmpty())
+                    {
+                        StaleGraphPaths.Add(OpBpPath + TEXT("::") + OpGraphName);
+                    }
+                }
+            }
+        }
+
+        for (const FString& GraphPath : StaleGraphPaths)
+        {
+            FSmithUEToolRegistry::Get().NidSession.MarkStale(GraphPath);
+        }
+
+        for (const FAtomicBatchOp& Op : CompileOps)
+        {
+            TSharedPtr<FJsonObject> DispatchResult = FSmithUEToolRegistry::Get().DispatchCommand(Op.OpName, Op.Params);
+            if (!DispatchResult.IsValid())
+            {
+                DispatchResult = MakeErrResp(FString::Printf(TEXT("Unknown command: %s"), *Op.OpName));
+            }
+
+            FString OpStatus;
+            DispatchResult->TryGetStringField(TEXT("status"), OpStatus);
+            if (OpStatus.Equals(TEXT("error"), ESearchCase::IgnoreCase))
+            {
+                return MakeErrResp(FString::Printf(TEXT("op[%d] '%s' failed: %s"), Op.Index, *Op.OpName, *ExtractDispatchError(DispatchResult, Op.OpName)));
+            }
+        }
+
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetBoolField(TEXT("atomic"), true);
+        Data->SetNumberField(TEXT("operations_executed"), Operations->Num());
+        return WrapSuccess(Data);
+    }
 
     // --- Single transaction wrapping the entire batch ---
     const FScopedTransaction Transaction(FText::FromString(TEXT("SmithUE: Blueprint Batch Op")));
@@ -942,5 +1330,200 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpValidateCode(const TS
     {
         Data->SetStringField(TEXT("error"), SyntaxError);
     }
+    return WrapSuccess(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path")}, Error))
+    {
+        return MakeErrResp(Error);
+    }
+
+    FString BpPath;
+    Params->TryGetStringField(TEXT("bp_path"), BpPath);
+
+    UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+    if (!BP)
+    {
+        return MakeErrResp(FString::Printf(TEXT("Failed to load blueprint: %s"), *BpPath));
+    }
+
+    // --- Filter params ---
+    FString NameFilter;
+    Params->TryGetStringField(TEXT("name"), NameFilter);
+    const FString NameFilterLower = NameFilter.ToLower();
+
+    FString TypeFilter;
+    Params->TryGetStringField(TEXT("type"), TypeFilter);
+
+    bool bVerbose = false;
+    Params->TryGetBoolField(TEXT("verbose"), bVerbose);
+
+    int32 Limit = 100;
+    {
+        int32 LimitParam = 0;
+        if (Params->TryGetNumberField(TEXT("limit"), LimitParam) && LimitParam > 0)
+        {
+            Limit = LimitParam;
+        }
+    }
+
+    // --- Collect all graphs ---
+    TArray<UEdGraph*> AllGraphs;
+    BP->GetAllGraphs(AllGraphs);
+
+    // --- Search nodes ---
+    TArray<TSharedPtr<FJsonValue>> ResultNodes;
+    int32 MatchCount = 0;
+
+    for (UEdGraph* Graph : AllGraphs)
+    {
+        if (!Graph)
+        {
+            continue;
+        }
+        const FString GraphName = Graph->GetName();
+        const FString GraphPath = BpPath + TEXT("::") + GraphName;
+
+        // --- Build / refresh GuidToShortId for this graph (mirrors bp_describe_graph) ---
+        // Always rebuild: ensures the session is fresh and consistent with current node order.
+        TMap<FGuid, FString> GuidToShortId;
+        {
+            int32 NodeIndex = 0;
+            for (UEdGraphNode* N : Graph->Nodes)
+            {
+                if (N)
+                {
+                    GuidToShortId.Add(N->NodeGuid, FString::Printf(TEXT("N%d"), NodeIndex++));
+                }
+            }
+
+            // Store into NidSession so subsequent commands (bp_connect_pins etc.) can resolve.
+            TMap<int32, FGuid> IndexToGuid;
+            IndexToGuid.Reserve(GuidToShortId.Num());
+            for (const TPair<FGuid, FString>& Pair : GuidToShortId)
+            {
+                const FString& NidStr = Pair.Value;
+                if (NidStr.Len() >= 2 && NidStr[0] == TEXT('N'))
+                {
+                    const int32 Idx = FCString::Atoi(*NidStr.Mid(1));
+                    IndexToGuid.Add(Idx, Pair.Key);
+                }
+            }
+            FSmithUEToolRegistry::Get().NidSession.StoreNids(GraphPath, IndexToGuid);
+        }
+
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (!Node)
+            {
+                continue;
+            }
+            if (MatchCount >= Limit)
+            {
+                break;
+            }
+
+            // --- Type filter (exact class name match) ---
+            if (!TypeFilter.IsEmpty())
+            {
+                if (!Node->GetClass()->GetName().Equals(TypeFilter, ESearchCase::IgnoreCase))
+                {
+                    continue;
+                }
+            }
+
+            // --- Name filter (case-insensitive substring of full title) ---
+            if (!NameFilterLower.IsEmpty())
+            {
+                const FString TitleLower = Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString().ToLower();
+                if (!TitleLower.Contains(NameFilterLower))
+                {
+                    continue;
+                }
+            }
+
+            // Resolve N-id from session map (guaranteed present after StoreNids above).
+            const FString* ShortId = GuidToShortId.Find(Node->NodeGuid);
+            const FString NidStr = ShortId ? *ShortId : Node->NodeGuid.ToString();
+
+            // --- Build node object ---
+            TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
+            NodeObj->SetStringField(TEXT("nid"),      NidStr);
+            NodeObj->SetStringField(TEXT("title"),    Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+            NodeObj->SetStringField(TEXT("type"),     Node->GetClass()->GetName());
+            NodeObj->SetStringField(TEXT("graph"),    GraphName);
+            NodeObj->SetObjectField(TEXT("position"), [&]()
+            {
+                TSharedPtr<FJsonObject> Pos = MakeShared<FJsonObject>();
+                Pos->SetNumberField(TEXT("x"), Node->NodePosX);
+                Pos->SetNumberField(TEXT("y"), Node->NodePosY);
+                return Pos;
+            }());
+
+            // --- Verbose: include pins ---
+            if (bVerbose)
+            {
+                TArray<TSharedPtr<FJsonValue>> PinsIn;
+                TArray<TSharedPtr<FJsonValue>> PinsOut;
+
+                for (UEdGraphPin* Pin : Node->Pins)
+                {
+                    if (!Pin)
+                    {
+                        continue;
+                    }
+                    TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+                    PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+                    PinObj->SetStringField(TEXT("type"), PinTypeToString(Pin->PinType));
+                    PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+
+                    TArray<TSharedPtr<FJsonValue>> ConnectedTo;
+                    for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                    {
+                        if (!LinkedPin) continue;
+                        UEdGraphNode* LinkedNode = LinkedPin->GetOwningNode();
+                        if (!LinkedNode) continue;
+                        const FString* Nid = GuidToShortId.Find(LinkedNode->NodeGuid);
+                        if (Nid) ConnectedTo.Add(MakeShared<FJsonValueString>(*Nid));
+                    }
+                    PinObj->SetArrayField(TEXT("connected_to"), ConnectedTo);
+
+                    if (Pin->Direction == EGPD_Input)
+                    {
+                        PinsIn.Add(MakeShared<FJsonValueObject>(PinObj));
+                    }
+                    else
+                    {
+                        PinsOut.Add(MakeShared<FJsonValueObject>(PinObj));
+                    }
+                }
+
+                if (PinsIn.Num() > 0)
+                {
+                    NodeObj->SetArrayField(TEXT("in"), PinsIn);
+                }
+                if (PinsOut.Num() > 0)
+                {
+                    NodeObj->SetArrayField(TEXT("out"), PinsOut);
+                }
+            }
+
+            ResultNodes.Add(MakeShared<FJsonValueObject>(NodeObj));
+            ++MatchCount;
+        }
+
+        if (MatchCount >= Limit)
+        {
+            break;
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("bp_path"), BpPath);
+    Data->SetArrayField(TEXT("nodes"), ResultNodes);
+    Data->SetNumberField(TEXT("count"), ResultNodes.Num());
     return WrapSuccess(Data);
 }
