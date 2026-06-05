@@ -251,6 +251,27 @@ MCP 服务已在 v0.8.0 中移除，由 `smithue-cli` 替代。迁移指南请�
 
 ---
 
+## 卸载
+
+完全卸载前，建议先运行 `smithue-cli purge` 清理 `%LOCALAPPDATA%\.smithue\` 目录中的残留文件。
+
+```bash
+# 预览将被删除的内容（不实际删除）
+smithue-cli purge --dry-run
+
+# 非交互式完整清理（适用于脚本/CI）
+smithue-cli purge -y
+```
+
+`purge` 命令会在删除前进行存活检测，并在目录为符号链接时拒绝操作以保障安全。完整参数说明请参阅 [smithue-cli README — Uninstall](https://github.com/123dx-svg/smithue-cli#uninstall)。
+
+清理完成后，再执行：
+```bash
+npm uninstall -g smithue-cli
+```
+
+---
+
 ## 许可证
 
 Copyright 2026, 123dx-svg. MIT License.
