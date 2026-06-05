@@ -61,7 +61,7 @@ TSharedPtr<FJsonObject> FSmithUEToolRegistry::DispatchCommand(const FString& Nam
 		TEXT("bp_describe_graph"),
 		TEXT("bp_get_summary"),
 	};
-	const bool bIsReadonly = ReadonlyCommands.Contains(Name) || Name.StartsWith(TEXT("observation_"));
+	const bool bIsReadonly = ReadonlyCommands.Contains(Name) || Name.StartsWith(TEXT("observation_")) || Name.StartsWith(TEXT("pie_"));
 
 	if (!bIsReadonly)
 	{

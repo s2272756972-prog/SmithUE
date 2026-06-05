@@ -9,6 +9,7 @@
 #include "Components/ChildActorComponent.h"
 #include "Components/PostProcessComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "GameFramework/MovementComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Dom/JsonObject.h"
@@ -698,10 +699,15 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddComponent(const TSharedP
 
 	// 安全措施: 禁用组件模板的 Tick, 防止重编译时触发纯虚函数崩溃
 	// Safety: disable tick on the component template to prevent pure virtual crashes
+	// 但跳过 UMovementComponent 子类 — 它们依赖 Tick 驱动运动
+	// Skip UMovementComponent subclasses — they require tick to function
 	if (UActorComponent* Template = SCSNode->ComponentTemplate)
 	{
-		Template->PrimaryComponentTick.bCanEverTick = false;
-		Template->PrimaryComponentTick.bStartWithTickEnabled = false;
+		if (!Template->IsA<UMovementComponent>())
+		{
+			Template->PrimaryComponentTick.bCanEverTick = false;
+			Template->PrimaryComponentTick.bStartWithTickEnabled = false;
+		}
 	}
 
 	// 可选: 挂载到父组件实现层级结构
