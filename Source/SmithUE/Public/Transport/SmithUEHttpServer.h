@@ -38,5 +38,5 @@ private:
 	FString PortFilePath;
 
 	/** Handle for the FTSTicker delegate that polls asset-registry readiness. */
-	FDelegateHandle ReadyTickerHandle;
+	FTSTicker::FDelegateHandle ReadyTickerHandle;
 };
