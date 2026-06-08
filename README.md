@@ -52,14 +52,33 @@ npx smithue-cli list
    git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
    ```
 
-2. 使用虚幻引擎 5.2 构建项目。
+2. 使用虚幻引擎 5.2 构建项目（首次编译约 50 秒）。
 
 3. 启动编辑器。SmithUE 将自动启动 HTTP 服务器并分配动态端口。
 
-4. 验证连接：
+4. 验证安装：
    ```bash
    npx smithue-cli status
    ```
+
+### 安装成功的标志
+
+| 检查项 | 期望结果 |
+|--------|---------|
+| 编辑器右下角出现 🟢 绿色圆点 + "SmithUE" 文字 | 插件已加载且 HTTP 服务器就绪 |
+| `npx smithue-cli status` 返回 `"ready": true` | CLI 能连接到编辑器 |
+| `npx smithue-cli exec ping '{}'` 返回 `"message": "pong"` | 命令通道畅通 |
+
+> 如果圆点为灰色或 CLI 报错 `No SmithUE portfiles found`，请等待编辑器完全加载后重试。
+
+### 多项目共享（可选）
+
+如果需要在多个项目中使用同一份插件代码，使用符号链接：
+```bash
+# Windows (以管理员运行)
+mklink /D "{OtherProject}\Plugins\SmithUE" "{SourceProject}\Plugins\SmithUE"
+```
+首次打开目标项目时会自动编译插件。
 
 **注意**：SmithUE 现在使用 `smithue-cli` 进行交互。详情请访问：https://github.com/123dx-svg/smithue-cli
 
