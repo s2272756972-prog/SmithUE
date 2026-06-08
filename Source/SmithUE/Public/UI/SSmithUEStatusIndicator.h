@@ -14,27 +14,25 @@ using FHttpResponsePtr = TSharedPtr<IHttpResponse, ESPMode::ThreadSafe>;
 
 /**
  * Status bar indicator for SmithUE CLI connectivity.
- * - Green dot : HTTP /ready returned {ready:true}
- * - Gray dot  : server unreachable or not ready
+ * - Green dot  : HTTP /ready returned {ready:true}, PIE not active
+ * - Yellow dot : ready but PIE is running (some commands locked)
+ * - Gray dot   : server unreachable or not ready
  * Polls 127.0.0.1:{port}/ready every 5 seconds.
  * Port is read from %LOCALAPPDATA%\.smithue\*.port file.
- * Tooltip shows version, port, tool count.
- * "Copy CLI Command" button visible when server is ready.
+ * Tooltip shows project name, port, PIE state.
+ * Click dot to copy port number to clipboard.
  */
 class SSmithUEStatusIndicator : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SSmithUEStatusIndicator)
-		: _ToolCount(0)
-	{}
-		SLATE_ARGUMENT(int32, ToolCount)
+	SLATE_BEGIN_ARGS(SSmithUEStatusIndicator) {}
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
 	virtual ~SSmithUEStatusIndicator() override;
 
 private:
-	/** Read port from %LOCALAPPDATA%\.smithue\*.port — returns 0 if not found. */
+	/** Read port and project_name from %LOCALAPPDATA%\.smithue\*.port — returns 0 if not found. */
 	int32 ReadPortFile();
 
 	/** Fire HTTP GET 127.0.0.1:{Port}/ready. Called by ticker. */
@@ -45,18 +43,20 @@ private:
 
 	FSlateColor GetDotColor() const;
 	FText GetTooltipText() const;
-	EVisibility GetCopyButtonVisibility() const;
-	FReply OnCopyCliCommand();
+	FReply OnDotClicked();
 
 	/** Ticker handle — cleaned up in destructor. */
 	FTSTicker::FDelegateHandle TickerHandle;
 
-	/** Tool count passed at construction time. */
-	int32 ToolCount = 0;
+	/** Project name from portfile. */
+	FString ProjectName;
 
 	/** Last discovered port (0 = none). */
 	int32 CurrentPort = 0;
 
 	/** True when last /ready check returned {ready:true}. */
 	bool bIsReady = false;
+
+	/** True when PIE is active (from /ready response). */
+	bool bPIEActive = false;
 };

@@ -27,30 +27,10 @@ namespace
 		static FSlateRoundedBoxBrush Brush(FLinearColor::White, 5.f);
 		return Brush;
 	}
-
-	static FString GetPluginVersion()
-	{
-		static FString CachedVersion;
-		if (CachedVersion.IsEmpty())
-		{
-			TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE"));
-			if (Plugin.IsValid())
-			{
-				CachedVersion = Plugin->GetDescriptor().VersionName;
-			}
-			if (CachedVersion.IsEmpty())
-			{
-				CachedVersion = TEXT("?");
-			}
-		}
-		return CachedVersion;
-	}
 }
 
 void SSmithUEStatusIndicator::Construct(const FArguments& InArgs)
 {
-	ToolCount = InArgs._ToolCount;
-
 	// Fire first poll immediately
 	PollReady();
 
@@ -72,20 +52,26 @@ void SSmithUEStatusIndicator::Construct(const FArguments& InArgs)
 		[
 			SNew(SHorizontalBox)
 
-			// --- Dot ---
+			// --- Clickable Dot ---
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
 			.Padding(0.f, 0.f, 4.f, 0.f)
 			[
-				SNew(SBox)
-				.WidthOverride(10.f)
-				.HeightOverride(10.f)
+				SNew(SButton)
+				.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+				.OnClicked_Raw(this, &SSmithUEStatusIndicator::OnDotClicked)
 				.ToolTipText_Raw(this, &SSmithUEStatusIndicator::GetTooltipText)
+				.ContentPadding(FMargin(0.f))
 				[
-					SNew(SImage)
-					.Image(&GetCircleBrush())
-					.ColorAndOpacity_Raw(this, &SSmithUEStatusIndicator::GetDotColor)
+					SNew(SBox)
+					.WidthOverride(10.f)
+					.HeightOverride(10.f)
+					[
+						SNew(SImage)
+						.Image(&GetCircleBrush())
+						.ColorAndOpacity_Raw(this, &SSmithUEStatusIndicator::GetDotColor)
+					]
 				]
 			]
 
@@ -93,28 +79,11 @@ void SSmithUEStatusIndicator::Construct(const FArguments& InArgs)
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
-			.Padding(0.f, 0.f, 4.f, 0.f)
 			[
 				SNew(STextBlock)
 				.Text(FText::FromString(TEXT("SmithUE")))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 				.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
-			]
-
-			// --- Copy CLI button (visible only when ready) ---
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				SNew(SButton)
-				.Visibility_Raw(this, &SSmithUEStatusIndicator::GetCopyButtonVisibility)
-				.OnClicked_Raw(this, &SSmithUEStatusIndicator::OnCopyCliCommand)
-				.ToolTipText(FText::FromString(TEXT("Copy: npx smithue-cli exec ping {}")))
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(TEXT("Copy CLI Command")))
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-				]
 			]
 		]
 	];
@@ -152,6 +121,12 @@ int32 SSmithUEStatusIndicator::ReadPortFile()
 				int32 Port = 0;
 				if (Obj->TryGetNumberField(TEXT("port"), Port) && Port > 0)
 				{
+					// Read project_name from portfile
+					FString ProjName;
+					if (Obj->TryGetStringField(TEXT("project_name"), ProjName))
+					{
+						ProjectName = ProjName;
+					}
 					return Port;
 				}
 			}
@@ -166,6 +141,7 @@ void SSmithUEStatusIndicator::PollReady()
 	if (CurrentPort <= 0)
 	{
 		bIsReady = false;
+		bPIEActive = false;
 		return;
 	}
 
@@ -184,16 +160,17 @@ void SSmithUEStatusIndicator::OnReadyResponse(FHttpRequestPtr /*Request*/, FHttp
 	if (!bSuccess || !Response.IsValid())
 	{
 		bIsReady = false;
+		bPIEActive = false;
 		return;
 	}
 
 	if (Response->GetResponseCode() < 200 || Response->GetResponseCode() >= 300)
 	{
 		bIsReady = false;
+		bPIEActive = false;
 		return;
 	}
 
-	// Expect JSON: {"ready": true}
 	TSharedPtr<FJsonObject> Obj;
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
 	if (FJsonSerializer::Deserialize(Reader, Obj) && Obj.IsValid())
@@ -201,50 +178,64 @@ void SSmithUEStatusIndicator::OnReadyResponse(FHttpRequestPtr /*Request*/, FHttp
 		bool bReadyField = false;
 		Obj->TryGetBoolField(TEXT("ready"), bReadyField);
 		bIsReady = bReadyField;
+
+		bool bPIEField = false;
+		Obj->TryGetBoolField(TEXT("pie_active"), bPIEField);
+		bPIEActive = bPIEField;
 	}
 	else
 	{
 		bIsReady = false;
+		bPIEActive = false;
 	}
 }
 
 FSlateColor SSmithUEStatusIndicator::GetDotColor() const
 {
-	if (bIsReady)
+	if (!bIsReady)
 	{
-		// Green — server ready
-		return FSlateColor(FLinearColor(0.1f, 0.9f, 0.3f, 1.f));
+		// Gray — server unreachable / not ready
+		return FSlateColor(FLinearColor(0.45f, 0.45f, 0.45f, 1.f));
 	}
-	// Gray — server unreachable / not ready
-	return FSlateColor(FLinearColor(0.45f, 0.45f, 0.45f, 1.f));
+
+	if (bPIEActive)
+	{
+		// Yellow — ready but PIE running (some commands locked)
+		return FSlateColor(FLinearColor(0.95f, 0.75f, 0.1f, 1.f));
+	}
+
+	// Green — fully ready
+	return FSlateColor(FLinearColor(0.1f, 0.9f, 0.3f, 1.f));
 }
 
 FText SSmithUEStatusIndicator::GetTooltipText() const
 {
+	if (!bIsReady)
+	{
+		return FText::FromString(TEXT("Not ready"));
+	}
+
 	FString Tip;
-	Tip += FString::Printf(TEXT("SmithUE v%s\n"), *GetPluginVersion());
-	Tip += TEXT("─────────────────\n");
-	if (CurrentPort > 0)
+	if (!ProjectName.IsEmpty())
 	{
-		Tip += FString::Printf(TEXT("HTTP port : %d\n"), CurrentPort);
+		Tip += ProjectName + TEXT(" | ");
 	}
-	else
+	Tip += FString::Printf(TEXT("Port: %d"), CurrentPort);
+
+	if (bPIEActive)
 	{
-		Tip += TEXT("HTTP port : (no port file)\n");
+		Tip += TEXT("\nPIE: active");
 	}
-	Tip += FString::Printf(TEXT("Tools     : %d\n"), ToolCount);
-	Tip += TEXT("─────────────────\n");
-	Tip += bIsReady ? TEXT("Status    : ready") : TEXT("Status    : down");
+
+	Tip += TEXT("\n(click to copy port)");
 	return FText::FromString(Tip);
 }
 
-EVisibility SSmithUEStatusIndicator::GetCopyButtonVisibility() const
+FReply SSmithUEStatusIndicator::OnDotClicked()
 {
-	return bIsReady ? EVisibility::Visible : EVisibility::Collapsed;
-}
-
-FReply SSmithUEStatusIndicator::OnCopyCliCommand()
-{
-	FPlatformApplicationMisc::ClipboardCopy(TEXT("npx smithue-cli exec ping {}"));
+	if (CurrentPort > 0)
+	{
+		FPlatformApplicationMisc::ClipboardCopy(*FString::Printf(TEXT("%d"), CurrentPort));
+	}
 	return FReply::Handled();
 }
