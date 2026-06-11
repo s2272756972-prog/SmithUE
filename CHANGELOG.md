@@ -1,5 +1,14 @@
 # SmithUE Changelog
 
+## v1.5.0 — Blueprint Class Member Inspection
+
+### Added
+- `bp_get_class_members` command — inspect a Blueprint or native C++ class's members (functions, variables, macros, delegates, interfaces) with full inheritance-chain attribution.
+  - Returns `inheritance_chain` (each entry tagged blueprint/native + module/blueprint_path), up to UObject.
+  - Members grouped by owning class — distinguishes which class in the chain declares each function/variable/interface/delegate.
+  - Token-conscious controls: `scope` (self|chain|owner:<Class>), `kinds` filter (functions,variables,macros,delegates,interfaces), `detail` (compact|full), `limit` (default 200, sets `truncated:true` when exceeded). `counts` always reports full per-owner totals cheaply so callers can size queries before drilling in.
+  - Resolves both Blueprint asset paths and native C++ class names (e.g. `ACarPawn`).
+
 ## v1.4.0 — HTTP Robustness
 
 ### Fixed

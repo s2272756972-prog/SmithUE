@@ -1,7 +1,7 @@
 ﻿{
 	"FileVersion": 3,
-	"Version": 2,
-	"VersionName": "1.4.0",
+	"Version": 3,
+	"VersionName": "1.5.0",
 	"FriendlyName": "SmithUE",
 	"Description": "Full-stack AI tool service plugin - exposes editor automation and Blueprint generation via TCP+HTTP",
 	"Category": "Editor",

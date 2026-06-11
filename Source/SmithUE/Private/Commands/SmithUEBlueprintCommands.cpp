@@ -10,6 +10,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -18,6 +19,7 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "ScopedTransaction.h"
+#include "UObject/Class.h"
 
 namespace
 {
@@ -147,6 +149,255 @@ namespace
         return NodeObj;
     }
 
+    enum class ESmithUEMemberKind : uint8
+    {
+        Functions,
+        Variables,
+        Macros,
+        Delegates,
+        Interfaces
+    };
+
+    struct FSmithUEClassMemberBucket
+    {
+        int32 FunctionCount = 0;
+        int32 VariableCount = 0;
+        int32 MacroCount = 0;
+        int32 DelegateCount = 0;
+        int32 InterfaceCount = 0;
+
+        TArray<TSharedPtr<FJsonValue>> Functions;
+        TArray<TSharedPtr<FJsonValue>> Variables;
+        TArray<TSharedPtr<FJsonValue>> Macros;
+        TArray<TSharedPtr<FJsonValue>> Delegates;
+        TArray<TSharedPtr<FJsonValue>> Interfaces;
+    };
+
+    TSet<ESmithUEMemberKind> ParseMemberKinds(const FString& KindsParam)
+    {
+        TSet<ESmithUEMemberKind> Kinds;
+        if (KindsParam.IsEmpty())
+        {
+            Kinds.Add(ESmithUEMemberKind::Functions);
+            Kinds.Add(ESmithUEMemberKind::Variables);
+            Kinds.Add(ESmithUEMemberKind::Macros);
+            Kinds.Add(ESmithUEMemberKind::Delegates);
+            Kinds.Add(ESmithUEMemberKind::Interfaces);
+            return Kinds;
+        }
+
+        TArray<FString> Parts;
+        KindsParam.ParseIntoArray(Parts, TEXT(","), true);
+        for (FString Part : Parts)
+        {
+            Part.TrimStartAndEndInline();
+            Part.ToLowerInline();
+            if (Part == TEXT("functions") || Part == TEXT("function"))
+            {
+                Kinds.Add(ESmithUEMemberKind::Functions);
+            }
+            else if (Part == TEXT("variables") || Part == TEXT("variable"))
+            {
+                Kinds.Add(ESmithUEMemberKind::Variables);
+            }
+            else if (Part == TEXT("macros") || Part == TEXT("macro"))
+            {
+                Kinds.Add(ESmithUEMemberKind::Macros);
+            }
+            else if (Part == TEXT("delegates") || Part == TEXT("delegate"))
+            {
+                Kinds.Add(ESmithUEMemberKind::Delegates);
+            }
+            else if (Part == TEXT("interfaces") || Part == TEXT("interface"))
+            {
+                Kinds.Add(ESmithUEMemberKind::Interfaces);
+            }
+        }
+        return Kinds;
+    }
+
+    TSharedPtr<FJsonValue> MakeCompactOrFullEntry(const FString& Name, bool bFull, const TSharedPtr<FJsonObject>& FullObj)
+    {
+        if (!bFull)
+        {
+            return MakeShared<FJsonValueString>(Name);
+        }
+        FullObj->SetStringField(TEXT("name"), Name);
+        return MakeShared<FJsonValueObject>(FullObj);
+    }
+
+    bool TryAddLimited(TArray<TSharedPtr<FJsonValue>>& Target, const TSharedPtr<FJsonValue>& Value, int32 Limit, int32& Added, bool& bTruncated)
+    {
+        if (Added >= Limit)
+        {
+            bTruncated = true;
+            return false;
+        }
+        Target.Add(Value);
+        ++Added;
+        return true;
+    }
+
+    FString FunctionSignatureToString(UFunction* Function)
+    {
+        if (!Function)
+        {
+            return TEXT("");
+        }
+
+        TArray<FString> Params;
+        FString ReturnType = TEXT("void");
+        for (TFieldIterator<FProperty> PropIt(Function); PropIt; ++PropIt)
+        {
+            FProperty* Prop = *PropIt;
+            if (!Prop || !Prop->HasAnyPropertyFlags(CPF_Parm))
+            {
+                continue;
+            }
+
+            const FString PropType = Prop->GetCPPType();
+            if (Prop->HasAnyPropertyFlags(CPF_ReturnParm))
+            {
+                ReturnType = PropType;
+            }
+            else
+            {
+                Params.Add(FString::Printf(TEXT("%s %s"), *PropType, *Prop->GetName()));
+            }
+        }
+
+        return FString::Printf(TEXT("%s %s(%s)"), *ReturnType, *Function->GetName(), *FString::Join(Params, TEXT(", ")));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> FunctionFlagsToJson(UFunction* Function)
+    {
+        TArray<TSharedPtr<FJsonValue>> Flags;
+        if (!Function)
+        {
+            return Flags;
+        }
+        if (Function->HasAnyFunctionFlags(FUNC_BlueprintCallable))
+        {
+            Flags.Add(MakeShared<FJsonValueString>(TEXT("BlueprintCallable")));
+        }
+        if (Function->HasAnyFunctionFlags(FUNC_BlueprintPure))
+        {
+            Flags.Add(MakeShared<FJsonValueString>(TEXT("BlueprintPure")));
+        }
+        if (Function->HasAnyFunctionFlags(FUNC_Net))
+        {
+            Flags.Add(MakeShared<FJsonValueString>(TEXT("Net")));
+        }
+        if (Function->HasAnyFunctionFlags(FUNC_BlueprintEvent))
+        {
+            Flags.Add(MakeShared<FJsonValueString>(TEXT("Event")));
+        }
+        return Flags;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> PropertyFlagsToJson(FProperty* Property)
+    {
+        TArray<TSharedPtr<FJsonValue>> Flags;
+        if (!Property)
+        {
+            return Flags;
+        }
+        if (Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly))
+        {
+            Flags.Add(MakeShared<FJsonValueString>(TEXT("BlueprintReadOnly")));
+        }
+        if (Property->HasAnyPropertyFlags(CPF_Net))
+        {
+            Flags.Add(MakeShared<FJsonValueString>(TEXT("Replicated")));
+        }
+        if (Property->HasAnyPropertyFlags(CPF_Edit))
+        {
+            Flags.Add(MakeShared<FJsonValueString>(TEXT("EditAnywhere")));
+        }
+        return Flags;
+    }
+
+    bool IsDelegateProperty(FProperty* Property)
+    {
+        return CastField<FMulticastDelegateProperty>(Property) != nullptr || CastField<FDelegateProperty>(Property) != nullptr;
+    }
+
+    TSharedPtr<FJsonValue> MakeFunctionMemberJson(UFunction* Function, bool bFull)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        if (bFull)
+        {
+            Obj->SetStringField(TEXT("signature"), FunctionSignatureToString(Function));
+            Obj->SetArrayField(TEXT("flags"), FunctionFlagsToJson(Function));
+        }
+        return MakeCompactOrFullEntry(Function ? Function->GetName() : TEXT("None"), bFull, Obj);
+    }
+
+    TSharedPtr<FJsonValue> MakeVariableMemberJson(FProperty* Property, bool bFull)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        if (bFull && Property)
+        {
+            Obj->SetStringField(TEXT("type"), Property->GetCPPType());
+            Obj->SetArrayField(TEXT("flags"), PropertyFlagsToJson(Property));
+        }
+        return MakeCompactOrFullEntry(Property ? Property->GetName() : TEXT("None"), bFull, Obj);
+    }
+
+    TSharedPtr<FJsonValue> MakeDelegateMemberJson(const FString& Name, bool bFull, bool bMulticast, const FString& Signature = TEXT(""))
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        if (bFull)
+        {
+            Obj->SetStringField(TEXT("kind"), bMulticast ? TEXT("multicast") : TEXT("single"));
+            if (!Signature.IsEmpty())
+            {
+                Obj->SetStringField(TEXT("signature"), Signature);
+            }
+        }
+        return MakeCompactOrFullEntry(Name, bFull, Obj);
+    }
+
+    TSharedPtr<FJsonValue> MakeNamedGraphMemberJson(UEdGraph* Graph, bool bFull)
+    {
+        const FString Name = Graph ? Graph->GetName() : TEXT("None");
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        if (bFull && Graph)
+        {
+            Obj->SetNumberField(TEXT("node_count"), Graph->Nodes.Num());
+        }
+        return MakeCompactOrFullEntry(Name, bFull, Obj);
+    }
+
+    UClass* ResolveNativeClass(const FString& ClassName)
+    {
+        TArray<FString> Candidates;
+        Candidates.Add(ClassName);
+        if (ClassName.Len() > 1 && (ClassName[0] == TEXT('A') || ClassName[0] == TEXT('U')))
+        {
+            Candidates.Add(ClassName.Mid(1));
+        }
+        else
+        {
+            Candidates.Add(FString::Printf(TEXT("A%s"), *ClassName));
+            Candidates.Add(FString::Printf(TEXT("U%s"), *ClassName));
+        }
+
+        for (const FString& Candidate : Candidates)
+        {
+            if (UClass* FoundClass = UClass::TryFindTypeSlow<UClass>(*Candidate))
+            {
+                return FoundClass;
+            }
+        }
+        return nullptr;
+    }
+
+    bool ClassNameMatchesScope(UClass* OwnerClass, const FString& OwnerFilter)
+    {
+        return OwnerFilter.IsEmpty() || (OwnerClass && OwnerClass->GetName() == OwnerFilter);
+    }
+
     TSharedPtr<FJsonObject> WrapSuccess(TSharedPtr<FJsonObject> Data)
     {
         return FSmithUECommonUtils::CreateSuccessResponse(Data);
@@ -164,6 +415,20 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true)
             }),
         &HandleBpGetSummary);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_get_class_members"),
+            TEXT("Blueprint"),
+            TEXT("Get a Blueprint or native class's members grouped by owning class, with inheritance-chain attribution and token-conscious output controls."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path OR native C++ class name (e.g. ACarPawn)"), true),
+                FSmithUEToolParam(TEXT("kinds"), TEXT("string"), TEXT("Comma list: functions,variables,macros,delegates,interfaces. Default all.")),
+                FSmithUEToolParam(TEXT("scope"), TEXT("string"), TEXT("self (default, only members declared in this class) | chain (full inheritance chain grouped by owner) | owner:<ClassName>")),
+                FSmithUEToolParam(TEXT("detail"), TEXT("string"), TEXT("compact (default, names only) | full (signatures, types, flags)")),
+                FSmithUEToolParam(TEXT("limit"), TEXT("integer"), TEXT("Max total members returned. Default 200."))
+            }),
+        &HandleBpGetClassMembers);
 
     Registry.Register(
         FSmithUEToolSchema(
@@ -469,6 +734,468 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetSummary(const TSha
         }
     }
     Data->SetArrayField(TEXT("components"), Components);
+
+    return WrapSuccess(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetClassMembers(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path")}, Error))
+    {
+        return MakeErrResp(Error);
+    }
+
+    FString BpPath;
+    if (!Params->TryGetStringField(TEXT("bp_path"), BpPath) || BpPath.IsEmpty())
+    {
+        return MakeErrResp(TEXT("Missing required param: 'bp_path'"));
+    }
+
+    FString KindsParam;
+    Params->TryGetStringField(TEXT("kinds"), KindsParam);
+    const TSet<ESmithUEMemberKind> Kinds = ParseMemberKinds(KindsParam);
+    if (Kinds.Num() == 0)
+    {
+        return MakeErrResp(FString::Printf(TEXT("No supported member kinds requested: %s"), *KindsParam));
+    }
+
+    FString Scope = TEXT("self");
+    Params->TryGetStringField(TEXT("scope"), Scope);
+    Scope.TrimStartAndEndInline();
+    FString ScopeLower = Scope;
+    ScopeLower.ToLowerInline();
+
+    FString OwnerFilter;
+    bool bScopeChain = false;
+    if (ScopeLower == TEXT("self") || ScopeLower.IsEmpty())
+    {
+        bScopeChain = false;
+    }
+    else if (ScopeLower == TEXT("chain"))
+    {
+        bScopeChain = true;
+    }
+    else if (ScopeLower.StartsWith(TEXT("owner:")))
+    {
+        bScopeChain = true;
+        OwnerFilter = Scope.Mid(6);
+        OwnerFilter.TrimStartAndEndInline();
+        if (OwnerFilter.IsEmpty())
+        {
+            return MakeErrResp(TEXT("scope owner:<ClassName> requires a class name"));
+        }
+    }
+    else
+    {
+        return MakeErrResp(FString::Printf(TEXT("Unsupported scope: %s"), *Scope));
+    }
+
+    FString Detail = TEXT("compact");
+    Params->TryGetStringField(TEXT("detail"), Detail);
+    Detail.TrimStartAndEndInline();
+    Detail.ToLowerInline();
+    if (Detail.IsEmpty())
+    {
+        Detail = TEXT("compact");
+    }
+    if (Detail != TEXT("compact") && Detail != TEXT("full"))
+    {
+        return MakeErrResp(FString::Printf(TEXT("Unsupported detail: %s"), *Detail));
+    }
+    const bool bFullDetail = Detail == TEXT("full");
+
+    int32 Limit = 200;
+    double LimitParam = 0.0;
+    if (Params->TryGetNumberField(TEXT("limit"), LimitParam) && LimitParam > 0.0)
+    {
+        Limit = FMath::Max(1, static_cast<int32>(LimitParam));
+    }
+
+    UBlueprint* BP = nullptr;
+    UClass* Cls = nullptr;
+    FString ResolvedFrom = TEXT("native");
+    const bool bLooksLikeAssetPath = BpPath.StartsWith(TEXT("/Game")) || BpPath.StartsWith(TEXT("/Engine")) || BpPath.Contains(TEXT("."));
+    if (bLooksLikeAssetPath)
+    {
+        BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+        Cls = BP ? BP->GeneratedClass : nullptr;
+        ResolvedFrom = TEXT("blueprint");
+    }
+    else
+    {
+        Cls = ResolveNativeClass(BpPath);
+    }
+
+    if (!Cls)
+    {
+        return MakeErrResp(FString::Printf(TEXT("Failed to resolve Blueprint/class: %s"), *BpPath));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Chain;
+    TArray<UClass*> ChainClasses;
+    for (UClass* C = Cls; C != nullptr; C = C->GetSuperClass())
+    {
+        ChainClasses.Add(C);
+
+        TSharedPtr<FJsonObject> Node = MakeShared<FJsonObject>();
+        Node->SetStringField(TEXT("class"), C->GetName());
+        if (UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(C))
+        {
+            Node->SetStringField(TEXT("type"), TEXT("blueprint"));
+            if (C->ClassGeneratedBy)
+            {
+                Node->SetStringField(TEXT("blueprint_path"), C->ClassGeneratedBy->GetPathName());
+            }
+        }
+        else
+        {
+            Node->SetStringField(TEXT("type"), TEXT("native"));
+            const FString Pkg = C->GetOutermost() ? C->GetOutermost()->GetName() : TEXT("");
+            FString Module;
+            Pkg.Split(TEXT("/Script/"), nullptr, &Module);
+            Node->SetStringField(TEXT("module"), Module.IsEmpty() ? Pkg : Module);
+        }
+        Chain.Add(MakeShared<FJsonValueObject>(Node));
+
+        if (C == UObject::StaticClass())
+        {
+            break;
+        }
+    }
+
+    TMap<FString, FSmithUEClassMemberBucket> Buckets;
+    auto ShouldIncludeOwner = [&OwnerFilter](UClass* OwnerClass) -> bool
+    {
+        return ClassNameMatchesScope(OwnerClass, OwnerFilter);
+    };
+
+    const EFieldIteratorFlags::SuperClassFlags FieldFlags = bScopeChain
+        ? EFieldIteratorFlags::IncludeSuper
+        : EFieldIteratorFlags::ExcludeSuper;
+
+    if (Kinds.Contains(ESmithUEMemberKind::Functions))
+    {
+        for (TFieldIterator<UFunction> It(Cls, FieldFlags); It; ++It)
+        {
+            UFunction* Function = *It;
+            UClass* OwnerClass = Function ? Function->GetOwnerClass() : nullptr;
+            if (!OwnerClass || !ShouldIncludeOwner(OwnerClass))
+            {
+                continue;
+            }
+            ++Buckets.FindOrAdd(OwnerClass->GetName()).FunctionCount;
+        }
+    }
+
+    if (Kinds.Contains(ESmithUEMemberKind::Variables) || Kinds.Contains(ESmithUEMemberKind::Delegates))
+    {
+        for (TFieldIterator<FProperty> It(Cls, FieldFlags); It; ++It)
+        {
+            FProperty* Property = *It;
+            UClass* OwnerClass = Property ? Property->GetOwnerClass() : nullptr;
+            if (!OwnerClass || !ShouldIncludeOwner(OwnerClass))
+            {
+                continue;
+            }
+
+            const bool bIsDelegate = IsDelegateProperty(Property);
+            FSmithUEClassMemberBucket& Bucket = Buckets.FindOrAdd(OwnerClass->GetName());
+            if (bIsDelegate)
+            {
+                if (Kinds.Contains(ESmithUEMemberKind::Delegates))
+                {
+                    ++Bucket.DelegateCount;
+                }
+            }
+            else if (Kinds.Contains(ESmithUEMemberKind::Variables))
+            {
+                ++Bucket.VariableCount;
+            }
+        }
+    }
+
+    if (Kinds.Contains(ESmithUEMemberKind::Interfaces))
+    {
+        for (UClass* C : ChainClasses)
+        {
+            if (!C || !ShouldIncludeOwner(C))
+            {
+                continue;
+            }
+
+            const UClass* SuperClass = C->GetSuperClass();
+            for (const FImplementedInterface& Interface : C->Interfaces)
+            {
+                if (!Interface.Class)
+                {
+                    continue;
+                }
+
+                bool bInherited = false;
+                if (SuperClass)
+                {
+                    for (const FImplementedInterface& SuperInterface : SuperClass->Interfaces)
+                    {
+                        if (SuperInterface.Class == Interface.Class)
+                        {
+                            bInherited = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!bInherited)
+                {
+                    ++Buckets.FindOrAdd(C->GetName()).InterfaceCount;
+                }
+            }
+        }
+    }
+
+    if (Kinds.Contains(ESmithUEMemberKind::Macros))
+    {
+        for (UClass* C : ChainClasses)
+        {
+            if (!C || !ShouldIncludeOwner(C) || !Cast<UBlueprintGeneratedClass>(C))
+            {
+                continue;
+            }
+
+            UBlueprint* SourceBP = Cast<UBlueprint>(C->ClassGeneratedBy);
+            if (!SourceBP)
+            {
+                continue;
+            }
+
+            Buckets.FindOrAdd(C->GetName()).MacroCount += SourceBP->MacroGraphs.Num();
+        }
+    }
+
+    if (Kinds.Contains(ESmithUEMemberKind::Delegates) && BP && ShouldIncludeOwner(Cls))
+    {
+        Buckets.FindOrAdd(Cls->GetName()).DelegateCount += BP->DelegateSignatureGraphs.Num();
+    }
+
+    int32 Added = 0;
+    bool bTruncated = false;
+
+    if (Kinds.Contains(ESmithUEMemberKind::Functions))
+    {
+        for (TFieldIterator<UFunction> It(Cls, FieldFlags); It; ++It)
+        {
+            UFunction* Function = *It;
+            UClass* OwnerClass = Function ? Function->GetOwnerClass() : nullptr;
+            if (!OwnerClass || !ShouldIncludeOwner(OwnerClass))
+            {
+                continue;
+            }
+            if (!TryAddLimited(Buckets.FindOrAdd(OwnerClass->GetName()).Functions, MakeFunctionMemberJson(Function, bFullDetail), Limit, Added, bTruncated))
+            {
+                break;
+            }
+        }
+    }
+
+    if (!bTruncated && (Kinds.Contains(ESmithUEMemberKind::Variables) || Kinds.Contains(ESmithUEMemberKind::Delegates)))
+    {
+        for (TFieldIterator<FProperty> It(Cls, FieldFlags); It; ++It)
+        {
+            FProperty* Property = *It;
+            UClass* OwnerClass = Property ? Property->GetOwnerClass() : nullptr;
+            if (!OwnerClass || !ShouldIncludeOwner(OwnerClass))
+            {
+                continue;
+            }
+
+            FSmithUEClassMemberBucket& Bucket = Buckets.FindOrAdd(OwnerClass->GetName());
+            if (IsDelegateProperty(Property))
+            {
+                if (Kinds.Contains(ESmithUEMemberKind::Delegates))
+                {
+                    const bool bMulticast = CastField<FMulticastDelegateProperty>(Property) != nullptr;
+                    FString Signature;
+                    if (bFullDetail)
+                    {
+                        if (FMulticastDelegateProperty* MultiDelegate = CastField<FMulticastDelegateProperty>(Property))
+                        {
+                            Signature = FunctionSignatureToString(MultiDelegate->SignatureFunction);
+                        }
+                        else if (FDelegateProperty* Delegate = CastField<FDelegateProperty>(Property))
+                        {
+                            Signature = FunctionSignatureToString(Delegate->SignatureFunction);
+                        }
+                    }
+                    if (!TryAddLimited(Bucket.Delegates, MakeDelegateMemberJson(Property->GetName(), bFullDetail, bMulticast, Signature), Limit, Added, bTruncated))
+                    {
+                        break;
+                    }
+                }
+            }
+            else if (Kinds.Contains(ESmithUEMemberKind::Variables))
+            {
+                if (!TryAddLimited(Bucket.Variables, MakeVariableMemberJson(Property, bFullDetail), Limit, Added, bTruncated))
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!bTruncated && Kinds.Contains(ESmithUEMemberKind::Delegates) && BP && ShouldIncludeOwner(Cls))
+    {
+        FSmithUEClassMemberBucket& Bucket = Buckets.FindOrAdd(Cls->GetName());
+        for (UEdGraph* Graph : BP->DelegateSignatureGraphs)
+        {
+            if (!Graph)
+            {
+                continue;
+            }
+            if (!TryAddLimited(Bucket.Delegates, MakeDelegateMemberJson(Graph->GetName(), bFullDetail, true), Limit, Added, bTruncated))
+            {
+                break;
+            }
+        }
+    }
+
+    if (!bTruncated && Kinds.Contains(ESmithUEMemberKind::Interfaces))
+    {
+        for (UClass* C : ChainClasses)
+        {
+            if (!C || !ShouldIncludeOwner(C))
+            {
+                continue;
+            }
+
+            const UClass* SuperClass = C->GetSuperClass();
+            for (const FImplementedInterface& Interface : C->Interfaces)
+            {
+                if (!Interface.Class)
+                {
+                    continue;
+                }
+
+                bool bInherited = false;
+                if (SuperClass)
+                {
+                    for (const FImplementedInterface& SuperInterface : SuperClass->Interfaces)
+                    {
+                        if (SuperInterface.Class == Interface.Class)
+                        {
+                            bInherited = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!bInherited)
+                {
+                    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+                    if (bFullDetail)
+                    {
+                        Obj->SetStringField(TEXT("path"), Interface.Class->GetPathName());
+                    }
+                    if (!TryAddLimited(Buckets.FindOrAdd(C->GetName()).Interfaces, MakeCompactOrFullEntry(Interface.Class->GetName(), bFullDetail, Obj), Limit, Added, bTruncated))
+                    {
+                        break;
+                    }
+                }
+            }
+            if (bTruncated)
+            {
+                break;
+            }
+        }
+    }
+
+    if (!bTruncated && Kinds.Contains(ESmithUEMemberKind::Macros))
+    {
+        for (UClass* C : ChainClasses)
+        {
+            if (!C || !ShouldIncludeOwner(C) || !Cast<UBlueprintGeneratedClass>(C))
+            {
+                continue;
+            }
+
+            UBlueprint* SourceBP = Cast<UBlueprint>(C->ClassGeneratedBy);
+            if (!SourceBP)
+            {
+                continue;
+            }
+
+            FSmithUEClassMemberBucket& Bucket = Buckets.FindOrAdd(C->GetName());
+            for (UEdGraph* Graph : SourceBP->MacroGraphs)
+            {
+                if (!Graph)
+                {
+                    continue;
+                }
+                if (!TryAddLimited(Bucket.Macros, MakeNamedGraphMemberJson(Graph, bFullDetail), Limit, Added, bTruncated))
+                {
+                    break;
+                }
+            }
+            if (bTruncated)
+            {
+                break;
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> CountsObj = MakeShared<FJsonObject>();
+    TSharedPtr<FJsonObject> MembersObj = MakeShared<FJsonObject>();
+
+    auto EmitBucket = [&Buckets, &CountsObj, &MembersObj](const FString& OwnerName)
+    {
+        FSmithUEClassMemberBucket* Bucket = Buckets.Find(OwnerName);
+        if (!Bucket)
+        {
+            return;
+        }
+
+        TSharedPtr<FJsonObject> OwnerCounts = MakeShared<FJsonObject>();
+        OwnerCounts->SetNumberField(TEXT("functions"), Bucket->FunctionCount);
+        OwnerCounts->SetNumberField(TEXT("variables"), Bucket->VariableCount);
+        OwnerCounts->SetNumberField(TEXT("macros"), Bucket->MacroCount);
+        OwnerCounts->SetNumberField(TEXT("delegates"), Bucket->DelegateCount);
+        OwnerCounts->SetNumberField(TEXT("interfaces"), Bucket->InterfaceCount);
+        CountsObj->SetObjectField(OwnerName, OwnerCounts);
+
+        TSharedPtr<FJsonObject> OwnerMembers = MakeShared<FJsonObject>();
+        OwnerMembers->SetArrayField(TEXT("functions"), Bucket->Functions);
+        OwnerMembers->SetArrayField(TEXT("variables"), Bucket->Variables);
+        OwnerMembers->SetArrayField(TEXT("delegates"), Bucket->Delegates);
+        OwnerMembers->SetArrayField(TEXT("interfaces"), Bucket->Interfaces);
+        OwnerMembers->SetArrayField(TEXT("macros"), Bucket->Macros);
+        MembersObj->SetObjectField(OwnerName, OwnerMembers);
+    };
+
+    if (!OwnerFilter.IsEmpty())
+    {
+        EmitBucket(OwnerFilter);
+    }
+    else
+    {
+        for (UClass* C : ChainClasses)
+        {
+            if (C)
+            {
+                EmitBucket(C->GetName());
+            }
+            if (!bScopeChain)
+            {
+                break;
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("class"), Cls->GetName());
+    Data->SetStringField(TEXT("resolved_from"), ResolvedFrom);
+    Data->SetArrayField(TEXT("inheritance_chain"), Chain);
+    Data->SetObjectField(TEXT("counts"), CountsObj);
+    Data->SetObjectField(TEXT("members"), MembersObj);
+    Data->SetBoolField(TEXT("truncated"), bTruncated);
 
     return WrapSuccess(Data);
 }
