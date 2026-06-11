@@ -4,9 +4,9 @@
 #include "Async/Future.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-#include "Editor.h"
 #include "HAL/PlatformProcess.h"
-#include "Interfaces/IPluginManager.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 #include "Transport/SmithUEHttpServer.h"
@@ -18,15 +18,7 @@
 namespace SmithUEHttpServer::Private
 {
 	constexpr int32 ReceiveBufferSize = 8 * 1024;
-	struct FParsedHttpRequest
-	{
-		FString Method;
-		FString Path;
-		FString Protocol;
-		TMap<FString, FString> Headers;
-		FString Body;
-		int64 ContentLength = 0;
-	};
+	using FParsedHttpRequest = FSmithUEHttpServerRunnable::FParsedHttpRequest;
 
 	enum class EHttpRequestReceiveResult
 	{
@@ -103,7 +95,7 @@ namespace SmithUEHttpServer::Private
 		return true;
 	}
 
-	EHttpRequestReceiveResult ReceiveHttpRequest(FSocket& ClientSocket, const bool& bStopping, FParsedHttpRequest& OutRequest)
+	EHttpRequestReceiveResult ReceiveHttpRequest(FSocket& ClientSocket, const FThreadSafeBool& bStopping, FParsedHttpRequest& OutRequest)
 	{
 		TArray<uint8> ReceivedData;
 		TArray<uint8> Chunk;
@@ -223,6 +215,101 @@ namespace SmithUEHttpServer::Private
 		return FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(Message, ErrorCode));
 	}
 
+	uint16 GetPortFromCommandLine(const TCHAR* FlagName, uint16 DefaultPort)
+	{
+		int32 RequestedPort = 0;
+		if (!FParse::Value(FCommandLine::Get(), FlagName, RequestedPort) || RequestedPort <= 0 || RequestedPort > MAX_uint16)
+		{
+			return DefaultPort;
+		}
+
+		return static_cast<uint16>(RequestedPort);
+	}
+
+	void AppendToolJsonArray(const TArray<FSmithUEToolSchema>& Tools, TArray<TSharedPtr<FJsonValue>>& OutJsonTools)
+	{
+		OutJsonTools.Reserve(Tools.Num());
+		for (const FSmithUEToolSchema& Tool : Tools)
+		{
+			OutJsonTools.Add(MakeShared<FJsonValueObject>(Tool.ToJsonSchema()));
+		}
+	}
+
+	bool IsWorkerSafeCommand(const FString& CommandName)
+	{
+		return CommandName.Equals(TEXT("ping"), ESearchCase::IgnoreCase) ||
+			CommandName.Equals(TEXT("list_tools"), ESearchCase::IgnoreCase) ||
+			CommandName.Equals(TEXT("get_protocol_info"), ESearchCase::IgnoreCase);
+	}
+
+	TSharedPtr<FJsonObject> DispatchWorkerSafeCommand(const FString& CommandName, const TSharedPtr<FJsonObject>& Params)
+	{
+		if (CommandName.Equals(TEXT("ping"), ESearchCase::IgnoreCase))
+		{
+			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetStringField(TEXT("status"), TEXT("success"));
+			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+			Data->SetStringField(TEXT("message"), TEXT("pong"));
+			Response->SetObjectField(TEXT("data"), Data);
+			return Response;
+		}
+
+		if (CommandName.Equals(TEXT("list_tools"), ESearchCase::IgnoreCase))
+		{
+			FString Category;
+			if (Params.IsValid())
+			{
+				Params->TryGetStringField(TEXT("category"), Category);
+			}
+
+			const TArray<FSmithUEToolSchema> Tools = Category.IsEmpty()
+				? FSmithUEToolRegistry::Get().GetAll()
+				: FSmithUEToolRegistry::Get().GetByCategory(Category);
+
+			TArray<TSharedPtr<FJsonValue>> JsonTools;
+			AppendToolJsonArray(Tools, JsonTools);
+
+			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetStringField(TEXT("status"), TEXT("success"));
+			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+			Data->SetStringField(TEXT("protocol_version"), TEXT("1.0"));
+			Data->SetArrayField(TEXT("tools"), JsonTools);
+			Response->SetObjectField(TEXT("data"), Data);
+			return Response;
+		}
+
+		if (CommandName.Equals(TEXT("get_protocol_info"), ESearchCase::IgnoreCase))
+		{
+			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetStringField(TEXT("status"), TEXT("success"));
+
+			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+			Data->SetStringField(TEXT("protocol_version"), TEXT("1.0"));
+			Data->SetStringField(TEXT("server_name"), TEXT("SmithUE"));
+			Data->SetStringField(TEXT("ue_version"), TEXT("5.2"));
+
+			TArray<TSharedPtr<FJsonValue>> SupportedDomains;
+			for (const TCHAR* Domain : {TEXT("Editor"), TEXT("Asset"), TEXT("Material"), TEXT("Project"), TEXT("Blueprint")})
+			{
+				SupportedDomains.Add(MakeShared<FJsonValueString>(FString(Domain)));
+			}
+			Data->SetArrayField(TEXT("supported_domains"), SupportedDomains);
+			Data->SetNumberField(TEXT("tcp_port"), GetPortFromCommandLine(TEXT("SmithUEport="), 13720));
+			Data->SetNumberField(TEXT("http_port"), GetPortFromCommandLine(TEXT("SmithUEhttpport="), 13721));
+			Data->SetStringField(TEXT("framing_type"), TEXT("length_prefix_le32"));
+
+			Response->SetObjectField(TEXT("data"), Data);
+			return Response;
+		}
+
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown command: %s"), *CommandName));
+	}
+
+	FString DispatchWorkerSafeCommandAsJson(const FString& CommandName, const TSharedPtr<FJsonObject>& Params)
+	{
+		return FSmithUECommonUtils::SerializeJson(DispatchWorkerSafeCommand(CommandName, Params));
+	}
+
 	bool IsNidString(const FString& Value)
 	{
 		return Value.StartsWith(TEXT("N")) && Value.Mid(1).IsNumeric();
@@ -340,7 +427,7 @@ namespace SmithUEHttpServer::Private
 		}
 
 		// ------------------------------------------------------------------
-		//  GET /ready  — startup guard probe; non-blocking atomic read
+		//  GET /ready  — startup guard probe; non-blocking atomic read only
 		// ------------------------------------------------------------------
 		if (Request.Method.Equals(TEXT("GET"), ESearchCase::IgnoreCase) && Request.Path == TEXT("/ready"))
 		{
@@ -353,41 +440,19 @@ namespace SmithUEHttpServer::Private
 				return Result;
 			}
 
-			// Plugin version — safe to query from any thread
-			FString PluginVersion = TEXT("unknown");
-			if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
-			{
-				PluginVersion = Plugin->GetDescriptor().VersionName;
-			}
-
-			// pie_active must be read on the GameThread
-			check(!IsInGameThread());
-			TPromise<bool> PiePromise;
-			TFuture<bool>  PieFuture = PiePromise.GetFuture();
-			AsyncTask(ENamedThreads::GameThread, [Promise = MoveTemp(PiePromise)]() mutable
-			{
-				check(IsInGameThread());
-				const bool bPie = GEditor != nullptr && GEditor->PlayWorld != nullptr;
-				Promise.SetValue(bPie);
-			});
-			const bool bPieActive = PieFuture.Get();
-
-			Result.Body = FString::Printf(
-				TEXT("{\"ready\":true,\"version\":\"%s\",\"pie_active\":%s}"),
-				*PluginVersion,
-				bPieActive ? TEXT("true") : TEXT("false"));
+			Result.Body = TEXT("{\"ready\":true,\"version\":\"unknown\",\"pie_active\":false}");
 			return Result;
 		}
 
 		if (Request.Method.Equals(TEXT("GET"), ESearchCase::IgnoreCase) && Request.Path == TEXT("/api/v1/health"))
 		{
-			Result.Body = FSmithUEDispatcher::Get().DispatchSync(TEXT("ping"), MakeShared<FJsonObject>());
+			Result.Body = DispatchWorkerSafeCommandAsJson(TEXT("ping"), MakeShared<FJsonObject>());
 			return Result;
 		}
 
 		if (Request.Method.Equals(TEXT("GET"), ESearchCase::IgnoreCase) && Request.Path == TEXT("/api/v1/tools"))
 		{
-			Result.Body = FSmithUEDispatcher::Get().DispatchSync(TEXT("list_tools"), MakeShared<FJsonObject>());
+			Result.Body = DispatchWorkerSafeCommandAsJson(TEXT("list_tools"), MakeShared<FJsonObject>());
 			return Result;
 		}
 
@@ -452,6 +517,10 @@ namespace SmithUEHttpServer::Private
 			{
 				Result.Body = FSmithUEDispatcher::Get().DispatchAsync(CommandName, Params);
 			}
+			else if (IsWorkerSafeCommand(CommandName))
+			{
+				Result.Body = DispatchWorkerSafeCommandAsJson(CommandName, Params);
+			}
 			else if (JsonObjectContainsNid(Params) && !IsInGameThread())
 			{
 				Result.Body = DispatchNidCommandSyncOnGameThread(CommandName, Params);
@@ -468,6 +537,46 @@ namespace SmithUEHttpServer::Private
 		Result.Body = MakeErrorBody(TEXT("Route not found"));
 		return Result;
 	}
+}
+
+bool FSmithUEHttpServerRunnable::IsGameThreadRequired(const FParsedHttpRequest& Request)
+{
+	// GET /ready — lightweight atomic read, no UObject access
+	if (Request.Method.Equals(TEXT("GET"), ESearchCase::IgnoreCase) && Request.Path == TEXT("/ready"))
+	{
+		return false;
+	}
+
+	// GET health/tools map to audited worker-safe system commands.
+	if (Request.Method.Equals(TEXT("GET"), ESearchCase::IgnoreCase) &&
+		(Request.Path == TEXT("/api/v1/health") || Request.Path == TEXT("/api/v1/tools")))
+	{
+		return false;
+	}
+
+	// POST /api/v1/execute — check command name
+	if (Request.Method.Equals(TEXT("POST"), ESearchCase::IgnoreCase) &&
+		Request.Path == TEXT("/api/v1/execute"))
+	{
+		// Parse command name from JSON body to identify lightweight commands.
+		// Parse safely: if JSON parsing fails, default to game thread (safe).
+		const TSharedPtr<FJsonObject> Body = FSmithUECommonUtils::ParseJson(Request.Body);
+		if (Body.IsValid())
+		{
+			FString Command;
+			if (Body->TryGetStringField(TEXT("command"), Command))
+			{
+				// These commands don't access UObjects and can run on worker threads.
+				if (SmithUEHttpServer::Private::IsWorkerSafeCommand(Command))
+				{
+					return false;
+				}
+			}
+		}
+	}
+
+	// Default: require game thread (safe)
+	return true;
 }
 
 FSmithUEHttpServerRunnable::FSmithUEHttpServerRunnable(USmithUEHttpServer* InServer, TSharedPtr<FSocket> InListenerSocket)
@@ -498,10 +607,10 @@ uint32 FSmithUEHttpServerRunnable::Run()
 		}
 
 		FSocket* RawClientSocket = ListenerSocket->Accept(TEXT("SmithUEHttpClient"));
-		TSharedPtr<FSocket> ClientSocket;
+		TSharedPtr<FSocket, ESPMode::ThreadSafe> ClientSocket;
 		if (RawClientSocket != nullptr)
 		{
-			ClientSocket = MakeShareable(RawClientSocket, ::FSocketDeleter(ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)));
+			ClientSocket = TSharedPtr<FSocket, ESPMode::ThreadSafe>(RawClientSocket, ::FSocketDeleter(ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)));
 		}
 
 		if (!ClientSocket.IsValid())
@@ -513,32 +622,76 @@ uint32 FSmithUEHttpServerRunnable::Run()
 		ClientSocket->SetNoDelay(true);
 		ClientSocket->SetNonBlocking(true);
 
-		SmithUEHttpServer::Private::FParsedHttpRequest Request;
-		FString Response;
-		const SmithUEHttpServer::Private::EHttpRequestReceiveResult ReceiveResult = SmithUEHttpServer::Private::ReceiveHttpRequest(*ClientSocket, bStopping, Request);
-		if (ReceiveResult == SmithUEHttpServer::Private::EHttpRequestReceiveResult::Success)
+		if (bStopping)
 		{
-			const SmithUEHttpServer::Private::FRouteResult RouteResult = SmithUEHttpServer::Private::RouteRequest(Request, Server);
-			Response = RouteResult.StatusCode == 204
-				? SmithUEHttpServer::Private::BuildNoContentResponse()
-				: SmithUEHttpServer::Private::BuildHttpResponse(RouteResult.StatusCode, RouteResult.StatusText, RouteResult.Body);
-		}
-		else if (ReceiveResult == SmithUEHttpServer::Private::EHttpRequestReceiveResult::PayloadTooLarge)
-		{
-			Response = SmithUEHttpServer::Private::BuildHttpResponse(413, TEXT("Payload Too Large"),
-				FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(TEXT("payload too large"), TEXT("PAYLOAD_TOO_LARGE"))));
-		}
-		else
-		{
-			Response = SmithUEHttpServer::Private::BuildHttpResponse(400, TEXT("Bad Request"), SmithUEHttpServer::Private::MakeErrorBody(TEXT("Failed to parse HTTP request")));
+			ClientSocket->Close();
+			continue;
 		}
 
-		if (!SmithUEHttpServer::Private::SendAll(*ClientSocket, Response))
+		if (ActiveWorkerCount.GetValue() >= MaxConcurrentWorkers)
 		{
-			UE_LOG(LogSmithUE, Verbose, TEXT("Failed to send HTTP response to SmithUE client"));
+			const FString BusyResponse = SmithUEHttpServer::Private::BuildHttpResponse(503, TEXT("Service Unavailable"),
+				FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(TEXT("Server busy: too many concurrent requests"), TEXT("INTERNAL_ERROR"))));
+			SmithUEHttpServer::Private::SendAll(*ClientSocket, BusyResponse);
+			ClientSocket->Close();
+			continue;
 		}
 
-		ClientSocket->Close();
+		ActiveWorkerCount.Increment();
+		USmithUEHttpServer* ServerPtr = Server;
+		Async(EAsyncExecution::ThreadPool, [this, ClientSocket, ServerPtr]()
+		{
+			struct FActiveWorkerScope
+			{
+				FThreadSafeCounter& Counter;
+				~FActiveWorkerScope()
+				{
+					Counter.Decrement();
+				}
+			} ActiveWorkerScope{ActiveWorkerCount};
+
+			SmithUEHttpServer::Private::FParsedHttpRequest Request;
+			FString Response;
+			const SmithUEHttpServer::Private::EHttpRequestReceiveResult ReceiveResult = SmithUEHttpServer::Private::ReceiveHttpRequest(*ClientSocket, bStopping, Request);
+			if (ReceiveResult == SmithUEHttpServer::Private::EHttpRequestReceiveResult::Success)
+			{
+				SmithUEHttpServer::Private::FRouteResult RouteResult;
+				if (IsGameThreadRequired(Request))
+				{
+					TPromise<SmithUEHttpServer::Private::FRouteResult> Promise;
+					TFuture<SmithUEHttpServer::Private::FRouteResult> Future = Promise.GetFuture();
+					AsyncTask(ENamedThreads::GameThread, [Request, ServerPtr, Promise = MoveTemp(Promise)]() mutable
+					{
+						check(IsInGameThread());
+						Promise.SetValue(SmithUEHttpServer::Private::RouteRequest(Request, ServerPtr));
+					});
+					RouteResult = Future.Get();
+				}
+				else
+				{
+					RouteResult = SmithUEHttpServer::Private::RouteRequest(Request, ServerPtr);
+				}
+				Response = RouteResult.StatusCode == 204
+					? SmithUEHttpServer::Private::BuildNoContentResponse()
+					: SmithUEHttpServer::Private::BuildHttpResponse(RouteResult.StatusCode, RouteResult.StatusText, RouteResult.Body);
+			}
+			else if (ReceiveResult == SmithUEHttpServer::Private::EHttpRequestReceiveResult::PayloadTooLarge)
+			{
+				Response = SmithUEHttpServer::Private::BuildHttpResponse(413, TEXT("Payload Too Large"),
+					FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(TEXT("payload too large"), TEXT("PAYLOAD_TOO_LARGE"))));
+			}
+			else
+			{
+				Response = SmithUEHttpServer::Private::BuildHttpResponse(400, TEXT("Bad Request"), SmithUEHttpServer::Private::MakeErrorBody(TEXT("Failed to parse HTTP request")));
+			}
+
+			if (!SmithUEHttpServer::Private::SendAll(*ClientSocket, Response))
+			{
+				UE_LOG(LogSmithUE, Verbose, TEXT("Failed to send HTTP response to SmithUE client"));
+			}
+
+			ClientSocket->Close();
+		});
 	}
 
 	return 0;

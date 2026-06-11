@@ -220,7 +220,8 @@ static void SmithUE_WritePortFileAtomic(const FString& FinalPath, const FString&
 // ============================================================
 
 USmithUEHttpServer::USmithUEHttpServer()
-	: ServerThread(nullptr)
+	: Runnable(nullptr)
+	, ServerThread(nullptr)
 	, bIsRunning(false)
 	, Port(0)
 	, BoundPort(0)
@@ -307,11 +308,22 @@ void USmithUEHttpServer::StartServer()
 
 	ListenerSocket = NewListenerSocket;
 	bIsRunning = true;
-	ServerThread = FRunnableThread::Create(new FSmithUEHttpServerRunnable(this, ListenerSocket), TEXT("SmithUEHttpServerThread"));
+	if (!IsRooted())
+	{
+		AddToRoot();
+	}
+	Runnable = new FSmithUEHttpServerRunnable(this, ListenerSocket);
+	ServerThread = FRunnableThread::Create(Runnable, TEXT("SmithUEHttpServerThread"));
 	if (ServerThread == nullptr)
 	{
 		UE_LOG(LogSmithUE, Error, TEXT("Failed to create SmithUE HTTP server thread"));
+		delete Runnable;
+		Runnable = nullptr;
 		StopServer();
+		if (IsRooted())
+		{
+			RemoveFromRoot();
+		}
 		return;
 	}
 
@@ -359,29 +371,19 @@ void USmithUEHttpServer::StartServer()
 			// Build portfile path and store for later cleanup
 			PortFilePath = DirPath + FString::Printf(TEXT("\\%u.port"), FPlatformProcess::GetCurrentProcessId());
 
-			// Resolve plugin version from descriptor
-			FString PluginVersion = TEXT("unknown");
-			if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
-			{
-				PluginVersion = Plugin->GetDescriptor().VersionName;
-			}
+			EnsurePortFileWritten(true);
 
-			// Project file path — normalise to forward slashes for JSON
-			FString ProjectPath = FPaths::GetProjectFilePath();
-			ProjectPath.ReplaceInline(TEXT("\\"), TEXT("/"));
-
-			const FString JsonContent = FString::Printf(
-				TEXT("{\"port\":%d,\"pid\":%u,\"project\":\"%s\",\"project_name\":\"%s\",\"started_at\":\"%s\",\"plugin_version\":\"%s\"}"),
-				static_cast<int32>(BoundPort),
-				FPlatformProcess::GetCurrentProcessId(),
-				*ProjectPath,
-				FApp::GetProjectName(),
-				*FDateTime::UtcNow().ToIso8601(),
-				*PluginVersion
+			// Register heartbeat to re-write portfile if deleted externally
+			HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateWeakLambda(this, [this](float /*DeltaTime*/) -> bool
+				{
+					// EnsurePortFileWritten(false) is a no-op when the file already exists,
+					// so this only does work (and logs) when the file has disappeared.
+					EnsurePortFileWritten(false);
+					return true; // keep ticking
+				}),
+				SMITHUE_PORTFILE_HEARTBEAT_INTERVAL
 			);
-
-			SmithUE_WritePortFileAtomic(PortFilePath, JsonContent);
-			UE_LOG(LogSmithUE, Log, TEXT("SmithUE: portfile written to %s"), *PortFilePath);
 
 			// OnExit handles crash / abnormal termination paths
 			FCoreDelegates::OnExit.AddLambda([PortFilePathCopy = PortFilePath]()
@@ -390,6 +392,43 @@ void USmithUEHttpServer::StartServer()
 			});
 		}
 	}
+}
+
+void USmithUEHttpServer::EnsurePortFileWritten(bool bForce)
+{
+	if (PortFilePath.IsEmpty())
+	{
+		return; // Not yet initialized
+	}
+
+	if (!bForce && IFileManager::Get().FileExists(*PortFilePath))
+	{
+		return; // File exists and we're not forced to re-write
+	}
+
+	// Resolve plugin version from descriptor
+	FString PluginVersion = TEXT("unknown");
+	if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
+	{
+		PluginVersion = Plugin->GetDescriptor().VersionName;
+	}
+
+	// Project file path — normalise to forward slashes for JSON
+	FString ProjectPath = FPaths::GetProjectFilePath();
+	ProjectPath.ReplaceInline(TEXT("\\"), TEXT("/"));
+
+	const FString JsonContent = FString::Printf(
+		TEXT("{\"port\":%d,\"pid\":%u,\"project\":\"%s\",\"project_name\":\"%s\",\"started_at\":\"%s\",\"plugin_version\":\"%s\"}"),
+		static_cast<int32>(BoundPort),
+		FPlatformProcess::GetCurrentProcessId(),
+		*ProjectPath,
+		FApp::GetProjectName(),
+		*FDateTime::UtcNow().ToIso8601(),
+		*PluginVersion
+	);
+
+	SmithUE_WritePortFileAtomic(PortFilePath, JsonContent);
+	UE_LOG(LogSmithUE, Log, TEXT("SmithUE: portfile written to %s"), *PortFilePath);
 }
 
 void USmithUEHttpServer::StopServer()
@@ -402,11 +441,42 @@ void USmithUEHttpServer::StopServer()
 	bIsRunning = false;
 	bIsReady   = false;
 
+	// Signal the runnable first so the accept loop stops and no new worker lambdas are launched.
+	if (Runnable != nullptr)
+	{
+		Runnable->Stop();
+	}
+
 	// Remove readiness ticker if still pending
 	if (ReadyTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(ReadyTickerHandle);
 		ReadyTickerHandle.Reset();
+	}
+
+	// Unregister heartbeat before deleting portfile to prevent a race where
+	// the heartbeat fires after intentional deletion and re-creates the file.
+	if (HeartbeatTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+		HeartbeatTickerHandle.Reset();
+	}
+
+	// Wait for in-flight workers to complete before removing discovery state or
+	// destroying the runnable/server objects captured by worker lambdas.
+	const double WaitStartTime = FPlatformTime::Seconds();
+	constexpr double MaxWaitSeconds = 2.0;
+	bool bShutdownDrainTimedOut = false;
+	while (Runnable != nullptr && Runnable->GetActiveWorkerCount() > 0)
+	{
+		if (FPlatformTime::Seconds() - WaitStartTime > MaxWaitSeconds)
+		{
+			UE_LOG(LogSmithUE, Warning, TEXT("SmithUE: shutdown drain timeout — %d workers still running"),
+				Runnable->GetActiveWorkerCount());
+			bShutdownDrainTimedOut = true;
+			break;
+		}
+		FPlatformProcess::Sleep(0.05f);
 	}
 
 	// Graceful shutdown: delete portfile so the slot is freed immediately
@@ -423,8 +493,19 @@ void USmithUEHttpServer::StopServer()
 		ServerThread = nullptr;
 	}
 
+	if (Runnable != nullptr && !bShutdownDrainTimedOut)
+	{
+		delete Runnable;
+		Runnable = nullptr;
+	}
+
 	if (ListenerSocket.IsValid())
 	{
 		ListenerSocket.Reset();
+	}
+
+	if (!bShutdownDrainTimedOut && IsRooted())
+	{
+		RemoveFromRoot();
 	}
 }

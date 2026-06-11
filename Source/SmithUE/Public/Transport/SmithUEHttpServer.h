@@ -6,6 +6,7 @@
 #include "SmithUEHttpServer.generated.h"
 
 class FSocket;
+class FSmithUEHttpServerRunnable;
 class FRunnableThread;
 
 UCLASS()
@@ -23,6 +24,12 @@ public:
 
 	void StartServer();
 	void StopServer();
+
+	/** Write (or re-write) the portfile for this server instance.
+	 *  If bForce is false, skips the write when the file already exists.
+	 *  Preserves atomic write + current-user-only ACL.
+	 *  Safe to call from the game thread only. */
+	void EnsurePortFileWritten(bool bForce = false);
 	bool IsRunning() const { return bIsRunning; }
 	uint16 GetBoundPort() const { return BoundPort; }
 
@@ -31,6 +38,7 @@ public:
 
 private:
 	TSharedPtr<FSocket> ListenerSocket;
+	FSmithUEHttpServerRunnable* Runnable;
 	FRunnableThread* ServerThread;
 	bool bIsRunning;
 	uint16 Port;
@@ -39,4 +47,8 @@ private:
 
 	/** Handle for the FTSTicker delegate that polls asset-registry readiness. */
 	FTSTicker::FDelegateHandle ReadyTickerHandle;
+
+	/** Portfile heartbeat — re-writes the portfile if it disappears externally. */
+	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
+	static constexpr float SMITHUE_PORTFILE_HEARTBEAT_INTERVAL = 4.0f;
 };
