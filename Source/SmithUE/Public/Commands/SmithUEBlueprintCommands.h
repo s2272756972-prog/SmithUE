@@ -13,6 +13,9 @@ private:
     static TSharedPtr<FJsonObject> HandleBpGetSummary(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleBpGetComponentDetails(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleBpGetClassMembers(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleBpHealthCheck(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleBpDiff(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleBpTraceValue(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleBpDescribeGraph(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleBpCompileCode(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleBpBatchOp(const TSharedPtr<FJsonObject>& Params);
