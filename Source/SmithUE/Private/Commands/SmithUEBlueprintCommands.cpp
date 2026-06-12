@@ -9,15 +9,23 @@
 #include "Utils/SmithUECommonUtils.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
+#include "GameFramework/Actor.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Materials/MaterialInterface.h"
 #include "ScopedTransaction.h"
 #include "UObject/Class.h"
 
@@ -214,6 +222,181 @@ namespace
             }
         }
         return Kinds;
+    }
+
+    enum class ESmithUEComponentPropGroup : uint8
+    {
+        Mobility,
+        Transform,
+        Physics,
+        Rendering,
+        Mesh,
+        Collision
+    };
+
+    TSet<ESmithUEComponentPropGroup> ParseComponentPropGroups(const FString& PropsParam)
+    {
+        TSet<ESmithUEComponentPropGroup> Groups;
+        if (PropsParam.IsEmpty())
+        {
+            Groups.Add(ESmithUEComponentPropGroup::Mobility);
+            Groups.Add(ESmithUEComponentPropGroup::Transform);
+            Groups.Add(ESmithUEComponentPropGroup::Physics);
+            Groups.Add(ESmithUEComponentPropGroup::Rendering);
+            Groups.Add(ESmithUEComponentPropGroup::Mesh);
+            Groups.Add(ESmithUEComponentPropGroup::Collision);
+            return Groups;
+        }
+
+        TArray<FString> Parts;
+        PropsParam.ParseIntoArray(Parts, TEXT(","), true);
+        for (FString Part : Parts)
+        {
+            Part.TrimStartAndEndInline();
+            Part.ToLowerInline();
+            if (Part == TEXT("mobility"))
+            {
+                Groups.Add(ESmithUEComponentPropGroup::Mobility);
+            }
+            else if (Part == TEXT("transform"))
+            {
+                Groups.Add(ESmithUEComponentPropGroup::Transform);
+            }
+            else if (Part == TEXT("physics"))
+            {
+                Groups.Add(ESmithUEComponentPropGroup::Physics);
+            }
+            else if (Part == TEXT("rendering") || Part == TEXT("visibility") || Part == TEXT("materials"))
+            {
+                Groups.Add(ESmithUEComponentPropGroup::Rendering);
+            }
+            else if (Part == TEXT("mesh"))
+            {
+                Groups.Add(ESmithUEComponentPropGroup::Mesh);
+            }
+            else if (Part == TEXT("collision"))
+            {
+                Groups.Add(ESmithUEComponentPropGroup::Collision);
+            }
+        }
+        return Groups;
+    }
+
+    bool WantsComponentGroup(const TSet<ESmithUEComponentPropGroup>& Groups, ESmithUEComponentPropGroup Group)
+    {
+        return Groups.Contains(Group);
+    }
+
+    bool ComponentNameMatchesFilter(const FString& ComponentName, const FString& ComponentFilter)
+    {
+        return ComponentFilter.IsEmpty() || ComponentName.Equals(ComponentFilter, ESearchCase::IgnoreCase);
+    }
+
+    TSharedPtr<FJsonObject> ComponentDetailsToJson(
+        UActorComponent* Comp,
+        const FString& Name,
+        const FString& Source,
+        const TSet<ESmithUEComponentPropGroup>& Groups)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("name"), Name);
+        Obj->SetStringField(TEXT("class"), Comp ? Comp->GetClass()->GetName() : TEXT("None"));
+        Obj->SetStringField(TEXT("source"), Source);
+
+        if (!Comp)
+        {
+            return Obj;
+        }
+
+        if (USceneComponent* SceneComp = Cast<USceneComponent>(Comp))
+        {
+            if (WantsComponentGroup(Groups, ESmithUEComponentPropGroup::Mobility))
+            {
+                Obj->SetStringField(
+                    TEXT("mobility"),
+                    StaticEnum<EComponentMobility::Type>()->GetNameStringByValue(static_cast<int64>(SceneComp->Mobility)));
+            }
+
+            if (WantsComponentGroup(Groups, ESmithUEComponentPropGroup::Transform))
+            {
+                TSharedPtr<FJsonObject> Transform = MakeShared<FJsonObject>();
+                Transform->SetStringField(TEXT("location"), SceneComp->GetRelativeLocation().ToString());
+                Transform->SetStringField(TEXT("rotation"), SceneComp->GetRelativeRotation().ToString());
+                Transform->SetStringField(TEXT("scale"), SceneComp->GetRelativeScale3D().ToString());
+                Obj->SetObjectField(TEXT("transform"), Transform);
+
+                TSharedPtr<FJsonObject> Absolute = MakeShared<FJsonObject>();
+                Absolute->SetBoolField(TEXT("location"), SceneComp->IsUsingAbsoluteLocation());
+                Absolute->SetBoolField(TEXT("rotation"), SceneComp->IsUsingAbsoluteRotation());
+                Absolute->SetBoolField(TEXT("scale"), SceneComp->IsUsingAbsoluteScale());
+                Obj->SetObjectField(TEXT("absolute"), Absolute);
+            }
+
+            if (WantsComponentGroup(Groups, ESmithUEComponentPropGroup::Rendering))
+            {
+                TSharedPtr<FJsonObject> Visibility = MakeShared<FJsonObject>();
+                Visibility->SetBoolField(TEXT("visible"), SceneComp->GetVisibleFlag());
+                Visibility->SetBoolField(TEXT("hidden_in_game"), SceneComp->bHiddenInGame);
+                Obj->SetObjectField(TEXT("visibility"), Visibility);
+            }
+        }
+
+        if (UPrimitiveComponent* PrimitiveComp = Cast<UPrimitiveComponent>(Comp))
+        {
+            if (WantsComponentGroup(Groups, ESmithUEComponentPropGroup::Physics))
+            {
+                TSharedPtr<FJsonObject> Physics = MakeShared<FJsonObject>();
+                Physics->SetBoolField(TEXT("simulate_physics"), PrimitiveComp->BodyInstance.bSimulatePhysics);
+                Physics->SetBoolField(TEXT("enable_gravity"), PrimitiveComp->BodyInstance.bEnableGravity);
+                Obj->SetObjectField(TEXT("physics"), Physics);
+            }
+
+            if (WantsComponentGroup(Groups, ESmithUEComponentPropGroup::Collision))
+            {
+                TSharedPtr<FJsonObject> Collision = MakeShared<FJsonObject>();
+                Collision->SetStringField(TEXT("profile"), PrimitiveComp->GetCollisionProfileName().ToString());
+                Collision->SetStringField(
+                    TEXT("enabled"),
+                    StaticEnum<ECollisionEnabled::Type>()->GetNameStringByValue(static_cast<int64>(PrimitiveComp->GetCollisionEnabled())));
+                Obj->SetObjectField(TEXT("collision"), Collision);
+            }
+
+            if (WantsComponentGroup(Groups, ESmithUEComponentPropGroup::Rendering))
+            {
+                TArray<TSharedPtr<FJsonValue>> Materials;
+                for (int32 Index = 0; Index < PrimitiveComp->GetNumMaterials(); ++Index)
+                {
+                    if (UMaterialInterface* Material = PrimitiveComp->GetMaterial(Index))
+                    {
+                        Materials.Add(MakeShared<FJsonValueString>(Material->GetPathName()));
+                    }
+                }
+                if (Materials.Num() > 0)
+                {
+                    Obj->SetArrayField(TEXT("materials"), Materials);
+                }
+            }
+        }
+
+        if (WantsComponentGroup(Groups, ESmithUEComponentPropGroup::Mesh))
+        {
+            if (UStaticMeshComponent* StaticMeshComp = Cast<UStaticMeshComponent>(Comp))
+            {
+                if (UStaticMesh* StaticMesh = StaticMeshComp->GetStaticMesh())
+                {
+                    Obj->SetStringField(TEXT("mesh"), StaticMesh->GetPathName());
+                }
+            }
+            else if (USkeletalMeshComponent* SkeletalMeshComp = Cast<USkeletalMeshComponent>(Comp))
+            {
+                if (USkeletalMesh* SkeletalMesh = SkeletalMeshComp->GetSkeletalMeshAsset())
+                {
+                    Obj->SetStringField(TEXT("mesh"), SkeletalMesh->GetPathName());
+                }
+            }
+        }
+
+        return Obj;
     }
 
     TSharedPtr<FJsonValue> MakeCompactOrFullEntry(const FString& Name, bool bFull, const TSharedPtr<FJsonObject>& FullObj)
@@ -415,6 +598,19 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true)
             }),
         &HandleBpGetSummary);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_get_component_details"),
+            TEXT("Blueprint"),
+            TEXT("Read component template properties (mobility, transform, absolute flags, physics, collision, visibility, mesh, materials) for a Blueprint. Covers own SCS + inherited components. Closes the gap where bp_get_summary only shows hierarchy."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
+                FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional: only this component name. Empty = all.")),
+                FSmithUEToolParam(TEXT("props"), TEXT("string"), TEXT("Optional comma filter: transform,mobility,physics,rendering,mesh,collision. Default all.")),
+                FSmithUEToolParam(TEXT("include_inherited"), TEXT("boolean"), TEXT("Include inherited (parent/native) components. Default true."))
+            }),
+        &HandleBpGetComponentDetails);
 
     Registry.Register(
         FSmithUEToolSchema(
@@ -735,6 +931,107 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetSummary(const TSha
     }
     Data->SetArrayField(TEXT("components"), Components);
 
+    return WrapSuccess(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetComponentDetails(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path")}, Error))
+    {
+        return MakeErrResp(Error);
+    }
+
+    FString BpPath;
+    if (!Params->TryGetStringField(TEXT("bp_path"), BpPath) || BpPath.IsEmpty())
+    {
+        return MakeErrResp(TEXT("Missing required param: 'bp_path'"));
+    }
+
+    FString ComponentFilter;
+    Params->TryGetStringField(TEXT("component"), ComponentFilter);
+    ComponentFilter.TrimStartAndEndInline();
+
+    FString PropsParam;
+    Params->TryGetStringField(TEXT("props"), PropsParam);
+    const TSet<ESmithUEComponentPropGroup> PropGroups = ParseComponentPropGroups(PropsParam);
+    if (PropGroups.Num() == 0)
+    {
+        return MakeErrResp(FString::Printf(TEXT("No supported component property groups requested: %s"), *PropsParam));
+    }
+
+    bool bIncludeInherited = true;
+    Params->TryGetBoolField(TEXT("include_inherited"), bIncludeInherited);
+
+    UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+    if (!BP)
+    {
+        return MakeErrResp(FString::Printf(TEXT("Failed to load blueprint: %s"), *BpPath));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Components;
+    TSet<FName> CoveredComponentNames;
+
+    if (USimpleConstructionScript* SCS = BP->SimpleConstructionScript)
+    {
+        for (USCS_Node* Node : SCS->GetAllNodes())
+        {
+            if (!Node)
+            {
+                continue;
+            }
+
+            const FName ComponentName = Node->GetVariableName();
+            CoveredComponentNames.Add(ComponentName);
+
+            const FString ComponentNameString = ComponentName.ToString();
+            if (!ComponentNameMatchesFilter(ComponentNameString, ComponentFilter))
+            {
+                continue;
+            }
+
+            Components.Add(MakeShared<FJsonValueObject>(ComponentDetailsToJson(
+                Node->ComponentTemplate,
+                ComponentNameString,
+                TEXT("scs"),
+                PropGroups)));
+        }
+    }
+
+    if (bIncludeInherited)
+    {
+        if (UClass* GenClass = BP->GeneratedClass)
+        {
+            if (AActor* CDO = Cast<AActor>(GenClass->GetDefaultObject()))
+            {
+                TArray<UActorComponent*> CDOComponents;
+                CDO->GetComponents(CDOComponents);
+                for (UActorComponent* Comp : CDOComponents)
+                {
+                    if (!Comp || CoveredComponentNames.Contains(Comp->GetFName()))
+                    {
+                        continue;
+                    }
+
+                    const FString ComponentNameString = Comp->GetName();
+                    if (!ComponentNameMatchesFilter(ComponentNameString, ComponentFilter))
+                    {
+                        continue;
+                    }
+
+                    Components.Add(MakeShared<FJsonValueObject>(ComponentDetailsToJson(
+                        Comp,
+                        ComponentNameString,
+                        TEXT("inherited"),
+                        PropGroups)));
+                }
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("bp_path"), BpPath);
+    Data->SetArrayField(TEXT("components"), Components);
     return WrapSuccess(Data);
 }
 
