@@ -13,6 +13,12 @@
 #include "Engine/Blueprint.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Editor.h"
+#include "Blueprint/SmithUEBpAtomicAPI.h"
+#include "BlueprintEditor.h"
+#include "BlueprintEditorModule.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "SMyBlueprint.h"
+#include "Types/SlateEnums.h"
 
 // ---------------------------------------------------------------------------
 // Core layout algorithm (works on abstract adjacency)
@@ -365,6 +371,23 @@ void FSmithUEGraphCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         {
             return FSmithUEGraphCommands::HandleAutoLayoutGraph(Params);
         });
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_focus_node"),
+            TEXT("Editor"),
+            TEXT("Open a Blueprint editor and focus a node (node_id+graph_name), function graph (function_name), or variable (variable_name)."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
+                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name (required with node_id)")),
+                FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID to focus")),
+                FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function graph to open")),
+                FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable to select in My Blueprint"))
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEGraphCommands::HandleFocusNode(Params);
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -483,4 +506,265 @@ TSharedPtr<FJsonObject> FSmithUEGraphCommands::HandleAutoLayoutGraph(const TShar
     Data->SetNumberField(TEXT("spacing_y"), SpacingY);
 
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// HandleFocusNode
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEGraphCommands::HandleFocusNode(const TSharedPtr<FJsonObject>& Params)
+{
+#if WITH_EDITOR
+    if (!Params.IsValid())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params"));
+    }
+
+    // -----------------------------------------------------------------------
+    // 1. Validate bp_path
+    // -----------------------------------------------------------------------
+    FString BpPath;
+    if (!Params->TryGetStringField(TEXT("bp_path"), BpPath) || BpPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: bp_path"));
+    }
+
+    // -----------------------------------------------------------------------
+    // 2. Extract optional focus-mode params
+    // -----------------------------------------------------------------------
+    FString NodeId, GraphName, FunctionName, VariableName;
+    Params->TryGetStringField(TEXT("node_id"),       NodeId);
+    Params->TryGetStringField(TEXT("graph_name"),    GraphName);
+    Params->TryGetStringField(TEXT("function_name"), FunctionName);
+    Params->TryGetStringField(TEXT("variable_name"), VariableName);
+
+    // -----------------------------------------------------------------------
+    // 3. Validate: exactly one of (node_id, function_name, variable_name)
+    // -----------------------------------------------------------------------
+    const int32 ModeCount = (NodeId.IsEmpty()       ? 0 : 1)
+                          + (FunctionName.IsEmpty()  ? 0 : 1)
+                          + (VariableName.IsEmpty()  ? 0 : 1);
+
+    if (ModeCount == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            TEXT("Exactly one of node_id, function_name, or variable_name must be specified"));
+    }
+    if (ModeCount > 1)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            TEXT("Only one of node_id, function_name, or variable_name may be specified at a time"));
+    }
+    if (!NodeId.IsEmpty() && GraphName.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            TEXT("graph_name is required when node_id is specified"));
+    }
+
+    // -----------------------------------------------------------------------
+    // 4. Load Blueprint (reuses FSmithUEBpAtomicAPI::LoadBlueprint pattern,
+    //    which handles level:current / level:/Game/... prefixes and path
+    //    normalisation identically to SmithUEBlueprintCommands.cpp)
+    // -----------------------------------------------------------------------
+    UBlueprint* BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+    if (!BP)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Blueprint not found: %s"), *BpPath));
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Open editor + get IBlueprintEditor interface
+    //    (game-thread safety: HTTP server's IsGameThreadRequired() returns true
+    //    for all non-worker-safe POST /api/v1/execute commands, so the entire
+    //    RouteRequest is already dispatched via AsyncTask(GameThread,...).
+    //    This is the same mechanism used by auto_layout_graph.)
+    // -----------------------------------------------------------------------
+    if (!GEditor)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("GEditor not available"));
+    }
+
+    UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+    if (!EditorSubsystem)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("AssetEditorSubsystem not available"));
+    }
+
+    // Ensure the editor window is open before asking for the interface.
+    EditorSubsystem->OpenEditorForAsset(BP);
+
+    TSharedPtr<IBlueprintEditor> BPEditorIface =
+        FKismetEditorUtilities::GetIBlueprintEditorForObject(BP, /*bOpenEditor=*/true);
+    if (!BPEditorIface.IsValid())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to open Blueprint editor"));
+    }
+
+    // =======================================================================
+    // Mode A: Focus a specific node by NodeGuid + graph_name
+    // =======================================================================
+    if (!NodeId.IsEmpty())
+    {
+        // Search all graph collections for the named graph (case-insensitive,
+        // mirroring FindSmithUEGraphByName in SmithUEBlueprintCommands.cpp)
+        UEdGraph* TargetGraph = nullptr;
+        auto SearchGraphCollection = [&GraphName](const TArray<UEdGraph*>& Graphs) -> UEdGraph*
+        {
+            for (UEdGraph* G : Graphs)
+            {
+                if (G && G->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+                {
+                    return G;
+                }
+            }
+            return nullptr;
+        };
+
+        if (!TargetGraph) { TargetGraph = SearchGraphCollection(BP->UbergraphPages);  }
+        if (!TargetGraph) { TargetGraph = SearchGraphCollection(BP->FunctionGraphs);  }
+        if (!TargetGraph) { TargetGraph = SearchGraphCollection(BP->MacroGraphs);     }
+
+        if (!TargetGraph)
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Graph not found: %s"), *GraphName));
+        }
+
+        // Resolve the GUID (mirrors FindTraceNode GUID branch in SmithUEBlueprintCommands.cpp)
+        FGuid NodeGuid;
+        if (!FGuid::Parse(NodeId, NodeGuid))
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Invalid node GUID format: %s"), *NodeId));
+        }
+
+        UEdGraphNode* TargetNode = nullptr;
+        for (UEdGraphNode* Node : TargetGraph->Nodes)
+        {
+            if (Node && Node->NodeGuid == NodeGuid)
+            {
+                TargetNode = Node;
+                break;
+            }
+        }
+
+        if (!TargetNode)
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Node '%s' not found in graph '%s'"), *NodeId, *GraphName));
+        }
+
+        // JumpToHyperlink centers + highlights the node in the graph viewport.
+        BPEditorIface->JumpToHyperlink(TargetNode, /*bRequestRename=*/false);
+
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("focused"),     TEXT("node"));
+        Data->SetStringField(TEXT("target"),      NodeId);
+        Data->SetStringField(TEXT("graph"),       GraphName);
+        Data->SetStringField(TEXT("node_title"),
+            TargetNode->GetNodeTitle(ENodeTitleType::ListView).ToString());
+        return FSmithUECommonUtils::CreateSuccessResponse(Data);
+    }
+
+    // =======================================================================
+    // Mode B: Open a function graph and bring it to front
+    // =======================================================================
+    if (!FunctionName.IsEmpty())
+    {
+        UEdGraph* FunctionGraph = nullptr;
+
+        // Primary: BP->FunctionGraphs (named user functions)
+        for (UEdGraph* G : BP->FunctionGraphs)
+        {
+            if (G && G->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+            {
+                FunctionGraph = G;
+                break;
+            }
+        }
+        // Fallback: ubergraph pages (e.g. "EventGraph" requested by name)
+        if (!FunctionGraph)
+        {
+            for (UEdGraph* G : BP->UbergraphPages)
+            {
+                if (G && G->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+                {
+                    FunctionGraph = G;
+                    break;
+                }
+            }
+        }
+        // Fallback: macro graphs
+        if (!FunctionGraph)
+        {
+            for (UEdGraph* G : BP->MacroGraphs)
+            {
+                if (G && G->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+                {
+                    FunctionGraph = G;
+                    break;
+                }
+            }
+        }
+
+        if (!FunctionGraph)
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Function graph not found: %s"), *FunctionName));
+        }
+
+        // OpenGraphAndBringToFront switches the active tab and focuses the graph.
+        BPEditorIface->OpenGraphAndBringToFront(FunctionGraph, /*bSetFocus=*/true);
+
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("focused"), TEXT("function"));
+        Data->SetStringField(TEXT("target"),  FunctionName);
+        return FSmithUECommonUtils::CreateSuccessResponse(Data);
+    }
+
+    // =======================================================================
+    // Mode C: Select a variable in the My Blueprint panel
+    // =======================================================================
+    if (!VariableName.IsEmpty())
+    {
+        // IBlueprintEditor is implemented by FBlueprintEditor; the cast is
+        // safe because OpenEditorForAsset / GetIBlueprintEditorForObject always
+        // returns a FBlueprintEditor for UBlueprint assets.
+        TSharedPtr<FBlueprintEditor> BPEditor =
+            StaticCastSharedPtr<FBlueprintEditor>(BPEditorIface);
+        if (!BPEditor.IsValid())
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                TEXT("Failed to get concrete FBlueprintEditor (StaticCast failed)"));
+        }
+
+        TSharedPtr<SMyBlueprint> MyBPWidget = BPEditor->GetMyBlueprintWidget();
+        if (!MyBPWidget.IsValid())
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                TEXT("My Blueprint panel not available — ensure editor is fully open"));
+        }
+
+        // SelectItemByName scrolls to and highlights the variable row.
+        // NodeSectionID::VARIABLE targets the Variables section; use
+        // NodeSectionID::FUNCTION for the Functions section instead.
+        MyBPWidget->SelectItemByName(
+            FName(*VariableName),
+            ESelectInfo::Direct,
+            NodeSectionID::VARIABLE,
+            /*bIsCategory=*/false);
+
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("focused"), TEXT("variable"));
+        Data->SetStringField(TEXT("target"),  VariableName);
+        return FSmithUECommonUtils::CreateSuccessResponse(Data);
+    }
+
+    // Should be unreachable — ModeCount validation above guarantees one mode.
+    return FSmithUECommonUtils::CreateErrorResponse(TEXT("Internal error: no focus mode executed"));
+
+#else
+    return FSmithUECommonUtils::CreateErrorResponse(TEXT("bp_focus_node requires WITH_EDITOR"));
+#endif
 }

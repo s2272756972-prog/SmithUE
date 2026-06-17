@@ -15,4 +15,5 @@ public:
 
 private:
 	static TSharedPtr<FJsonObject> HandleAutoLayoutGraph(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleFocusNode(const TSharedPtr<FJsonObject>& Params);
 };
