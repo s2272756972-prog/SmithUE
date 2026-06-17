@@ -50,5 +50,4 @@ private:
 
 	/** Portfile heartbeat — re-writes the portfile if it disappears externally. */
 	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
-	static constexpr float SMITHUE_PORTFILE_HEARTBEAT_INTERVAL = 4.0f;
 };

@@ -2,6 +2,7 @@
 
 #include "SmithUEModule.h"
 #include "Transport/SmithUEHttpServer.h"
+#include "SmithUESettings.h"
 #include "Utils/SmithUEUpdateChecker.h"
 
 #include "Commands/SmithUEAssetCommands.h"
@@ -101,22 +102,28 @@ void FSmithUEModule::StartupModule()
 		})
 	);
 
-	// Schedule update check 7 seconds after startup (non-blocking)
-	FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateLambda([](float DeltaTime) -> bool
+	// Schedule update check 7 seconds after startup (non-blocking), if enabled in Project Settings
+	if (const USmithUESettings* SmithSettings = GetDefault<USmithUESettings>())
+	{
+		if (SmithSettings->bCheckForUpdatesOnStartup)
 		{
-			FSmithUEUpdateChecker::OnUpdateCheckComplete.AddLambda([]()
-			{
-				if (FSmithUEUpdateChecker::IsUpdateAvailable())
+			FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateLambda([](float DeltaTime) -> bool
 				{
-					FSmithUEUpdateChecker::ShowUpdateNotification();
-				}
-			});
-			FSmithUEUpdateChecker::CheckForUpdate();
-			return false; // one-shot
-		}),
-		7.0f
-	);
+					FSmithUEUpdateChecker::OnUpdateCheckComplete.AddLambda([]()
+					{
+						if (FSmithUEUpdateChecker::IsUpdateAvailable())
+						{
+							FSmithUEUpdateChecker::ShowUpdateNotification();
+						}
+					});
+					FSmithUEUpdateChecker::CheckForUpdate();
+					return false; // one-shot
+				}),
+				7.0f
+			);
+		}
+	}
 
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module started successfully."));
 }

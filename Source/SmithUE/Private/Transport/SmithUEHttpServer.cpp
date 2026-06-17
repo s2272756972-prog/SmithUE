@@ -19,6 +19,7 @@
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 #include "Transport/SmithUEHttpServerRunnable.h"
+#include "SmithUESettings.h"
 #include "SmithUEModule.h"
 
 #if PLATFORM_WINDOWS
@@ -241,7 +242,16 @@ void USmithUEHttpServer::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-	// Support SMITHUE_BIND_PORT env var override; default 0 = OS-assigned
+	// Read settings once
+	const USmithUESettings* SmithSettings = GetDefault<USmithUESettings>();
+
+	// Priority 3 (lowest): Project Settings
+	if (SmithSettings)
+	{
+		Port = static_cast<uint16>(FMath::Clamp(SmithSettings->HttpBindPort, 1024, 65535));
+	}
+
+	// Priority 2: SMITHUE_BIND_PORT environment variable override
 	FString EnvPort = FPlatformMisc::GetEnvironmentVariable(TEXT("SMITHUE_BIND_PORT"));
 	if (!EnvPort.IsEmpty())
 	{
@@ -250,6 +260,16 @@ void USmithUEHttpServer::Initialize(FSubsystemCollectionBase& Collection)
 		{
 			Port = static_cast<uint16>(ParsedPort);
 		}
+	}
+
+	// Priority 1: command-line override for HTTP bind port is not implemented;
+	// GetPortFromCommandLine in SmithUEHttpServerRunnable.cpp is for status reporting only.
+
+	// Respect auto-start setting
+	if (SmithSettings && !SmithSettings->bAutoStartServer)
+	{
+		UE_LOG(LogSmithUE, Log, TEXT("SmithUE: auto-start disabled by Project Settings"));
+		return;
 	}
 
 	StartServer();
@@ -374,6 +394,11 @@ void USmithUEHttpServer::StartServer()
 			EnsurePortFileWritten(true);
 
 			// Register heartbeat to re-write portfile if deleted externally
+			const float HeartbeatInterval = []() -> float {
+				const USmithUESettings* S = GetDefault<USmithUESettings>();
+				return S ? FMath::Clamp(S->PortfileHeartbeatInterval, 1.0f, 30.0f) : 4.0f;
+			}();
+
 			HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 				FTickerDelegate::CreateWeakLambda(this, [this](float /*DeltaTime*/) -> bool
 				{
@@ -382,7 +407,7 @@ void USmithUEHttpServer::StartServer()
 					EnsurePortFileWritten(false);
 					return true; // keep ticking
 				}),
-				SMITHUE_PORTFILE_HEARTBEAT_INTERVAL
+				HeartbeatInterval
 			);
 
 			// OnExit handles crash / abnormal termination paths

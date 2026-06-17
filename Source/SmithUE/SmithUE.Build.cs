@@ -16,7 +16,8 @@ public class SmithUE : ModuleRules
 				"Engine",
 				"InputCore",
 				"Json",
-				"JsonUtilities"
+				"JsonUtilities",
+				"DeveloperSettings"
 			}
 		);
 
