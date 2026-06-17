@@ -1,6 +1,6 @@
 # SmithUE Tool Reference
 
-> **178 tools across 19 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **182 tools across 19 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
@@ -12,7 +12,7 @@
 | Asset | 12 | Asset CRUD, browser operations, AI texture generation |
 | Editor | 8 | Actor spawning, properties, post-process, project settings, graph layout |
 | Interaction | 7 | Console/editor commands, undo/redo, key simulation, key bindings |
-| Blueprint | 17 | BP creation, nodes, functions, variables, components, DSL compiler |
+| Blueprint | 21 | BP creation, nodes, functions, variables, components, DSL compiler, breakpoints, navigation |
 | Viewport | 6 | Camera control, screenshots, actor selection, view modes |
 | Observation | 7 | Panels, editor state, actor properties, world outline |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
@@ -114,7 +114,7 @@
 | `simulate_key` | Simulate a key press |
 | `list_key_bindings` | List registered key bindings |
 
-## Blueprint (17 tools)
+## Blueprint (21 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -131,10 +131,14 @@
 | `bp_override_function` | Override a parent class function |
 | `bp_compile` | Compile a Blueprint |
 | `bp_get_summary` | Get Blueprint metadata (includes component hierarchy with parent/children) |
-| `bp_describe_graph` | Describe nodes and connections |
+| `bp_describe_graph` | Describe nodes and connections (output includes `node_guid` for use with breakpoint/focus commands) |
 | `bp_compile_code` | Compile Blueprint DSL |
 | `bp_batch_op` | Execute multiple atomic operations |
 | `bp_validate_code` | Validate Blueprint DSL syntax |
+| `bp_set_breakpoint` | Set/enable a breakpoint on a node by NodeGuid; `focus=true` (default) opens the editor and jumps to the node |
+| `bp_clear_breakpoint` | Remove a breakpoint from a node (same params as set, incl. `focus`); returns `was_present` |
+| `bp_list_breakpoints` | List all breakpoints in a Blueprint with graph, node_id, node_title, and enabled state |
+| `bp_focus_node` | Open Blueprint editor and jump to a node, function graph, or variable (exactly one of `node_id`+`graph_name`, `function_name`, `variable_name`) |
 
 ## Viewport (6 tools)
 
