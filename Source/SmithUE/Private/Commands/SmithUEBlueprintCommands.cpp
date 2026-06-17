@@ -2583,6 +2583,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
 
         TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
         NodeObj->SetStringField(TEXT("id"), *ShortId);
+        NodeObj->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
         NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
         NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
 
@@ -3274,6 +3275,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpSearch(const TSharedP
             // --- Build node object ---
             TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
             NodeObj->SetStringField(TEXT("nid"),      NidStr);
+            NodeObj->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
             NodeObj->SetStringField(TEXT("title"),    Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
             NodeObj->SetStringField(TEXT("type"),     Node->GetClass()->GetName());
             NodeObj->SetStringField(TEXT("graph"),    GraphName);
