@@ -20,4 +20,9 @@ private:
     static TSharedPtr<FJsonObject> HandleAssetGetDependencyTree(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleAssetValidate(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleMapCheckErrors(const TSharedPtr<FJsonObject>& Params);
+
+    // Breakpoint commands
+    static TSharedPtr<FJsonObject> HandleBpSetBreakpoint(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleBpClearBreakpoint(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleBpListBreakpoints(const TSharedPtr<FJsonObject>& Params);
 };

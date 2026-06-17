@@ -15,7 +15,11 @@
 #include "Engine/Blueprint.h"
 #include "Engine/World.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetDebugUtilities.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "BlueprintEditorModule.h"
+#include "Kismet2/Breakpoint.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 
@@ -224,6 +228,53 @@ namespace SmithUEDebug
         Node->SetArrayField(TEXT("dependencies"), Children);
         return Node;
     }
+
+    // Resolve graph_name + node_id → UEdGraphNode* inside a Blueprint.
+    // node_id must be provided; graph_name is optional (searches all graphs when empty).
+    UEdGraphNode* FindBreakpointNode(UBlueprint* Blueprint, const FString& GraphName, const FString& NodeId, FString& OutError)
+    {
+        if (NodeId.IsEmpty())
+        {
+            OutError = TEXT("node_id is required to identify the target node");
+            return nullptr;
+        }
+
+        TArray<UEdGraph*> Graphs;
+        AppendBlueprintGraphs(Blueprint, Graphs);
+
+        for (UEdGraph* Graph : Graphs)
+        {
+            if (!Graph)
+            {
+                continue;
+            }
+            if (!GraphName.IsEmpty() && !Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+            {
+                continue;
+            }
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (!Node)
+                {
+                    continue;
+                }
+                if (Node->NodeGuid.ToString() == NodeId)
+                {
+                    return Node;
+                }
+            }
+        }
+
+        if (GraphName.IsEmpty())
+        {
+            OutError = FString::Printf(TEXT("Node with GUID '%s' not found in blueprint"), *NodeId);
+        }
+        else
+        {
+            OutError = FString::Printf(TEXT("Node with GUID '%s' not found in graph '%s'"), *NodeId, *GraphName);
+        }
+        return nullptr;
+    }
 } // namespace SmithUEDebug
 
 using namespace SmithUEDebug;
@@ -333,6 +384,42 @@ void FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Run map check on the active editor world"),
             {}),
         &HandleMapCheckErrors);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_set_breakpoint"),
+            TEXT("Debug"),
+            TEXT("Set/enable a breakpoint on a Blueprint node by NodeGuid."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
+                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name (EventGraph / function name)")),
+                FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID")),
+                FSmithUEToolParam(TEXT("focus"), TEXT("boolean"), TEXT("Open the Blueprint editor and jump to the node after the operation (default true)"))
+            }),
+        &HandleBpSetBreakpoint);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_clear_breakpoint"),
+            TEXT("Debug"),
+            TEXT("Remove a breakpoint from a Blueprint node by NodeGuid."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
+                FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name (EventGraph / function name)")),
+                FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID")),
+                FSmithUEToolParam(TEXT("focus"), TEXT("boolean"), TEXT("Open the Blueprint editor and jump to the node after the operation (default true)"))
+            }),
+        &HandleBpClearBreakpoint);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bp_list_breakpoints"),
+            TEXT("Debug"),
+            TEXT("List all breakpoints in a Blueprint with their graph, node GUID, title, and enabled state."),
+            {
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
+            }),
+        &HandleBpListBreakpoints);
 }
 
 // ---------------------------------------------------------------------------
@@ -800,5 +887,204 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleMapCheckErrors(const TShare
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("world"), World->GetName());
     Data->SetStringField(TEXT("message"), TEXT("Map check completed. Open the Message Log (MapCheck category) in the editor for detailed results."));
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: bp_set_breakpoint
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpSetBreakpoint(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString BpPath;
+    Params->TryGetStringField(TEXT("bp_path"), BpPath);
+
+    FString GraphName;
+    Params->TryGetStringField(TEXT("graph_name"), GraphName);
+
+    FString NodeId;
+    Params->TryGetStringField(TEXT("node_id"), NodeId);
+
+    UBlueprint* Blueprint = LoadBlueprintForDebug(BpPath);
+    if (!Blueprint)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to load blueprint: %s"), *BpPath));
+    }
+
+    UEdGraphNode* Node = SmithUEDebug::FindBreakpointNode(Blueprint, GraphName, NodeId, Error);
+    if (!Node)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+#if WITH_EDITOR
+    FBlueprintBreakpoint* Existing = FKismetDebugUtilities::FindBreakpointForNode(Node, Blueprint);
+    if (Existing)
+    {
+        FKismetDebugUtilities::SetBreakpointEnabled(*Existing, true);
+    }
+    else
+    {
+        FKismetDebugUtilities::CreateBreakpoint(Blueprint, Node, /*bIsEnabled=*/true);
+        // breakpoint created enabled by CreateBreakpoint above
+    }
+    Blueprint->Modify();
+    Blueprint->MarkPackageDirty();
+#endif // WITH_EDITOR
+
+#if WITH_EDITOR
+    bool bFocus = true;
+    Params->TryGetBoolField(TEXT("focus"), bFocus);
+    if (bFocus && GEditor)
+    {
+        if (UAssetEditorSubsystem* AssetEditorSub = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
+        {
+            AssetEditorSub->OpenEditorForAsset(Blueprint);
+        }
+        TSharedPtr<IBlueprintEditor> BpEditor =
+            FKismetEditorUtilities::GetIBlueprintEditorForObject(Blueprint, /*bOpenEditor=*/true);
+        if (BpEditor.IsValid())
+        {
+            BpEditor->JumpToHyperlink(Node, /*bRequestRename=*/false);
+        }
+    }
+#endif // WITH_EDITOR
+
+    UEdGraph* OwningGraph = Node->GetGraph();
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("bp_path"), BpPath);
+    Data->SetStringField(TEXT("graph"), OwningGraph ? OwningGraph->GetName() : TEXT(""));
+    Data->SetStringField(TEXT("node_id"), NodeId);
+    Data->SetStringField(TEXT("node_title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+    Data->SetBoolField(TEXT("enabled"), true);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: bp_clear_breakpoint
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpClearBreakpoint(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString BpPath;
+    Params->TryGetStringField(TEXT("bp_path"), BpPath);
+
+    FString GraphName;
+    Params->TryGetStringField(TEXT("graph_name"), GraphName);
+
+    FString NodeId;
+    Params->TryGetStringField(TEXT("node_id"), NodeId);
+
+    UBlueprint* Blueprint = LoadBlueprintForDebug(BpPath);
+    if (!Blueprint)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to load blueprint: %s"), *BpPath));
+    }
+
+    UEdGraphNode* Node = SmithUEDebug::FindBreakpointNode(Blueprint, GraphName, NodeId, Error);
+    if (!Node)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    bool bWasPresent = false;
+#if WITH_EDITOR
+    if (FKismetDebugUtilities::FindBreakpointForNode(Node, Blueprint) != nullptr)
+    {
+        FKismetDebugUtilities::RemoveBreakpointFromNode(Node, Blueprint);
+        Blueprint->Modify();
+        Blueprint->MarkPackageDirty();
+        bWasPresent = true;
+    }
+#endif // WITH_EDITOR
+
+#if WITH_EDITOR
+    bool bFocus = true;
+    Params->TryGetBoolField(TEXT("focus"), bFocus);
+    if (bFocus && GEditor)
+    {
+        if (UAssetEditorSubsystem* AssetEditorSub = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
+        {
+            AssetEditorSub->OpenEditorForAsset(Blueprint);
+        }
+        TSharedPtr<IBlueprintEditor> BpEditor =
+            FKismetEditorUtilities::GetIBlueprintEditorForObject(Blueprint, /*bOpenEditor=*/true);
+        if (BpEditor.IsValid())
+        {
+            BpEditor->JumpToHyperlink(Node, /*bRequestRename=*/false);
+        }
+    }
+#endif // WITH_EDITOR
+
+    UEdGraph* OwningGraph = Node->GetGraph();
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("bp_path"), BpPath);
+    Data->SetStringField(TEXT("graph"), OwningGraph ? OwningGraph->GetName() : TEXT(""));
+    Data->SetStringField(TEXT("node_id"), NodeId);
+    Data->SetStringField(TEXT("node_title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+    Data->SetBoolField(TEXT("was_present"), bWasPresent);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: bp_list_breakpoints
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpListBreakpoints(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("bp_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString BpPath;
+    Params->TryGetStringField(TEXT("bp_path"), BpPath);
+
+    UBlueprint* Blueprint = LoadBlueprintForDebug(BpPath);
+    if (!Blueprint)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to load blueprint: %s"), *BpPath));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> BreakpointArray;
+#if WITH_EDITOR
+    FKismetDebugUtilities::ForeachBreakpoint(Blueprint, [&BreakpointArray](FBlueprintBreakpoint& Breakpoint)
+    {
+        UEdGraphNode* BPNode = Breakpoint.GetLocation();
+        if (!BPNode)
+        {
+            return;
+        }
+
+        UEdGraph* OwningGraph = BPNode->GetGraph();
+        TSharedPtr<FJsonObject> BPObj = MakeShared<FJsonObject>();
+        BPObj->SetStringField(TEXT("graph"), OwningGraph ? OwningGraph->GetName() : TEXT(""));
+        BPObj->SetStringField(TEXT("node_id"), BPNode->NodeGuid.ToString());
+        BPObj->SetStringField(TEXT("node_title"), BPNode->GetNodeTitle(ENodeTitleType::ListView).ToString());
+        BPObj->SetBoolField(TEXT("enabled"), Breakpoint.IsEnabled());
+        BreakpointArray.Add(MakeShared<FJsonValueObject>(BPObj));
+    });
+#endif // WITH_EDITOR
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("bp_path"), BpPath);
+    Data->SetNumberField(TEXT("breakpoint_count"), BreakpointArray.Num());
+    Data->SetArrayField(TEXT("breakpoints"), BreakpointArray);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
