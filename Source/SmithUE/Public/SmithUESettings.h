@@ -44,6 +44,9 @@ public:
 	bool bCheckForUpdatesOnStartup = true;
 
 	// UDeveloperSettings interface
-	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
-	virtual FName GetSectionName() const override  { return TEXT("SmithUE"); }
+	// GetContainerName must return "Project" to appear under Project Settings → Plugins.
+	// Default for EditorPerProjectUserSettings is "Editor" (→ Editor Preferences), not "Project".
+	virtual FName GetContainerName() const override { return TEXT("Project"); }
+	virtual FName GetCategoryName() const override  { return TEXT("Plugins"); }
+	virtual FName GetSectionName() const override   { return TEXT("SmithUE"); }
 };
