@@ -58,6 +58,7 @@ public class SmithUE : ModuleRules
 					"ToolMenus",
 					"ImageWrapper",
 					"AssetTools",
+					"ContentBrowser",
 					"Niagara",
 					"NiagaraEditor",
 					"Sequencer",

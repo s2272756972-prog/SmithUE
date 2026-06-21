@@ -9,6 +9,8 @@
 #include "EditorAssetLibrary.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
+#include "ContentBrowserModule.h"
+#include "IContentBrowserSingleton.h"
 #include "Misc/PackageName.h"
 #include "ObjectTools.h"
 #include "Subsystems/AssetEditorSubsystem.h"
@@ -201,6 +203,25 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Save all dirty (modified) assets to disk"),
             {}),
         &HandleSaveAllDirty);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("get_content_browser_selection"),
+            TEXT("Asset"),
+            TEXT("Get the folders and assets currently selected in the Content Browser"),
+            {}),
+        &HandleGetContentBrowserSelection);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("sync_content_browser"),
+            TEXT("Asset"),
+            TEXT("Navigate the Content Browser to a folder or asset and bring it to focus"),
+            {
+                FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to navigate to (e.g. /Game/Materials)")),
+                FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), TEXT("Asset to select and reveal (e.g. /Game/Materials/M_Base)"))
+            }),
+        &HandleSyncContentBrowser);
 }
 
 // ---------------------------------------------------------------------------
@@ -810,5 +831,128 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleSaveAllDirty(const TSharedP
     Data->SetStringField(TEXT("status"), TEXT("success"));
 
     UE_LOG(LogSmithUE, Log, TEXT("save_all_dirty: saved %d dirty assets"), SavedCount);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: get_content_browser_selection
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleGetContentBrowserSelection(const TSharedPtr<FJsonObject>& Params)
+{
+    FContentBrowserModule& ContentBrowserModule =
+        FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
+    IContentBrowserSingleton& ContentBrowser = ContentBrowserModule.Get();
+
+    // Folders: merge source-tree selection and asset-view folder selection, de-duplicated.
+    TArray<FString> PathViewFolders;
+    ContentBrowser.GetSelectedPathViewFolders(PathViewFolders);
+
+    TArray<FString> AssetViewFolders;
+    ContentBrowser.GetSelectedFolders(AssetViewFolders);
+
+    TArray<FString> Folders;
+    for (const FString& F : PathViewFolders) { Folders.AddUnique(F); }
+    for (const FString& F : AssetViewFolders) { Folders.AddUnique(F); }
+
+    TArray<TSharedPtr<FJsonValue>> FoldersArray;
+    FoldersArray.Reserve(Folders.Num());
+    for (const FString& F : Folders)
+    {
+        FoldersArray.Add(MakeShared<FJsonValueString>(F));
+    }
+
+    // Selected assets in the asset view.
+    TArray<FAssetData> SelectedAssets;
+    ContentBrowser.GetSelectedAssets(SelectedAssets);
+
+    TArray<TSharedPtr<FJsonValue>> AssetsArray;
+    AssetsArray.Reserve(SelectedAssets.Num());
+    for (const FAssetData& AssetData : SelectedAssets)
+    {
+        AssetsArray.Add(MakeShared<FJsonValueObject>(AssetDataToJson(AssetData, false)));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetArrayField(TEXT("selected_folders"), FoldersArray);
+    Data->SetArrayField(TEXT("selected_assets"), AssetsArray);
+    Data->SetNumberField(TEXT("folder_count"), Folders.Num());
+    Data->SetNumberField(TEXT("asset_count"), SelectedAssets.Num());
+
+    UE_LOG(LogSmithUE, Log, TEXT("get_content_browser_selection: %d folders, %d assets"),
+        Folders.Num(), SelectedAssets.Num());
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: sync_content_browser
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleSyncContentBrowser(const TSharedPtr<FJsonObject>& Params)
+{
+    FString FolderPath;
+    Params->TryGetStringField(TEXT("folder_path"), FolderPath);
+
+    FString AssetPath;
+    Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+
+    if (FolderPath.IsEmpty() && AssetPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            TEXT("Provide either 'folder_path' or 'asset_path' to navigate to"));
+    }
+
+    FContentBrowserModule& ContentBrowserModule =
+        FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
+    IContentBrowserSingleton& ContentBrowser = ContentBrowserModule.Get();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+
+    if (!AssetPath.IsEmpty())
+    {
+        IAssetRegistry& AssetRegistry = GetAssetRegistry();
+
+        // Accept both the full object path (/Game/Foo.Foo) and the bare
+        // package path (/Game/Foo) that list_assets / users commonly use.
+        FString ResolvedPath = AssetPath;
+        FAssetData AssetData = AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(ResolvedPath));
+        if (!AssetData.IsValid() && !AssetPath.Contains(TEXT(".")))
+        {
+            FString AssetName;
+            if (AssetPath.Split(TEXT("/"), nullptr, &AssetName, ESearchCase::IgnoreCase, ESearchDir::FromEnd)
+                && !AssetName.IsEmpty())
+            {
+                ResolvedPath = AssetPath + TEXT(".") + AssetName;
+                AssetData = AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(ResolvedPath));
+            }
+        }
+
+        if (!AssetData.IsValid())
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
+        }
+
+        TArray<FAssetData> AssetsToSync;
+        AssetsToSync.Add(AssetData);
+        ContentBrowser.SyncBrowserToAssets(AssetsToSync, /*bAllowLockedBrowsers*/ false, /*bFocusContentBrowser*/ true);
+
+        Data->SetStringField(TEXT("synced_to"), ResolvedPath);
+        Data->SetStringField(TEXT("kind"), TEXT("asset"));
+    }
+    else
+    {
+        TArray<FString> FoldersToSync;
+        FoldersToSync.Add(FolderPath);
+        ContentBrowser.SyncBrowserToFolders(FoldersToSync, /*bAllowLockedBrowsers*/ false, /*bFocusContentBrowser*/ true);
+
+        Data->SetStringField(TEXT("synced_to"), FolderPath);
+        Data->SetStringField(TEXT("kind"), TEXT("folder"));
+    }
+
+    Data->SetBoolField(TEXT("synced"), true);
+
+    UE_LOG(LogSmithUE, Log, TEXT("sync_content_browser: navigated to %s"),
+        AssetPath.IsEmpty() ? *FolderPath : *AssetPath);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

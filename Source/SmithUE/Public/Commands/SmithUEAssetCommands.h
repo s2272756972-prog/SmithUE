@@ -19,4 +19,6 @@ private:
     static TSharedPtr<FJsonObject> HandleAssetEditor(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleSaveAsset(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleSaveAllDirty(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleGetContentBrowserSelection(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleSyncContentBrowser(const TSharedPtr<FJsonObject>& Params);
 };
