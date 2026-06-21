@@ -494,6 +494,13 @@ TSharedPtr<FJsonObject> FSmithUEDataCommands::HandleDataCreateStruct(const TShar
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create UserDefinedStruct"));
     }
 
+    // UE auto-creates a default member (MemberVar_0); capture it to remove after real fields are added.
+    FGuid DefaultMemberGuid;
+    {
+        const TArray<FStructVariableDescription>& InitVars = FStructureEditorUtils::GetVarDesc(NewStruct);
+        if (InitVars.Num() > 0) { DefaultMemberGuid = InitVars[0].VarGuid; }
+    }
+
     TArray<TSharedPtr<FJsonValue>> CreatedFields;
     for (const TSharedPtr<FJsonValue>& FieldValue : *Fields)
     {
@@ -531,6 +538,12 @@ TSharedPtr<FJsonObject> FSmithUEDataCommands::HandleDataCreateStruct(const TShar
         CreatedField->SetStringField(TEXT("name"), FieldName);
         CreatedField->SetStringField(TEXT("type"), FieldType);
         CreatedFields.Add(MakeShared<FJsonValueObject>(CreatedField));
+    }
+
+    // Drop the default placeholder member now that real fields exist (struct must keep >=1 member).
+    if (DefaultMemberGuid.IsValid() && CreatedFields.Num() > 0)
+    {
+        FStructureEditorUtils::RemoveVariable(NewStruct, DefaultMemberGuid);
     }
 
     FStructureEditorUtils::OnStructureChanged(NewStruct);
