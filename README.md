@@ -98,7 +98,7 @@ SmithUE UE5 插件 (HTTP :动态端口)
 
 ## 命令参考
 
-SmithUE 提供了分布在 **20 个功能域** 中的 **199 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **23 个功能域** 中的 **209 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 
@@ -119,11 +119,14 @@ SmithUE 提供了分布在 **20 个功能域** 中的 **199 个工具**。命令
 | Sequencer | 6 | 关卡序列创建、绑定、轨道、关键帧 |
 | Viewport | 6 | 摄像机控制、截图、Actor 选择 |
 | Input | 6 | 增强输入：InputAction、InputMappingContext |
-| Data | 6 | 数据表、用户定义结构体、用户定义枚举 |
+| Data | 8 | 数据表、用户定义结构体、用户定义枚举 |
 | System | 5 | 服务器连接、会话管理 |
 | Project | 4 | 项目信息、插件、目录、源文件 |
 | UMG | 4 | 控件蓝图创建、控件树、属性 |
 | Debug | 3 | 蓝图断点：设置、清除、列出 |
+| Curve | 4 | 曲线资产(Float/LinearColor/Vector) + 颜色图集 |
+| RenderTarget | 2 | 纹理渲染目标 |
+| Physics | 2 | 物理材质(摩擦/弹性/密度) |
 
 ---
 

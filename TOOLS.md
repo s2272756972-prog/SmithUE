@@ -1,31 +1,34 @@
 # SmithUE Tool Reference
 
-> **199 tools across 20 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **209 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
 | Domain | Tools | Description |
 |--------|-------|-------------|
-| Blueprint | 31 | BP creation, nodes, functions, variables, components, DSL compiler, health check, diff, trace |
+| Blueprint | 31 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace |
 | Material | 20 | Materials, material instances, MPC, material functions |
-| Niagara | 17 | Particle system creation, emitters, modules, renderers, parameters |
-| Asset | 14 | Asset CRUD, browser operations, content browser selection/navigation, AI texture generation |
+| Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
+| Asset | 14 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
 | Level | 11 | Level management, landscape, foliage |
-| PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
 | Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
-| Editor | 9 | Actor spawning, properties, post-process, project settings, graph layout |
+| PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
+| Editor | 9 | Actor spawning, properties, post-process, project settings |
+| Data | 8 | DataTables, structs, enums, data assets |
 | Observation | 8 | Panels, editor state, actor properties, world outline |
+| Interaction | 7 | Console/editor commands, undo/redo, key simulation |
 | Animation | 7 | AnimMontage, AnimBlueprint, sections, notifies |
-| Interaction | 7 | Console/editor commands, undo/redo, key simulation, key bindings |
-| Sequencer | 6 | LevelSequence creation, bindings, tracks, keyframes |
 | Viewport | 6 | Camera control, screenshots, actor selection, view modes |
+| Sequencer | 6 | LevelSequence creation, bindings, tracks, keyframes |
 | Input | 6 | Enhanced Input: InputAction, InputMappingContext |
-| Data | 6 | DataTables, UserDefinedStructs, UserDefinedEnums |
 | System | 5 | Server connectivity, metrics, protocol info |
 | Project | 4 | Project info, plugins, folders, source files |
+| Curve | 4 | Curve assets (Float/LinearColor/Vector) + color atlas |
 | UMG | 4 | Widget Blueprint creation, widget tree, properties |
 | Debug | 3 | Blueprint breakpoints: set, clear, list |
+| RenderTarget | 2 | Texture render targets |
+| Physics | 2 | Physical materials (friction/restitution/density) |
 
 ---
 
@@ -165,22 +168,6 @@
 | `level_erase_foliage` | Remove foliage instances within a radius |
 | `level_get_foliage_stats` | Count foliage types and instances in the current level |
 
-## PIE
-
-| Tool | Description |
-|------|-------------|
-| `pie_teleport_actor` | Teleport an actor in the PIE world |
-| `pie_spawn_actor` | Spawn an actor in the PIE world |
-| `pie_destroy_actor` | Destroy an actor in the PIE world |
-| `pie_get_property` | Get a property value from an actor via reflection |
-| `pie_set_property` | Set a property value on an actor via reflection |
-| `pie_get_game_state` | Get PIE running state, player location, actor count |
-| `pie_list_actors` | List actors in the PIE world |
-| `pie_console_command` | Execute a console command in the PIE world |
-| `pie_start` | Start a Play-In-Editor session |
-| `pie_stop` | Stop the active PIE session |
-| `pie_is_active` | Check whether a PIE session is currently active and return its mode |
-
 ## Environment
 
 | Tool | Description |
@@ -197,6 +184,22 @@
 | `env_set_spline_point` | Modify a spline point position and tangent |
 | `env_get_spline_info` | Get spline point count, length, closed state |
 
+## PIE
+
+| Tool | Description |
+|------|-------------|
+| `pie_teleport_actor` | Teleport an actor in the PIE world |
+| `pie_spawn_actor` | Spawn an actor in the PIE world |
+| `pie_destroy_actor` | Destroy an actor in the PIE world |
+| `pie_get_property` | Get a property value from an actor via reflection |
+| `pie_set_property` | Set a property value on an actor via reflection |
+| `pie_get_game_state` | Get PIE running state, player location, actor count |
+| `pie_list_actors` | List actors in the PIE world |
+| `pie_console_command` | Execute a console command in the PIE world |
+| `pie_start` | Start a Play-In-Editor session |
+| `pie_stop` | Stop the active PIE session |
+| `pie_is_active` | Check whether a PIE session is currently active and return its mode |
+
 ## Editor
 
 | Tool | Description |
@@ -211,6 +214,19 @@
 | `set_project_setting` | Write a project configuration setting to INI file and flush to disk |
 | `auto_layout_graph` | Auto-arrange nodes in any graph (Material, Blueprint, Niagara). Closes editor if open to prevent save conflicts. |
 
+## Data
+
+| Tool | Description |
+|------|-------------|
+| `create_data_asset` | Create a Data Asset instance of a UDataAsset subclass |
+| `read_data_asset` | Read a Data Asset's class and all UPROPERTY values via reflection |
+| `data_create_table` | Create a DataTable asset using a row struct |
+| `data_add_row` | Add or replace a row in a DataTable from JSON object data |
+| `data_read_table` | Read all rows or a single row from a DataTable |
+| `data_import_json` | Import DataTable rows from a JSON string |
+| `data_create_struct` | Create a UserDefinedStruct asset with typed fields |
+| `data_create_enum` | Create a UserDefinedEnum asset with entries |
+
 ## Observation
 
 | Tool | Description |
@@ -224,18 +240,6 @@
 | `get_world_outline` | Returns all actors in the level with parent-child hierarchy and folder info. |
 | `take_blueprint_preview_screenshot` | Open a Blueprint in its editor and capture the SCS (Components) viewport as a PNG screenshot |
 
-## Animation
-
-| Tool | Description |
-|------|-------------|
-| `anim_create_montage` | Create an AnimMontage asset for a skeleton |
-| `anim_read_montage` | Read montage sections, notifies, and slots |
-| `anim_add_section` | Add a section to an AnimMontage |
-| `anim_link_sections` | Link two montage sections for sequential playback |
-| `anim_add_notify` | Add an anim notify at a time |
-| `anim_create_blueprint` | Create an AnimBlueprint asset |
-| `anim_read_blueprint` | Read AnimBP info (state machines, variables, skeleton) |
-
 ## Interaction
 
 | Tool | Description |
@@ -248,16 +252,17 @@
 | `simulate_key` | Simulate a key press (command-lookup first, Slate fallback) |
 | `list_key_bindings` | List all registered key bindings (commands with active key chords) |
 
-## Sequencer
+## Animation
 
 | Tool | Description |
 |------|-------------|
-| `seq_create` | Create a LevelSequence asset |
-| `seq_read` | Read sequence info (bindings, tracks, range) |
-| `seq_add_binding` | Bind a world actor to a sequence |
-| `seq_add_track` | Add a track to a binding (Transform, Float, Bool) |
-| `seq_add_keyframe` | Add a keyframe to a track at a given time |
-| `seq_set_range` | Set the playback range in frames |
+| `anim_create_montage` | Create an AnimMontage asset for a skeleton |
+| `anim_read_montage` | Read montage sections, notifies, and slots |
+| `anim_add_section` | Add a section to an AnimMontage |
+| `anim_link_sections` | Link two montage sections for sequential playback |
+| `anim_add_notify` | Add an anim notify at a time |
+| `anim_create_blueprint` | Create an AnimBlueprint asset |
+| `anim_read_blueprint` | Read AnimBP info (state machines, variables, skeleton) |
 
 ## Viewport
 
@@ -270,6 +275,17 @@
 | `select_actors` | Select one or more actors in the level by label |
 | `take_viewport_screenshot` | Capture the active editor viewport as a PNG file |
 
+## Sequencer
+
+| Tool | Description |
+|------|-------------|
+| `seq_create` | Create a LevelSequence asset |
+| `seq_read` | Read sequence info (bindings, tracks, range) |
+| `seq_add_binding` | Bind a world actor to a sequence |
+| `seq_add_track` | Add a track to a binding (Transform, Float, Bool) |
+| `seq_add_keyframe` | Add a keyframe to a track at a given time |
+| `seq_set_range` | Set the playback range in frames |
+
 ## Input
 
 | Tool | Description |
@@ -280,17 +296,6 @@
 | `input_read_mapping_context` | Read an InputMappingContext to see its action-key mappings and modifiers |
 | `input_edit_mapping_context` | Edit an InputMappingContext: add or remove key mappings |
 | `input_delete_asset` | Delete an InputAction or InputMappingContext asset by name or path |
-
-## Data
-
-| Tool | Description |
-|------|-------------|
-| `data_create_table` | Create a DataTable asset using a row struct |
-| `data_add_row` | Add or replace a row in a DataTable from JSON object data |
-| `data_read_table` | Read all rows or a single row from a DataTable |
-| `data_import_json` | Import DataTable rows from a JSON string |
-| `data_create_struct` | Create a UserDefinedStruct asset with typed fields |
-| `data_create_enum` | Create a UserDefinedEnum asset with entries |
 
 ## System
 
@@ -311,6 +316,15 @@
 | `create_folder` | Creates a content browser folder (e.g. /Game/MyFolder/SubFolder). |
 | `get_source_files` | Lists source files recursively under a given path, filtered by extension. |
 
+## Curve
+
+| Tool | Description |
+|------|-------------|
+| `create_curve` | Create a curve asset (Float, LinearColor, or Vector) with optional keyframes |
+| `read_curve` | Read a curve asset's type and keyframes |
+| `create_curve_atlas` | Create a CurveLinearColorAtlas, optionally seeded with CurveLinearColor assets |
+| `read_curve_atlas` | Read a CurveLinearColorAtlas: texture size and gradient curve paths |
+
 ## UMG
 
 | Tool | Description |
@@ -327,4 +341,18 @@
 | `bp_set_breakpoint` | Set/enable a breakpoint on a Blueprint node by NodeGuid. |
 | `bp_clear_breakpoint` | Remove a breakpoint from a Blueprint node by NodeGuid. |
 | `bp_list_breakpoints` | List all breakpoints in a Blueprint with their graph, node GUID, title, and enabled state. |
+
+## RenderTarget
+
+| Tool | Description |
+|------|-------------|
+| `create_render_target` | Create a TextureRenderTarget2D |
+| `read_render_target` | Read a TextureRenderTarget2D: size and format |
+
+## Physics
+
+| Tool | Description |
+|------|-------------|
+| `create_physical_material` | Create a PhysicalMaterial with friction/restitution/density |
+| `read_physical_material` | Read a PhysicalMaterial's friction/restitution/density |
 
