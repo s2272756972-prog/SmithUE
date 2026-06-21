@@ -1,25 +1,27 @@
 # AGENTS.md — SmithUE 插件开发指南
 
 > 给 AI 代理 / 贡献者。动手前读本文件;新增/改工具前必读 [docs/spec/](docs/spec/) 与 [CONTRIBUTING.md](CONTRIBUTING.md)。
+>
+> 占位符约定(与 README / CONTRIBUTING 一致):`{EngineRoot}` = UE 5.2 安装根、`{ProjectRoot}` = 宿主工程根目录、`{Project}` = 宿主工程名。本仓库**当前**嵌于 AIScript 工程(故 `{Project}` = `AIScript`),但插件可被任意宿主工程复用,**勿把绝对路径写死进代码或文档**。
 
 ## 这是什么 / 仓库边界(最易踩错)
 
 - 本目录是 **SmithUE 插件**(C++,UE 5.2)的**独立 git 仓库**:remote `123dx-svg/SmithUE`,**默认分支 `UE5.2`(不是 main)**。
-- 插件嵌在宿主工程内:`F:\DXProject\AIScript\Plugins\SmithUE`;宿主工程 `F:\DXProject\AIScript\AIScript.uproject`。
-- **消费端 `smithue-cli` 是另一个独立仓库**:`F:\DXProject\AIScript\smithue-cli`(TypeScript/npm,remote `123dx-svg/smithue-cli`,分支 `main`,已发布 npm 包)。改 CLI 去那个仓库,别在这里找。
+- 插件嵌在宿主工程内:`{ProjectRoot}\Plugins\SmithUE`;宿主工程为 `{ProjectRoot}\{Project}.uproject`。
+- **消费端 `smithue-cli` 是另一个独立仓库**(单独 clone):remote `123dx-svg/smithue-cli`,分支 `main`,TypeScript/npm,**已发布 npm 包 <https://www.npmjs.com/package/smithue-cli>**。改 CLI 去那个仓库,别在这里找。
 - 插件 ↔ CLI 走 HTTP JSON,**动态端口**(端口文件 `%LOCALAPPDATA%\.smithue\<pid>.port`,**不是固定 13721**——CONTRIBUTING 里的 13721 仅为示例)。两者**独立版本号,禁止互相比较**。
 
 ## 构建插件(顺序固定:关 → 编 → 启 → 验)
 
 ```powershell
 Stop-Process -Name UnrealEditor -Force   # 编辑器锁 DLL,必须先关
-dotnet "E:\Program Files\Epic Games\UE_5.2\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" `
-  AIScriptEditor Win64 Development "F:\DXProject\AIScript\AIScript.uproject" -WaitMutex
+dotnet "{EngineRoot}\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" `
+  {Project}Editor Win64 Development "{ProjectRoot}\{Project}.uproject" -WaitMutex
 # 之后重新启动编辑器即重新加载插件
 ```
 
-- 编译目标是 **`AIScriptEditor`**(宿主工程 target),不是 "SmithUE"。
-- UBT 误报 "Target is up to date" 不重编时 → 删 `Intermediate\Build\Win64\x64\AIScriptEditor\ActionHistory.bin` 强制重建。
+- 编译目标是 **`{Project}Editor`**(宿主工程 target,当前环境即 `AIScriptEditor`),不是 "SmithUE"。
+- UBT 误报 "Target is up to date" 不重编时 → 删 `{ProjectRoot}\Intermediate\Build\Win64\x64\{Project}Editor\ActionHistory.bin` 强制重建。
 
 ## 验证工具(编辑器运行后)
 
