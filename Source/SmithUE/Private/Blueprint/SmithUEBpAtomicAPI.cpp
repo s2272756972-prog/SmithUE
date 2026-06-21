@@ -28,6 +28,7 @@
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/InheritableComponentHandler.h"
 #include "Engine/LevelScriptBlueprint.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
@@ -277,6 +278,7 @@ namespace
 		TArray<FBulkComponentEdit> Edits;
 		bool bDryRun = false;
 		bool bDeferCompile = false;
+		bool bIncludeInherited = false;
 	};
 
 	FString JsonValueToImportText(const TSharedPtr<FJsonValue>& JsonValue)
@@ -496,6 +498,60 @@ namespace
 			}
 		}
 		return false;
+	}
+
+	void CollectOwnSCSVariableNames(UBlueprint* Blueprint, TSet<FName>& OutNames)
+	{
+		if (!Blueprint || !Blueprint->SimpleConstructionScript)
+		{
+			return;
+		}
+		for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (Node)
+			{
+				OutNames.Add(Node->GetVariableName());
+			}
+		}
+	}
+
+	bool ComponentMatchesNameFilter(UActorComponent* Component, const FString& ComponentName, const FString& ComponentFilter)
+	{
+		return ComponentFilter.IsEmpty()
+			|| ComponentName.Equals(ComponentFilter, ESearchCase::IgnoreCase)
+			|| (Component && Component->GetName().Equals(ComponentFilter, ESearchCase::IgnoreCase));
+	}
+
+	void CollectInheritedBPScsNodes(UBlueprint* ChildBlueprint, TArray<USCS_Node*>& OutNodes)
+	{
+		OutNodes.Reset();
+		if (!ChildBlueprint)
+		{
+			return;
+		}
+
+		TSet<FName> ShadowedNames;
+		CollectOwnSCSVariableNames(ChildBlueprint, ShadowedNames);
+
+		for (UBlueprintGeneratedClass* ParentBPGC = Cast<UBlueprintGeneratedClass>(ChildBlueprint->ParentClass);
+			ParentBPGC;
+			ParentBPGC = Cast<UBlueprintGeneratedClass>(ParentBPGC->GetSuperClass()))
+		{
+			USimpleConstructionScript* ParentSCS = ParentBPGC->SimpleConstructionScript;
+			if (!ParentSCS)
+			{
+				continue;
+			}
+
+			for (USCS_Node* ParentNode : ParentSCS->GetAllNodes())
+			{
+				if (!ParentNode || ShadowedNames.Contains(ParentNode->GetVariableName()))
+				{
+					continue;
+				}
+				OutNodes.Add(ParentNode);
+			}
+		}
 	}
 
 	bool ParseMaterialPropertyPath(const FString& PropertyPath, int32& OutIndex)
@@ -765,6 +821,8 @@ namespace
 		int32 ComponentsChanged = 0;
 		int32 ComponentsSkipped = 0;
 		int32 EditsApplied = 0;
+		int32 InheritedOverridesCreated = 0;
+		int32 InheritedOverridesReused = 0;
 		const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpBulkSetCompProp", "SmithUE: Bulk Set BP Component Properties"));
 
 		for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
@@ -822,9 +880,140 @@ namespace
 			ComponentResults.Add(MakeShared<FJsonValueObject>(ComponentResult));
 		}
 
+		bool bInheritedOverrideCreated = false;
+		if (Cfg.bIncludeInherited)
+		{
+			UBlueprintGeneratedClass* ChildBPGC = Cast<UBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+			TArray<USCS_Node*> InheritedNodes;
+			CollectInheritedBPScsNodes(Blueprint, InheritedNodes);
+			UInheritableComponentHandler* ReadOnlyICH = Blueprint->GetInheritableComponentHandler(false);
+
+			for (USCS_Node* ParentNode : InheritedNodes)
+			{
+				if (!ParentNode || !ParentNode->ComponentTemplate)
+				{
+					continue;
+				}
+
+				const FString ComponentName = ParentNode->GetVariableName().ToString();
+				FComponentKey Key(ParentNode);
+				if (!Key.IsValid())
+				{
+					TSharedPtr<FJsonObject> ComponentResult = MakeShared<FJsonObject>();
+					ComponentResult->SetStringField(TEXT("name"), ComponentName);
+					ComponentResult->SetStringField(TEXT("class"), ParentNode->ComponentClass ? ParentNode->ComponentClass->GetName() : TEXT("Unknown"));
+					ComponentResult->SetStringField(TEXT("source"), TEXT("inherited_override"));
+					ComponentResult->SetStringField(TEXT("action"), TEXT("skipped"));
+					ComponentResult->SetStringField(TEXT("reason"), TEXT("native inherited component not supported"));
+					ComponentResults.Add(MakeShared<FJsonValueObject>(ComponentResult));
+					++ComponentsSkipped;
+					continue;
+				}
+
+				UActorComponent* ExistingOverride = ReadOnlyICH ? ReadOnlyICH->GetOverridenComponentTemplate(Key) : nullptr;
+				UActorComponent* Component = ExistingOverride;
+				if (!Component)
+				{
+					Component = Cfg.bDryRun
+						? (ChildBPGC ? ParentNode->GetActualComponentTemplate(ChildBPGC) : ParentNode->ComponentTemplate.Get())
+						: nullptr;
+				}
+				if (!Component)
+				{
+					Component = ParentNode->ComponentTemplate;
+				}
+
+				if (!ComponentMatchesNameFilter(Component, ComponentName, Cfg.ComponentFilter) || !ComponentMatchesClassFilter(Component, Cfg.ComponentClassFilter))
+				{
+					continue;
+				}
+
+				TSharedPtr<FJsonObject> ComponentResult = MakeShared<FJsonObject>();
+				ComponentResult->SetStringField(TEXT("name"), ComponentName);
+				ComponentResult->SetStringField(TEXT("class"), Component->GetClass()->GetName());
+				ComponentResult->SetStringField(TEXT("source"), TEXT("inherited_override"));
+				ComponentResult->SetStringField(TEXT("override"), ExistingOverride ? TEXT("reused") : TEXT("created"));
+				TArray<TSharedPtr<FJsonValue>> EditResults;
+				bool bComponentApplied = false;
+
+				if (!Cfg.bDryRun)
+				{
+					UInheritableComponentHandler* ICH = Blueprint->GetInheritableComponentHandler(true);
+					if (!ICH)
+					{
+						ComponentResult->SetStringField(TEXT("action"), TEXT("error"));
+						ComponentResult->SetStringField(TEXT("error"), TEXT("Failed to create InheritableComponentHandler"));
+						ComponentResults.Add(MakeShared<FJsonValueObject>(ComponentResult));
+						++ComponentsSkipped;
+						continue;
+					}
+
+					ICH->SetFlags(RF_Transactional);
+					Component = ExistingOverride ? ExistingOverride : ICH->CreateOverridenComponentTemplate(Key);
+					if (!Component)
+					{
+						ComponentResult->SetStringField(TEXT("action"), TEXT("error"));
+						ComponentResult->SetStringField(TEXT("error"), TEXT("Failed to create inherited component override template"));
+						ComponentResults.Add(MakeShared<FJsonValueObject>(ComponentResult));
+						++ComponentsSkipped;
+						continue;
+					}
+
+					if (!ExistingOverride)
+					{
+						bInheritedOverrideCreated = true;
+					}
+					ICH->Modify();
+					Component->SetFlags(RF_Transactional);
+					Component->Modify();
+					Blueprint->Modify();
+				}
+
+				for (const FBulkComponentEdit& Edit : Cfg.Edits)
+				{
+					TSharedPtr<FJsonObject> EditResult;
+					const bool bApplied = ApplyBulkEdit(Component, Edit, Cfg.bDryRun, EditResult);
+					if (bApplied)
+					{
+						++EditsApplied;
+						bComponentApplied = true;
+						bAnyApplied = bAnyApplied || !Cfg.bDryRun;
+					}
+					EditResults.Add(MakeShared<FJsonValueObject>(EditResult));
+				}
+
+				ComponentResult->SetArrayField(TEXT("edits"), EditResults);
+				ComponentResult->SetStringField(TEXT("action"), bComponentApplied ? (Cfg.bDryRun ? TEXT("would_change") : TEXT("changed")) : TEXT("error"));
+				if (bComponentApplied)
+				{
+					++ComponentsChanged;
+					if (ExistingOverride)
+					{
+						++InheritedOverridesReused;
+					}
+					else
+					{
+						++InheritedOverridesCreated;
+					}
+				}
+				else
+				{
+					++ComponentsSkipped;
+				}
+				ComponentResults.Add(MakeShared<FJsonValueObject>(ComponentResult));
+			}
+		}
+
 		if (bAnyApplied)
 		{
-			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			if (bInheritedOverrideCreated)
+			{
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			}
+			else
+			{
+				FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			}
 			Blueprint->MarkPackageDirty();
 			if (Cfg.bDeferCompile)
 			{
@@ -845,6 +1034,9 @@ namespace
 		Result->SetNumberField(TEXT("changed"), ComponentsChanged);
 		Result->SetNumberField(TEXT("skipped"), ComponentsSkipped);
 		Result->SetNumberField(TEXT("edits_applied"), EditsApplied);
+		Result->SetNumberField(TEXT("inherited_overrides_created"), InheritedOverridesCreated);
+		Result->SetNumberField(TEXT("inherited_overrides_reused"), InheritedOverridesReused);
+		Result->SetStringField(TEXT("note"), FString::Printf(TEXT("Inherited component overrides: created %d, reused %d."), InheritedOverridesCreated, InheritedOverridesReused));
 		Result->SetArrayField(TEXT("components"), ComponentResults);
 		return Result;
 	}
@@ -915,7 +1107,7 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_bulk_set_component_property"), TEXT("Blueprint"), TEXT("Bulk-set generic component template properties on own SCS components in one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Supports dotted/indexed property_path (e.g. RelativeLocation.Z, BodyInstance.bSimulatePhysics, OverrideMaterials[0]) plus semantic setters for collision, StaticMesh, Material[i], PostProcessMaterial, and ChildActorClass."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Single Blueprint asset path. Provide this OR folder_path.")), FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder (e.g. /Game/Vehicles); applies to all Blueprints directly under it (non-recursive). Leading /All is stripped. Provide this OR bp_path.")), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Optional component class filter by class/superclass name, e.g. StaticMeshComponent. Empty = all component classes.")), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional component variable/template name. Empty = all matching own SCS components.")), FSmithUEToolParam(TEXT("edits"), TEXT("array"), TEXT("Required array of objects {property_path,value}. property_path supports dotted/indexed paths and semantic keys Collision.ObjectType, Collision.Response.<Channel>, Collision.Profile, StaticMesh, Material[i]/Materials[i], PostProcessMaterial, ChildActorClass."), true, FString(), TEXT("object")), FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview changes without modifying or compiling. Default false.")), FSmithUEToolParam(TEXT("defer_compile"), TEXT("boolean"), TEXT("Queue changed Blueprints and flush compilation once at end. Default false.")) }), &HandleBpBulkSetComponentProperty);
+		Registry.Register(FSmithUEToolSchema(TEXT("bp_bulk_set_component_property"), TEXT("Blueprint"), TEXT("Bulk-set generic component template properties on own SCS components in one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Supports dotted/indexed property_path (e.g. RelativeLocation.Z, BodyInstance.bSimulatePhysics, OverrideMaterials[0]) plus semantic setters for collision, StaticMesh, Material[i], PostProcessMaterial, and ChildActorClass. Set include_inherited=true to edit parent-Blueprint SCS inherited components as child ICH override templates."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Single Blueprint asset path. Provide this OR folder_path.")), FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder (e.g. /Game/Vehicles); applies to all Blueprints directly under it (non-recursive). Leading /All is stripped. Provide this OR bp_path.")), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Optional component class filter by class/superclass name, e.g. StaticMeshComponent. Empty = all component classes.")), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional component variable/template name. Empty = all matching own SCS components.")), FSmithUEToolParam(TEXT("edits"), TEXT("array"), TEXT("Required array of objects {property_path,value}. property_path supports dotted/indexed paths and semantic keys Collision.ObjectType, Collision.Response.<Channel>, Collision.Profile, StaticMesh, Material[i]/Materials[i], PostProcessMaterial, ChildActorClass."), true, FString(), TEXT("object")), FSmithUEToolParam(TEXT("include_inherited"), TEXT("boolean"), TEXT("Also target parent-Blueprint SCS inherited components by creating/reusing child InheritableComponentHandler override templates. Default false.")), FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview changes without modifying or compiling. Default false.")), FSmithUEToolParam(TEXT("defer_compile"), TEXT("boolean"), TEXT("Queue changed Blueprints and flush compilation once at end. Default false.")) }), &HandleBpBulkSetComponentProperty);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_collision"), TEXT("Blueprint"), TEXT("Bulk-set collision (object type + per-channel responses) on StaticMeshComponent templates inside one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Switches the component to a Custom profile, then applies object type and responses via proper engine setters. Skips components whose StaticMesh has no collision geometry unless disabled."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Single Blueprint asset path. Provide this OR folder_path.")), FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder (e.g. /Game/MyVehicles); applies to all Blueprints directly under it (non-recursive). Provide this OR bp_path.")), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional: only this StaticMeshComponent name. Empty = all StaticMeshComponents.")), FSmithUEToolParam(TEXT("object_type"), TEXT("string"), TEXT("Collision object type display name. Default 'Vehicle'.")), FSmithUEToolParam(TEXT("responses"), TEXT("object"), TEXT("Map of channel display name -> response, e.g. {\"Pawn\":\"Ignore\"}. Response is Ignore/Overlap/Block.")), FSmithUEToolParam(TEXT("skip_if_no_mesh_collision"), TEXT("boolean"), TEXT("Skip a component if its StaticMesh asset has no collision geometry. Default true.")), FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview changes without modifying. Default false.")) }), &HandleBpSetComponentCollision);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_override_function"), TEXT("Blueprint"), TEXT("Override a parent class function in a Blueprint (creates proper override graph with correct signature)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Parent function name to override"), true) }), &HandleBpOverrideFunction);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true) }), &HandleBpCompile);
@@ -2135,9 +2327,10 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBulkSetComponentProperty(co
 
 	FBulkApplyConfig Cfg;
 	Cfg.ComponentClassFilter = ComponentClass;
-	Cfg.ComponentFilter = Component;
-	Params->TryGetBoolField(TEXT("dry_run"), Cfg.bDryRun);
-	Params->TryGetBoolField(TEXT("defer_compile"), Cfg.bDeferCompile);
+		Cfg.ComponentFilter = Component;
+		Params->TryGetBoolField(TEXT("dry_run"), Cfg.bDryRun);
+		Params->TryGetBoolField(TEXT("defer_compile"), Cfg.bDeferCompile);
+		Params->TryGetBoolField(TEXT("include_inherited"), Cfg.bIncludeInherited);
 
 	for (const TSharedPtr<FJsonValue>& EditValue : *EditValues)
 	{
@@ -2211,8 +2404,9 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBulkSetComponentProperty(co
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetBoolField(TEXT("dry_run"), Cfg.bDryRun);
-	Data->SetBoolField(TEXT("defer_compile"), Cfg.bDeferCompile);
+		Data->SetBoolField(TEXT("dry_run"), Cfg.bDryRun);
+		Data->SetBoolField(TEXT("defer_compile"), Cfg.bDeferCompile);
+		Data->SetBoolField(TEXT("include_inherited"), Cfg.bIncludeInherited);
 	Data->SetNumberField(TEXT("blueprint_count"), BpPaths.Num());
 	Data->SetNumberField(TEXT("total_blueprints_changed"), TotalBlueprintsChanged);
 	Data->SetNumberField(TEXT("total_components_changed"), TotalComponentsChanged);
