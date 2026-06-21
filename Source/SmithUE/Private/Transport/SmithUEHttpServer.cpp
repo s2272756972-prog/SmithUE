@@ -328,6 +328,14 @@ void USmithUEHttpServer::StartServer()
 
 	ListenerSocket = NewListenerSocket;
 	bIsRunning = true;
+
+	// Cache plugin version on the game thread (IPluginManager is game-thread only).
+	// Immutable after this point — the /ready handler reads it from the worker thread.
+	if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
+	{
+		PluginVersion = Plugin->GetDescriptor().VersionName;
+	}
+
 	if (!IsRooted())
 	{
 		AddToRoot();
@@ -431,11 +439,13 @@ void USmithUEHttpServer::EnsurePortFileWritten(bool bForce)
 		return; // File exists and we're not forced to re-write
 	}
 
-	// Resolve plugin version from descriptor
-	FString PluginVersion = TEXT("unknown");
-	if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
+	// Resolve plugin version into the cached member on first use (game-thread only)
+	if (PluginVersion.IsEmpty() || PluginVersion == TEXT("unknown"))
 	{
-		PluginVersion = Plugin->GetDescriptor().VersionName;
+		if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SmithUE")))
+		{
+			PluginVersion = Plugin->GetDescriptor().VersionName;
+		}
 	}
 
 	// Project file path — normalise to forward slashes for JSON

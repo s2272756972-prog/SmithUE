@@ -36,6 +36,10 @@ public:
 	/** Set to true on the GameThread once AssetRegistry finishes loading. Safe to read from any thread. */
 	FThreadSafeBool bIsReady;
 
+	/** Plugin version cached at StartServer (game thread, IPluginManager-only).
+	 *  Immutable after init — safe to read from the HTTP worker thread. */
+	FString PluginVersion = TEXT("unknown");
+
 private:
 	TSharedPtr<FSocket> ListenerSocket;
 	FSmithUEHttpServerRunnable* Runnable;

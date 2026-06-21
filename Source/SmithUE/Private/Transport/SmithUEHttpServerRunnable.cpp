@@ -440,7 +440,10 @@ namespace SmithUEHttpServer::Private
 				return Result;
 			}
 
-			Result.Body = TEXT("{\"ready\":true,\"version\":\"unknown\",\"pie_active\":false}");
+			const FString Version = InServer ? InServer->PluginVersion : TEXT("unknown");
+			Result.Body = FString::Printf(
+				TEXT("{\"ready\":true,\"version\":\"%s\",\"pie_active\":false}"),
+				*Version);
 			return Result;
 		}
 
