@@ -26,6 +26,8 @@ SmithUE UE5 插件  (C++, HTTP Server, 工具注册表)
 | 小写 + 下划线 | `create_render_target` |
 | create 必须有对应的 read | `create_curve` ↔ `read_curve` |
 
+> 详细命名规范(参数规范字典、待修正的不一致、为路由而写的 description)见 [NAMING.md](NAMING.md)。
+
 ## 3. Schema 与响应约定
 
 ### 注册 Schema
