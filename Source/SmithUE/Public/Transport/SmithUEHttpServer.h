@@ -36,6 +36,10 @@ public:
 	/** Set to true on the GameThread once AssetRegistry finishes loading. Safe to read from any thread. */
 	FThreadSafeBool bIsReady;
 
+	/** True while a PIE session is active. Updated on the GameThread via PIE delegates,
+	 *  read from the HTTP worker thread in the /ready handler. */
+	FThreadSafeBool bPIEActive;
+
 	/** Plugin version cached at StartServer (game thread, IPluginManager-only).
 	 *  Immutable after init — safe to read from the HTTP worker thread. */
 	FString PluginVersion = TEXT("unknown");
@@ -54,4 +58,8 @@ private:
 
 	/** Portfile heartbeat — re-writes the portfile if it disappears externally. */
 	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
+
+	/** Handles for the PIE begin/end delegates that drive bPIEActive. */
+	FDelegateHandle PIEBeginHandle;
+	FDelegateHandle PIEEndHandle;
 };

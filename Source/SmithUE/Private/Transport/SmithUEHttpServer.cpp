@@ -2,6 +2,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Containers/Ticker.h"
+#include "Editor.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
@@ -336,6 +337,24 @@ void USmithUEHttpServer::StartServer()
 		PluginVersion = Plugin->GetDescriptor().VersionName;
 	}
 
+	// Track PIE state on the game thread so the worker-thread /ready handler can
+	// report pie_active without touching GEditor/UObjects.
+	bPIEActive = (GEditor != nullptr && GEditor->PlayWorld != nullptr);
+	if (!PIEBeginHandle.IsValid())
+	{
+		PIEBeginHandle = FEditorDelegates::BeginPIE.AddLambda([this](const bool /*bIsSimulating*/)
+		{
+			bPIEActive = true;
+		});
+	}
+	if (!PIEEndHandle.IsValid())
+	{
+		PIEEndHandle = FEditorDelegates::EndPIE.AddLambda([this](const bool /*bIsSimulating*/)
+		{
+			bPIEActive = false;
+		});
+	}
+
 	if (!IsRooted())
 	{
 		AddToRoot();
@@ -496,6 +515,19 @@ void USmithUEHttpServer::StopServer()
 		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 		HeartbeatTickerHandle.Reset();
 	}
+
+	// Unregister PIE delegates that drive bPIEActive.
+	if (PIEBeginHandle.IsValid())
+	{
+		FEditorDelegates::BeginPIE.Remove(PIEBeginHandle);
+		PIEBeginHandle.Reset();
+	}
+	if (PIEEndHandle.IsValid())
+	{
+		FEditorDelegates::EndPIE.Remove(PIEEndHandle);
+		PIEEndHandle.Reset();
+	}
+	bPIEActive = false;
 
 	// Wait for in-flight workers to complete before removing discovery state or
 	// destroying the runnable/server objects captured by worker lambdas.
