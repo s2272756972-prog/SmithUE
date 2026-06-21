@@ -32,6 +32,7 @@ public class SmithUE : ModuleRules
 				"SlateCore",
 				"Projects",
 				"AssetRegistry",
+				"PhysicsCore",
 				"LevelEditor",
 				"Sockets",
 				"Networking",

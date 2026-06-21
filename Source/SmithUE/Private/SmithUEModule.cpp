@@ -6,6 +6,7 @@
 #include "Utils/SmithUEUpdateChecker.h"
 
 #include "Commands/SmithUEAssetCommands.h"
+#include "Commands/SmithUEAssetFactoryCommands.h"
 #include "Commands/SmithUEBlueprintCommands.h"
 #include "Commands/SmithUEEditorCommands.h"
 #include "Commands/SmithUEInteractionCommands.h"
@@ -54,6 +55,7 @@ void FSmithUEModule::StartupModule()
 	FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEMaterialFunctionCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEAssetFactoryCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEEditorCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEInteractionCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry::Get());
