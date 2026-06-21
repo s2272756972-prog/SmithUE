@@ -1,6 +1,6 @@
 # SmithUE Tool Reference
 
-> **197 tools across 20 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **199 tools across 20 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
@@ -9,8 +9,8 @@
 | Blueprint | 31 | BP creation, nodes, functions, variables, components, DSL compiler, health check, diff, trace |
 | Material | 20 | Materials, material instances, MPC, material functions |
 | Niagara | 17 | Particle system creation, emitters, modules, renderers, parameters |
+| Asset | 14 | Asset CRUD, browser operations, content browser selection/navigation, AI texture generation |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
-| Asset | 12 | Asset CRUD, browser operations, AI texture generation |
 | Level | 11 | Level management, landscape, foliage |
 | PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
 | Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
@@ -112,6 +112,25 @@
 | `niagara_delete_module` | Delete a module from an emitter's stack by function name |
 | `niagara_delete_emitter` | Delete an emitter from a Niagara system by name |
 
+## Asset
+
+| Tool | Description |
+|------|-------------|
+| `list_assets` | List assets in a content folder |
+| `find_asset` | Find assets by name wildcard pattern |
+| `get_asset_info` | Get detailed information about a specific asset |
+| `rename_asset` | Rename an asset to a new name within the same folder |
+| `duplicate_asset` | Duplicate an asset to a new path |
+| `delete_asset` | Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway. |
+| `move_asset` | Move an asset to a new path (different folder and/or name). Updates all references. |
+| `asset_editor` | Open or close asset editors. Supports single or multiple assets. |
+| `save_asset` | Save a single asset to disk |
+| `save_all_dirty` | Save all dirty (modified) assets to disk |
+| `get_content_browser_selection` | Get the folders and assets currently selected in the Content Browser |
+| `sync_content_browser` | Navigate the Content Browser to a folder or asset and bring it to focus |
+| `generate_texture` | Generate a texture from a text prompt using an external AI image generation API. Returns a task_id for polling. |
+| `check_generation_task` | Check the status of an asynchronous texture generation task |
+
 ## Analysis
 
 | Tool | Description |
@@ -129,23 +148,6 @@
 | `asset_get_dependency_tree` | Get a recursive asset dependency tree |
 | `asset_validate` | Validate that asset paths resolve and load without errors |
 | `map_check_errors` | Run map check on the active editor world |
-
-## Asset
-
-| Tool | Description |
-|------|-------------|
-| `list_assets` | List assets in a content folder |
-| `find_asset` | Find assets by name wildcard pattern |
-| `get_asset_info` | Get detailed information about a specific asset |
-| `rename_asset` | Rename an asset to a new name within the same folder |
-| `duplicate_asset` | Duplicate an asset to a new path |
-| `delete_asset` | Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway. |
-| `move_asset` | Move an asset to a new path (different folder and/or name). Updates all references. |
-| `asset_editor` | Open or close asset editors. Supports single or multiple assets. |
-| `save_asset` | Save a single asset to disk |
-| `save_all_dirty` | Save all dirty (modified) assets to disk |
-| `generate_texture` | Generate a texture from a text prompt using an external AI image generation API. Returns a task_id for polling. |
-| `check_generation_task` | Check the status of an asynchronous texture generation task |
 
 ## Level
 
