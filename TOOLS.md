@@ -1,344 +1,328 @@
 # SmithUE Tool Reference
 
-> **182 tools across 19 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **197 tools across 20 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
 | Domain | Tools | Description |
 |--------|-------|-------------|
-| System | 5 | Server connectivity, session management |
-| Project | 4 | Project info, plugins, folders, source files |
+| Blueprint | 31 | BP creation, nodes, functions, variables, components, DSL compiler, health check, diff, trace |
 | Material | 20 | Materials, material instances, MPC, material functions |
-| Asset | 12 | Asset CRUD, browser operations, AI texture generation |
-| Editor | 8 | Actor spawning, properties, post-process, project settings, graph layout |
-| Interaction | 7 | Console/editor commands, undo/redo, key simulation, key bindings |
-| Blueprint | 21 | BP creation, nodes, functions, variables, components, DSL compiler, breakpoints, navigation |
-| Viewport | 6 | Camera control, screenshots, actor selection, view modes |
-| Observation | 7 | Panels, editor state, actor properties, world outline |
-| Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
 | Niagara | 17 | Particle system creation, emitters, modules, renderers, parameters |
+| Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
+| Asset | 12 | Asset CRUD, browser operations, AI texture generation |
 | Level | 11 | Level management, landscape, foliage |
-| Data | 6 | DataTables, UserDefinedStructs, UserDefinedEnums |
-| Sequencer | 6 | LevelSequence creation, bindings, tracks, keyframes |
-| Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
 | PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
+| Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
+| Editor | 9 | Actor spawning, properties, post-process, project settings, graph layout |
+| Observation | 8 | Panels, editor state, actor properties, world outline |
 | Animation | 7 | AnimMontage, AnimBlueprint, sections, notifies |
+| Interaction | 7 | Console/editor commands, undo/redo, key simulation, key bindings |
+| Sequencer | 6 | LevelSequence creation, bindings, tracks, keyframes |
+| Viewport | 6 | Camera control, screenshots, actor selection, view modes |
 | Input | 6 | Enhanced Input: InputAction, InputMappingContext |
+| Data | 6 | DataTables, UserDefinedStructs, UserDefinedEnums |
+| System | 5 | Server connectivity, metrics, protocol info |
+| Project | 4 | Project info, plugins, folders, source files |
 | UMG | 4 | Widget Blueprint creation, widget tree, properties |
+| Debug | 3 | Blueprint breakpoints: set, clear, list |
 
 ---
 
-## System (5 tools)
+## Blueprint
+
+| Tool | Description |
+|------|-------------|
+| `bp_create` | Create a new Blueprint asset |
+| `bp_add_function` | Add a function graph to a Blueprint |
+| `bp_create_node` | Create a node inside a Blueprint graph |
+| `bp_connect_pins` | Connect two Blueprint node pins |
+| `bp_disconnect_pins` | Disconnect two Blueprint node pins |
+| `bp_set_pin_default` | Set a Blueprint node pin default value |
+| `bp_delete_node` | Delete a node from a Blueprint graph |
+| `bp_add_variable` | Add a Blueprint member variable |
+| `bp_remove_variable` | Remove a Blueprint member variable by name |
+| `bp_add_component` | Add a component to a Blueprint SCS |
+| `bp_remove_component` | Remove a component from a Blueprint SCS |
+| `bp_set_component_property` | Set a property on a Blueprint SCS or inherited component template |
+| `bp_override_function` | Override a parent class function in a Blueprint (creates proper override graph with correct signature) |
+| `bp_compile` | Compile a Blueprint |
+| `bp_reparent` | Change the parent class of a Blueprint |
+| `bp_copy_graph` | Copy a function graph from one Blueprint to another |
+| `bp_remove_graph` | Remove a function graph or ubergraph page from a Blueprint |
+| `bp_rename_graph` | Rename a function graph or event graph page in a Blueprint (updates all internal call references) |
+| `bp_fixup_self_references` | Fix variable/function/component nodes to reference Self instead of a foreign parent class (use after bp_copy_graph across different class hierarchies) |
+| `bp_fix_local_var_scope` | Fix stale local variable scope references in all function graphs (use after bp_rename_graph or bp_copy_graph when local variables show scope mismatch warnings) |
+| `bp_get_summary` | Get Blueprint metadata summary |
+| `bp_get_component_details` | Read component template properties (mobility, transform, absolute flags, physics, collision, visibility, mesh, materials) for a Blueprint. Covers own SCS + inherited components. Closes the gap where bp_get_summary only shows hierarchy. |
+| `bp_get_class_members` | Get a Blueprint or native class's members grouped by owning class, with inheritance-chain attribution and token-conscious output controls. |
+| `bp_health_check` | Aggregate Blueprint health diagnostics: compile messages, unconnected required pins, broken references, and orphan impure nodes. |
+| `bp_diff` | Structural comparison of two Blueprints across parent, components, variables, functions, interfaces, and overrides. |
+| `bp_trace_value` | Trace data-flow upstream or downstream from a node data pin in a Blueprint graph. |
+| `bp_describe_graph` | Describe nodes in a Blueprint graph. mode: full(default)/compact/summary/node_pins/exec_chain. exec_chain mode follows exec pins from entry points (add entry_node param to start from specific N-id). |
+| `bp_compile_code` | Compile Blueprint DSL into a Blueprint |
+| `bp_batch_op` | Execute multiple Blueprint atomic operations in a single transaction. Supports op aliases (connect/link/disconnect/unlink/set_default/set_value/create/add_node/delete/remove_node). Max 50 ops. Partial commit: failures do not stop subsequent ops. |
+| `bp_validate_code` | Validate Blueprint DSL syntax without compiling |
+| `bp_search` | Search nodes in a Blueprint by name (substring, case-insensitive) and/or type (exact class name). Searches all graphs (event, function, macro). |
+
+## Material
+
+| Tool | Description |
+|------|-------------|
+| `create_material` | Create a new UMaterial asset |
+| `get_material_info` | Get information about a material including its expressions |
+| `add_material_expression` | Add a material expression node to a material |
+| `connect_material_pins` | Connect material expression pins. Use dest_expression_index=-1 to connect to material output. |
+| `compile_material` | Trigger material recompilation |
+| `set_material_property` | Set material properties (domain, blend_mode, shading_model, two_sided, blendable_location) |
+| `set_expression_property` | Set properties on a material expression node (e.g. Custom HLSL code, constant values, texture) |
+| `create_mpc` | Create a new Material Parameter Collection asset |
+| `add_mpc_scalar` | Add a scalar parameter to a Material Parameter Collection |
+| `add_mpc_vector` | Add a vector parameter to a Material Parameter Collection |
+| `set_mpc_value` | Update the default value of a scalar parameter in a Material Parameter Collection |
+| `create_material_instance` | Create a new MaterialInstanceConstant asset from a parent material |
+| `set_mi_scalar` | Set a scalar parameter override on a MaterialInstanceConstant |
+| `set_mi_vector` | Set a vector parameter override on a MaterialInstanceConstant |
+| `get_mi_info` | Get info about a MaterialInstanceConstant: parent name and all scalar/vector parameter overrides |
+| `create_material_function` | Create a new UMaterialFunction asset |
+| `get_material_function_info` | Get information about a material function including its expressions |
+| `add_mf_expression` | Add a material expression node to a material function |
+| `connect_mf_pins` | Connect material expression pins within a material function |
+| `set_mf_expression_property` | Set properties on a material function expression node (Custom HLSL code, constant values, function input/output names, etc.) |
+
+## Niagara
+
+| Tool | Description |
+|------|-------------|
+| `create_niagara_system` | Create a new UNiagaraSystem asset at the given content path |
+| `niagara_get_system_info` | Get information about a Niagara system including emitters and user parameters |
+| `niagara_add_emitter` | Add a new emitter to an existing Niagara system |
+| `niagara_add_emitter_from_template` | Add an emitter to a Niagara system from a specified template asset path |
+| `niagara_set_emitter_property` | Set a property on a Niagara emitter. Supported properties: enabled (bool), local_space (bool) |
+| `niagara_compile` | Compile a Niagara system and save the asset |
+| `niagara_add_renderer` | Add a renderer (sprite, mesh, or ribbon) to an emitter |
+| `niagara_set_renderer_property` | Set a property on a Niagara renderer. Supports Material (asset path), and UObject properties via reflection |
+| `niagara_add_module` | Add a Niagara module script to an emitter's stack group |
+| `niagara_set_module_input` | Set an input value on a Niagara module |
+| `niagara_add_user_parameter` | Add a user parameter to a Niagara system for Blueprint interaction |
+| `spawn_niagara_actor` | Spawn a NiagaraActor in the level with a given system asset, auto-activated |
+| `niagara_static_switch` | Get or set static switch values on a Niagara module. Omit switch_name to list all switches. |
+| `niagara_search_assets` | Search Niagara assets (systems and emitters) in the project via AssetRegistry |
+| `niagara_delete_renderer` | Delete a renderer from an emitter by index |
+| `niagara_delete_module` | Delete a module from an emitter's stack by function name |
+| `niagara_delete_emitter` | Delete an emitter from a Niagara system by name |
+
+## Analysis
+
+| Tool | Description |
+|------|-------------|
+| `analyze_module` | Analyze C++ source files in a directory and return a nomnoml relationship diagram (class inheritance, composition, includes). Supports large projects via directory-level scoping. |
+| `analyze_dependencies` | Analyze Build.cs module dependencies and return a nomnoml dependency graph. |
+| `analyze_blueprints` | Analyze Blueprint assets in a Content Browser path and return a nomnoml inheritance + component composition diagram. |
+| `bp_get_compile_errors` | Compile a Blueprint and return compiler errors and warnings |
+| `bp_refresh_all_nodes` | Reconstruct all nodes in a Blueprint |
+| `bp_find_unconnected_pins` | Find unconnected Blueprint exec and data pins |
+| `bp_fix_broken_references` | Remove non-existent Blueprint variable references and refresh nodes |
+| `asset_get_references` | Get package dependencies for an asset |
+| `asset_get_referencers` | Get packages that reference an asset |
+| `asset_find_orphans` | Find assets in a folder with no referencers |
+| `asset_get_dependency_tree` | Get a recursive asset dependency tree |
+| `asset_validate` | Validate that asset paths resolve and load without errors |
+| `map_check_errors` | Run map check on the active editor world |
+
+## Asset
+
+| Tool | Description |
+|------|-------------|
+| `list_assets` | List assets in a content folder |
+| `find_asset` | Find assets by name wildcard pattern |
+| `get_asset_info` | Get detailed information about a specific asset |
+| `rename_asset` | Rename an asset to a new name within the same folder |
+| `duplicate_asset` | Duplicate an asset to a new path |
+| `delete_asset` | Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway. |
+| `move_asset` | Move an asset to a new path (different folder and/or name). Updates all references. |
+| `asset_editor` | Open or close asset editors. Supports single or multiple assets. |
+| `save_asset` | Save a single asset to disk |
+| `save_all_dirty` | Save all dirty (modified) assets to disk |
+| `generate_texture` | Generate a texture from a text prompt using an external AI image generation API. Returns a task_id for polling. |
+| `check_generation_task` | Check the status of an asynchronous texture generation task |
+
+## Level
+
+| Tool | Description |
+|------|-------------|
+| `level_new` | Create a new level/map in the editor |
+| `level_open` | Open an existing level/map |
+| `level_save` | Save the current level |
+| `level_get_info` | Get current level name, path, and actor count |
+| `level_create_landscape` | Create a landscape in the current level |
+| `level_set_landscape_material` | Set the material on all landscape proxies in the current level |
+| `level_get_landscape_info` | Get landscape proxy component counts, dimensions, and materials |
+| `level_add_foliage_type` | Add a static mesh foliage type to the current level |
+| `level_paint_foliage` | Add foliage instances at explicit locations |
+| `level_erase_foliage` | Remove foliage instances within a radius |
+| `level_get_foliage_stats` | Count foliage types and instances in the current level |
+
+## PIE
+
+| Tool | Description |
+|------|-------------|
+| `pie_teleport_actor` | Teleport an actor in the PIE world |
+| `pie_spawn_actor` | Spawn an actor in the PIE world |
+| `pie_destroy_actor` | Destroy an actor in the PIE world |
+| `pie_get_property` | Get a property value from an actor via reflection |
+| `pie_set_property` | Set a property value on an actor via reflection |
+| `pie_get_game_state` | Get PIE running state, player location, actor count |
+| `pie_list_actors` | List actors in the PIE world |
+| `pie_console_command` | Execute a console command in the PIE world |
+| `pie_start` | Start a Play-In-Editor session |
+| `pie_stop` | Stop the active PIE session |
+| `pie_is_active` | Check whether a PIE session is currently active and return its mode |
+
+## Environment
+
+| Tool | Description |
+|------|-------------|
+| `env_set_post_process` | Configure post-process volume settings |
+| `env_set_fog` | Set exponential height fog properties |
+| `env_set_sky_atmosphere` | Set sky atmosphere parameters |
+| `env_set_light` | Set directional/point/spot light properties |
+| `env_set_physics` | Enable/disable physics simulation on an actor |
+| `env_set_collision` | Set collision profile/preset on an actor |
+| `env_get_physics_info` | Get physics/collision info for an actor |
+| `env_create_spline` | Create a spline actor with specified points |
+| `env_add_spline_point` | Add a point to an existing spline actor |
+| `env_set_spline_point` | Modify a spline point position and tangent |
+| `env_get_spline_info` | Get spline point count, length, closed state |
+
+## Editor
+
+| Tool | Description |
+|------|-------------|
+| `spawn_actor` | Spawn an actor in the current level |
+| `get_all_actors` | List all actors in the current level |
+| `set_actor_property` | Set a reflected property on an actor by label |
+| `delete_actor` | Delete an actor from the current level by label |
+| `add_postprocess_material` | Add a material to a PostProcessVolume's blendable list |
+| `open_map` | Open a map asset in the Unreal Editor |
+| `get_project_setting` | Read a project configuration setting from INI file |
+| `set_project_setting` | Write a project configuration setting to INI file and flush to disk |
+| `auto_layout_graph` | Auto-arrange nodes in any graph (Material, Blueprint, Niagara). Closes editor if open to prevent save conflicts. |
+
+## Observation
+
+| Tool | Description |
+|------|-------------|
+| `list_panels` | Lists all known editor panels and whether each is currently open. |
+| `open_panel` | Opens (or focuses) a named editor panel tab. |
+| `close_panel` | Closes a named editor panel tab if it is open. |
+| `get_editor_state` | Returns a snapshot of the current editor state: PIE, simulation, selection, level, viewport. |
+| `get_actor_property` | Read a reflected property value from an actor by label |
+| `get_selected_actors` | Returns the currently selected actors with label, class, location, and rotation. |
+| `get_world_outline` | Returns all actors in the level with parent-child hierarchy and folder info. |
+| `take_blueprint_preview_screenshot` | Open a Blueprint in its editor and capture the SCS (Components) viewport as a PNG screenshot |
+
+## Animation
+
+| Tool | Description |
+|------|-------------|
+| `anim_create_montage` | Create an AnimMontage asset for a skeleton |
+| `anim_read_montage` | Read montage sections, notifies, and slots |
+| `anim_add_section` | Add a section to an AnimMontage |
+| `anim_link_sections` | Link two montage sections for sequential playback |
+| `anim_add_notify` | Add an anim notify at a time |
+| `anim_create_blueprint` | Create an AnimBlueprint asset |
+| `anim_read_blueprint` | Read AnimBP info (state machines, variables, skeleton) |
+
+## Interaction
+
+| Tool | Description |
+|------|-------------|
+| `execute_editor_command` | Execute a named Unreal Editor command by name via GEditor->Exec |
+| `execute_console_command` | Execute a UE console command in the current editor world |
+| `list_editor_commands` | List all registered FUICommandInfo entries across all input binding contexts |
+| `undo` | Undo the last editor transaction |
+| `redo` | Redo the last undone editor transaction |
+| `simulate_key` | Simulate a key press (command-lookup first, Slate fallback) |
+| `list_key_bindings` | List all registered key bindings (commands with active key chords) |
+
+## Sequencer
+
+| Tool | Description |
+|------|-------------|
+| `seq_create` | Create a LevelSequence asset |
+| `seq_read` | Read sequence info (bindings, tracks, range) |
+| `seq_add_binding` | Bind a world actor to a sequence |
+| `seq_add_track` | Add a track to a binding (Transform, Float, Bool) |
+| `seq_add_keyframe` | Add a keyframe to a track at a given time |
+| `seq_set_range` | Set the playback range in frames |
+
+## Viewport
+
+| Tool | Description |
+|------|-------------|
+| `set_viewport_camera` | Set the active editor viewport camera location, rotation, and/or FOV |
+| `focus_on_actor` | Move the active viewport camera to focus on a named actor |
+| `set_viewport_mode` | Set the active viewport projection mode (perspective or orthographic) |
+| `get_viewport_info_detailed` | Get detailed active viewport info: camera, size, realtime state, view mode |
+| `select_actors` | Select one or more actors in the level by label |
+| `take_viewport_screenshot` | Capture the active editor viewport as a PNG file |
+
+## Input
+
+| Tool | Description |
+|------|-------------|
+| `input_create_action` | Create an Enhanced Input Action asset (IA_*) |
+| `input_create_mapping_context` | Create an Input Mapping Context asset (IMC_*) with optional key mappings |
+| `input_find_actions` | Find InputAction and InputMappingContext assets in the project |
+| `input_read_mapping_context` | Read an InputMappingContext to see its action-key mappings and modifiers |
+| `input_edit_mapping_context` | Edit an InputMappingContext: add or remove key mappings |
+| `input_delete_asset` | Delete an InputAction or InputMappingContext asset by name or path |
+
+## Data
+
+| Tool | Description |
+|------|-------------|
+| `data_create_table` | Create a DataTable asset using a row struct |
+| `data_add_row` | Add or replace a row in a DataTable from JSON object data |
+| `data_read_table` | Read all rows or a single row from a DataTable |
+| `data_import_json` | Import DataTable rows from a JSON string |
+| `data_create_struct` | Create a UserDefinedStruct asset with typed fields |
+| `data_create_enum` | Create a UserDefinedEnum asset with entries |
+
+## System
 
 | Tool | Description |
 |------|-------------|
 | `ping` | Test server connectivity |
 | `list_tools` | List all available commands with schemas |
 | `get_protocol_info` | Get protocol and transport information |
-| `register_session` | Register an MCP client session |
-| `unregister_session` | Unregister an MCP client session |
+| `system_get_metrics` | Return current session command metrics |
+| `system_reset_metrics` | Reset all command metrics counters |
 
-## Project (4 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_project_info` | Project name, version, directories |
-| `list_plugins` | All plugins with status |
-| `create_folder` | Create a content browser folder |
-| `get_source_files` | List source files by extension |
-
-## Material (20 tools)
+## Project
 
 | Tool | Description |
 |------|-------------|
-| `create_material` | Create a new UMaterial asset |
-| `get_material_info` | Get material expressions and structure |
-| `add_material_expression` | Add expression node to material |
-| `connect_material_pins` | Connect expression pins |
-| `compile_material` | Trigger material recompilation |
-| `set_material_property` | Set domain, blend mode, shading model |
-| `set_expression_property` | Set node properties (Custom HLSL, constants, textures) |
-| `create_mpc` | Create Material Parameter Collection |
-| `add_mpc_scalar` | Add scalar parameter to MPC |
-| `add_mpc_vector` | Add vector parameter to MPC |
-| `set_mpc_value` | Update MPC parameter default value |
-| `create_material_instance` | Create MaterialInstanceConstant |
-| `set_mi_scalar` | Set scalar parameter on MI |
-| `set_mi_vector` | Set vector parameter on MI |
-| `get_mi_info` | Get MI parent and parameter overrides |
-| `create_material_function` | Create UMaterialFunction |
-| `get_material_function_info` | Get material function expressions |
-| `add_mf_expression` | Add expression to material function |
-| `connect_mf_pins` | Connect pins within material function |
-| `set_mf_expression_property` | Set properties on MF expression node |
+| `get_project_info` | Returns basic project and engine information (name, version, directories). |
+| `list_plugins` | Lists all discovered plugins with name, version, enabled status, description, and category. |
+| `create_folder` | Creates a content browser folder (e.g. /Game/MyFolder/SubFolder). |
+| `get_source_files` | Lists source files recursively under a given path, filtered by extension. |
 
-## Asset (12 tools)
+## UMG
 
 | Tool | Description |
 |------|-------------|
-| `list_assets` | List assets in a content folder |
-| `find_asset` | Find assets by name pattern |
-| `get_asset_info` | Get detailed asset information |
-| `rename_asset` | Rename an asset |
-| `duplicate_asset` | Duplicate an asset |
-| `delete_asset` | Delete an asset (with reference check) |
-| `move_asset` | Move asset to new path |
-| `asset_editor` | Open/close asset editors |
-| `save_asset` | Save a single asset |
-| `save_all_dirty` | Save all modified assets |
-| `generate_texture` | Generate texture via AI API |
-| `check_generation_task` | Check async texture generation status |
-
-## Editor (8 tools)
-
-| Tool | Description |
-|------|-------------|
-| `spawn_actor` | Spawn an actor in the level |
-| `get_all_actors` | List all actors in the level |
-| `set_actor_property` | Set a reflected property on an actor |
-| `delete_actor` | Delete an actor by label |
-| `add_postprocess_material` | Add material to PostProcessVolume |
-| `get_project_setting` | Read project INI config value |
-| `set_project_setting` | Write project INI config value |
-| `auto_layout_graph` | Auto-arrange graph nodes |
-
-## Interaction (7 tools)
-
-| Tool | Description |
-|------|-------------|
-| `execute_editor_command` | Execute named editor command |
-| `execute_console_command` | Execute UE console command |
-| `list_editor_commands` | List all registered FUICommandInfo |
-| `undo` | Undo last editor transaction |
-| `redo` | Redo last undone transaction |
-| `simulate_key` | Simulate a key press |
-| `list_key_bindings` | List registered key bindings |
-
-## Blueprint (21 tools)
-
-| Tool | Description |
-|------|-------------|
-| `bp_create` | Create a new Blueprint asset (supports C++ class, BP class name `_C`, or BP path `/Game/...` as parent) |
-| `bp_add_function` | Add a function graph |
-| `bp_create_node` | Create a node in a graph (supports `Class::Function` shorthand for CallFunction nodes) |
-| `bp_connect_pins` | Connect two node pins |
-| `bp_set_pin_default` | Set pin default value |
-| `bp_delete_node` | Delete a node from a graph |
-| `bp_add_variable` | Add a member variable |
-| `bp_add_component` | Add a component to SCS (supports `parent` param for hierarchy attachment) |
-| `bp_remove_component` | Remove a component from SCS (children reparented automatically) |
-| `bp_set_component_property` | Set property on component template |
-| `bp_override_function` | Override a parent class function |
-| `bp_compile` | Compile a Blueprint |
-| `bp_get_summary` | Get Blueprint metadata (includes component hierarchy with parent/children) |
-| `bp_describe_graph` | Describe nodes and connections (output includes `node_guid` for use with breakpoint/focus commands) |
-| `bp_compile_code` | Compile Blueprint DSL |
-| `bp_batch_op` | Execute multiple atomic operations |
-| `bp_validate_code` | Validate Blueprint DSL syntax |
-| `bp_set_breakpoint` | Set/enable a breakpoint on a node by NodeGuid; `focus=true` (default) opens the editor and jumps to the node |
-| `bp_clear_breakpoint` | Remove a breakpoint from a node (same params as set, incl. `focus`); returns `was_present` |
-| `bp_list_breakpoints` | List all breakpoints in a Blueprint with graph, node_id, node_title, and enabled state |
-| `bp_focus_node` | Open Blueprint editor and jump to a node, function graph, or variable (exactly one of `node_id`+`graph_name`, `function_name`, `variable_name`) |
-
-## Viewport (6 tools)
-
-| Tool | Description |
-|------|-------------|
-| `set_viewport_camera` | Set viewport camera transform/FOV |
-| `focus_on_actor` | Focus viewport on an actor |
-| `set_viewport_mode` | Set projection mode |
-| `get_viewport_info_detailed` | Get full viewport state |
-| `select_actors` | Select actors by label |
-| `take_viewport_screenshot` | Capture viewport as PNG |
-
-## Observation (7 tools)
-
-| Tool | Description |
-|------|-------------|
-| `list_panels` | List all editor panels |
-| `open_panel` | Open/focus a panel tab |
-| `close_panel` | Close a panel tab |
-| `get_editor_state` | Snapshot of editor state |
-| `get_actor_property` | Read reflected property from actor |
-| `get_selected_actors` | Get currently selected actors |
-| `get_world_outline` | All actors with hierarchy and folders |
-
-## Analysis (13 tools)
-
-| Tool | Description |
-|------|-------------|
-| `analyze_module` | C++ source → nomnoml class diagram |
-| `analyze_dependencies` | Build.cs → nomnoml dependency graph |
-| `analyze_blueprints` | BP assets → nomnoml inheritance diagram |
-| `bp_get_compile_errors` | Compile BP and return errors |
-| `bp_refresh_all_nodes` | Reconstruct all nodes in BP |
-| `bp_find_unconnected_pins` | Find unconnected exec/data pins |
-| `bp_fix_broken_references` | Remove broken variable references |
-| `asset_get_references` | Get asset's package dependencies |
-| `asset_get_referencers` | Get packages that reference an asset |
-| `asset_find_orphans` | Find unreferenced assets |
-| `asset_get_dependency_tree` | Recursive dependency tree |
-| `asset_validate` | Validate asset paths load correctly |
-| `map_check_errors` | Run map check on active world |
-
-## Niagara (17 tools)
-
-| Tool | Description |
-|------|-------------|
-| `create_niagara_system` | Create a NiagaraSystem asset |
-| `niagara_get_system_info` | Get system emitters and parameters |
-| `niagara_add_emitter` | Add empty emitter |
-| `niagara_add_emitter_from_template` | Add emitter from template asset |
-| `niagara_set_emitter_property` | Set emitter enabled/local_space |
-| `niagara_compile` | Compile and save system |
-| `niagara_add_renderer` | Add sprite/mesh/ribbon renderer |
-| `niagara_set_renderer_property` | Set renderer material/properties |
-| `niagara_add_module` | Add module to stack group |
-| `niagara_set_module_input` | Set module input value |
-| `niagara_add_user_parameter` | Add user parameter for BP interaction |
-| `spawn_niagara_actor` | Spawn NiagaraActor in level |
-| `niagara_static_switch` | Get/set static switch values |
-| `niagara_search_assets` | Search Niagara assets by pattern |
-| `niagara_delete_renderer` | Delete renderer by index |
-| `niagara_delete_module` | Delete module from stack |
-| `niagara_delete_emitter` | Delete emitter from system |
-
-## Level (11 tools)
-
-| Tool | Description |
-|------|-------------|
-| `level_new` | Create a new level |
-| `level_open` | Open an existing level |
-| `level_save` | Save the current level |
-| `level_get_info` | Get level name, path, actor count |
-| `level_create_landscape` | Create a landscape |
-| `level_set_landscape_material` | Set landscape material |
-| `level_get_landscape_info` | Get landscape dimensions and materials |
-| `level_add_foliage_type` | Add a foliage type |
-| `level_paint_foliage` | Add foliage instances at locations |
-| `level_erase_foliage` | Remove foliage within radius |
-| `level_get_foliage_stats` | Count foliage types and instances |
-
-## Data (6 tools)
-
-| Tool | Description |
-|------|-------------|
-| `data_create_table` | Create a DataTable asset |
-| `data_add_row` | Add/replace a row in DataTable |
-| `data_read_table` | Read rows from DataTable |
-| `data_import_json` | Import DataTable from JSON string |
-| `data_create_struct` | Create UserDefinedStruct with fields |
-| `data_create_enum` | Create UserDefinedEnum with entries |
-
-## Sequencer (6 tools)
-
-| Tool | Description |
-|------|-------------|
-| `seq_create` | Create a LevelSequence asset |
-| `seq_read` | Read sequence bindings and tracks |
-| `seq_add_binding` | Bind a world actor to sequence |
-| `seq_add_track` | Add track to a binding |
-| `seq_add_keyframe` | Add keyframe at time |
-| `seq_set_range` | Set playback range in frames |
-
-## Environment (11 tools)
-
-| Tool | Description |
-|------|-------------|
-| `env_set_post_process` | Configure post-process settings |
-| `env_set_fog` | Set exponential height fog |
-| `env_set_sky_atmosphere` | Set sky atmosphere parameters |
-| `env_set_light` | Set light properties |
-| `env_set_physics` | Enable/disable physics on actor |
-| `env_set_collision` | Set collision profile |
-| `env_get_physics_info` | Get physics/collision info |
-| `env_create_spline` | Create spline with points |
-| `env_add_spline_point` | Add point to spline |
-| `env_set_spline_point` | Modify spline point position |
-| `env_get_spline_info` | Get spline info |
-
-## PIE (11 tools)
-
-| Tool | Description |
-|------|-------------|
-| `pie_start` | Start Play-In-Editor session |
-| `pie_stop` | Stop active PIE session |
-| `pie_is_active` | Check if PIE is running and its mode |
-| `pie_teleport_actor` | Teleport actor in PIE world |
-| `pie_spawn_actor` | Spawn actor in PIE world |
-| `pie_destroy_actor` | Destroy actor in PIE world |
-| `pie_get_property` | Get property from PIE actor |
-| `pie_set_property` | Set property on PIE actor |
-| `pie_get_game_state` | Get PIE state, player location |
-| `pie_list_actors` | List actors in PIE world |
-| `pie_console_command` | Execute console command in PIE |
-
-## Animation (7 tools)
-
-| Tool | Description |
-|------|-------------|
-| `anim_create_montage` | Create AnimMontage for skeleton |
-| `anim_read_montage` | Read montage sections/notifies |
-| `anim_add_section` | Add section to montage |
-| `anim_link_sections` | Link sections for playback |
-| `anim_add_notify` | Add anim notify at time |
-| `anim_create_blueprint` | Create AnimBlueprint |
-| `anim_read_blueprint` | Read AnimBP info |
-
-## Input (6 tools)
-
-| Tool | Description |
-|------|-------------|
-| `input_create_action` | Create Enhanced Input Action (IA_*) |
-| `input_create_mapping_context` | Create Input Mapping Context (IMC_*) |
-| `input_find_actions` | Find InputAction/IMC assets |
-| `input_read_mapping_context` | Read IMC mappings and modifiers |
-| `input_edit_mapping_context` | Add/remove key mappings in IMC |
-| `input_delete_asset` | Delete InputAction or IMC asset |
-
-## UMG (4 tools)
-
-| Tool | Description |
-|------|-------------|
-| `create_widget_blueprint` | Create a new Widget Blueprint asset (supports custom root widget class) |
+| `create_widget_blueprint` | Create a new Widget Blueprint asset |
 | `read_widget_blueprint` | Read the widget tree of an existing Widget Blueprint |
-| `add_widget` | Add a widget to a Widget Blueprint's widget tree (supports parent hierarchy) |
+| `add_widget` | Add a widget to an existing Widget Blueprint's widget tree |
 | `set_widget_property` | Set a property on a widget inside a Widget Blueprint via reflection |
 
----
+## Debug
 
-## Changelog
+| Tool | Description |
+|------|-------------|
+| `bp_set_breakpoint` | Set/enable a breakpoint on a Blueprint node by NodeGuid. |
+| `bp_clear_breakpoint` | Remove a breakpoint from a Blueprint node by NodeGuid. |
+| `bp_list_breakpoints` | List all breakpoints in a Blueprint with their graph, node GUID, title, and enabled state. |
 
-### v0.3.0 — UMG, MCP 增强, Schema 修正
-
-**新增域 / New domains:**
-- UMG (4 tools) — Widget Blueprint 创建、控件树读取、添加控件、设置属性
-
-**MCP 增强 / MCP enhancements:**
-- 异步失败回退与透明轮询 (async failover with transparent polling)
-- 每任务超时 + 异步任务 GC (per-task timeout + async task GC)
-- 转发 default/itemsType + 搜索限制 (forward default/itemsType + search limit)
-
-**Schema 修正 / Schema fixes:**
-- `enum` JSON key 重命名为 `allowedValues` (与 MCP 协议对齐)
-- 空 `default` 和 `itemsType` 字段不再序列化 (guard empty values)
-
-### v0.2.0 — Domain Expansion
-
-**Added domains (8 new):**
-- Level (11 tools) — Landscape, foliage, level management
-- Analysis (13 tools) — Source analysis, dependency graphs, BP diagnostics
-- Data (6 tools) — DataTables, UserDefinedStructs, UserDefinedEnums
-- Sequencer (6 tools) — LevelSequence creation and keyframing
-- Environment (11 tools) — Post-process, fog, sky, lights, physics, splines
-- PIE (11 tools) — Play-In-Editor runtime control and inspection
-- Animation (7 tools) — AnimMontage and AnimBlueprint management
-- Input (6 tools) — Enhanced Input system asset creation
-
-**Removed duplicates:**
-- `get_viewport_info` (Editor) → use `get_viewport_info_detailed` (Viewport)
-- `get_level_info` (Observation) → use `level_get_info` (Level)
-- `get_project_settings` (Project) → use `get_project_setting` (Editor)
-
-**Reorganized:**
-- Moved PIE control tools (`start_pie`, `stop_pie`, `is_pie_active`) from Interaction → PIE domain (renamed to `pie_start`, `pie_stop`, `pie_is_active`)
