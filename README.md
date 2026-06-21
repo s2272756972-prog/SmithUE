@@ -98,13 +98,13 @@ SmithUE UE5 插件 (HTTP :动态端口)
 
 ## 命令参考
 
-SmithUE 提供了分布在 **23 个功能域** 中的 **209 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **23 个功能域** 中的 **211 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 
 | 功能域 | 工具数 | 描述 |
 |---|---|---|
-| Blueprint | 31 | 蓝图创建、节点、函数、变量、组件、DSL 编译器、健康检查、diff |
+| Blueprint | 33 | 蓝图创建、节点、函数、变量、组件、DSL 编译器、健康检查、diff |
 | Material | 20 | 材质、材质实例、MPC、材质函数 |
 | Niagara | 17 | 粒子系统创建、发射器、模块、渲染器 |
 | Analysis | 13 | 源码分析、依赖图、蓝图诊断、资产校验 |

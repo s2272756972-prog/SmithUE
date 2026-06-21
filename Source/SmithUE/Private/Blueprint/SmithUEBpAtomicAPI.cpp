@@ -4,11 +4,18 @@
 
 #include "SmithUEModule.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/ARFilter.h"
+#include "AssetRegistry/AssetData.h"
 #include "Blueprint/SmithUEBpAtomicAPIHelpers.h"
 #include "Components/ActorComponent.h"
 #include "Components/ChildActorComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/PostProcessComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/CollisionProfile.h"
+#include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "GameFramework/MovementComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Materials/MaterialInterface.h"
@@ -37,18 +44,811 @@
 #include "K2Node_VariableSet.h"
 #include "InputAction.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "BlueprintCompilationManager.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
+#include "Misc/OutputDeviceNull.h"
 #include "ScopedTransaction.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "ToolRegistry/SmithUEToolSchema.h"
 #include "UObject/Package.h"
+#include "UObject/UnrealType.h"
 #include "Utils/SmithUECommonUtils.h"
 
 using namespace SmithUEBpAtomicAPIHelpers;
 
 namespace
 {
+	// --- Collision helpers (bp_set_component_collision) -----------------------
+
+	// Resolve a collision channel by its editor display name. Handles project
+	// renames in DefaultEngine.ini, e.g. "Vehicle" -> ECC_Vehicle, "Pawn" -> ECC_Pawn.
+	bool ResolveCollisionChannelByName(const FString& DisplayName, ECollisionChannel& OutChannel)
+	{
+		UCollisionProfile* Profile = UCollisionProfile::Get();
+		if (!Profile)
+		{
+			return false;
+		}
+		const FName Target(*DisplayName);
+		for (int32 Index = 0; Index < ECC_MAX; ++Index)
+		{
+			if (Profile->ReturnChannelNameFromContainerIndex(Index) == Target)
+			{
+				OutChannel = static_cast<ECollisionChannel>(Index);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	FString CollisionChannelDisplayName(ECollisionChannel Channel)
+	{
+		if (UCollisionProfile* Profile = UCollisionProfile::Get())
+		{
+			const FName Name = Profile->ReturnChannelNameFromContainerIndex(static_cast<int32>(Channel));
+			if (Name != NAME_None)
+			{
+				return Name.ToString();
+			}
+		}
+		return FString::Printf(TEXT("Channel_%d"), static_cast<int32>(Channel));
+	}
+
+	bool ParseCollisionResponse(const FString& In, ECollisionResponse& Out)
+	{
+		if (In.Equals(TEXT("Ignore"), ESearchCase::IgnoreCase)) { Out = ECR_Ignore; return true; }
+		if (In.Equals(TEXT("Overlap"), ESearchCase::IgnoreCase)) { Out = ECR_Overlap; return true; }
+		if (In.Equals(TEXT("Block"), ESearchCase::IgnoreCase)) { Out = ECR_Block; return true; }
+		return false;
+	}
+
+	const TCHAR* CollisionResponseName(ECollisionResponse Response)
+	{
+		switch (Response)
+		{
+			case ECR_Ignore:  return TEXT("Ignore");
+			case ECR_Overlap: return TEXT("Overlap");
+			case ECR_Block:   return TEXT("Block");
+			default:          return TEXT("Unknown");
+		}
+	}
+
+	// True if the component's StaticMesh asset has simple collision geometry.
+	bool StaticMeshHasCollisionGeometry(UStaticMeshComponent* SMC)
+	{
+		if (!SMC)
+		{
+			return false;
+		}
+		UStaticMesh* Mesh = SMC->GetStaticMesh();
+		if (!Mesh)
+		{
+			return false;
+		}
+		UBodySetup* BodySetup = Mesh->GetBodySetup();
+		if (!BodySetup)
+		{
+			return false;
+		}
+		// Match the engine's own definition (UStaticMeshComponent): a mesh "has collision"
+		// if it has simple primitives OR uses its render geometry as collision.
+		return BodySetup->AggGeom.GetElementCount() > 0
+			|| BodySetup->GetCollisionTraceFlag() == CTF_UseComplexAsSimple;
+	}
+
+	struct FCollisionApplyConfig
+	{
+		ECollisionChannel ObjectType = ECC_WorldStatic;
+		bool bSetObjectType = false;
+		TArray<TPair<ECollisionChannel, ECollisionResponse>> Responses;
+		FString ComponentFilter;          // empty = all StaticMeshComponents
+		bool bSkipIfNoMeshCollision = true;
+		bool bDryRun = false;
+	};
+
+	// Apply collision settings to all matching StaticMeshComponent templates in one Blueprint.
+	TSharedPtr<FJsonObject> ProcessBlueprintCollision(const FString& BpPath, const FCollisionApplyConfig& Cfg, int32& OutChangedTotal)
+	{
+		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetStringField(TEXT("bp_path"), BpPath);
+		TArray<TSharedPtr<FJsonValue>> CompResults;
+
+		UBlueprint* Blueprint = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+		if (!Blueprint || !Blueprint->SimpleConstructionScript)
+		{
+			Result->SetStringField(TEXT("status"), TEXT("error"));
+			Result->SetStringField(TEXT("error"), TEXT("Invalid blueprint or no SimpleConstructionScript"));
+			Result->SetArrayField(TEXT("components"), CompResults);
+			return Result;
+		}
+
+		bool bAnyChanged = false;
+		int32 LocalChanged = 0;
+		int32 LocalSkipped = 0;
+
+		for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (!Node || !Node->ComponentTemplate)
+			{
+				continue;
+			}
+			UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Node->ComponentTemplate);
+			if (!SMC)
+			{
+				continue;
+			}
+			const FString CompName = Node->GetVariableName().ToString();
+			if (!Cfg.ComponentFilter.IsEmpty() && !CompName.Equals(Cfg.ComponentFilter, ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+
+			TSharedPtr<FJsonObject> C = MakeShared<FJsonObject>();
+			C->SetStringField(TEXT("name"), CompName);
+
+			if (Cfg.bSkipIfNoMeshCollision && !StaticMeshHasCollisionGeometry(SMC))
+			{
+				C->SetStringField(TEXT("action"), TEXT("skipped"));
+				C->SetStringField(TEXT("reason"), SMC->GetStaticMesh() ? TEXT("static mesh has no collision geometry") : TEXT("no static mesh assigned"));
+				++LocalSkipped;
+				CompResults.Add(MakeShared<FJsonValueObject>(C));
+				continue;
+			}
+
+			C->SetStringField(TEXT("before_profile"), SMC->GetCollisionProfileName().ToString());
+			C->SetStringField(TEXT("before_object_type"), CollisionChannelDisplayName(SMC->GetCollisionObjectType()));
+
+			if (!Cfg.bDryRun)
+			{
+				Blueprint->Modify();
+				SMC->Modify();
+				// Switch to a Custom profile so per-channel/object-type overrides are not reset by a preset.
+				SMC->SetCollisionProfileName(UCollisionProfile::CustomCollisionProfileName);
+				if (Cfg.bSetObjectType)
+				{
+					SMC->SetCollisionObjectType(Cfg.ObjectType);
+				}
+				for (const TPair<ECollisionChannel, ECollisionResponse>& Resp : Cfg.Responses)
+				{
+					SMC->SetCollisionResponseToChannel(Resp.Key, Resp.Value);
+				}
+				bAnyChanged = true;
+			}
+			++LocalChanged;
+
+			C->SetStringField(TEXT("action"), Cfg.bDryRun ? TEXT("would_change") : TEXT("changed"));
+			C->SetStringField(TEXT("after_object_type"), CollisionChannelDisplayName(SMC->GetCollisionObjectType()));
+			TArray<TSharedPtr<FJsonValue>> RespArr;
+			for (const TPair<ECollisionChannel, ECollisionResponse>& Resp : Cfg.Responses)
+			{
+				TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+				R->SetStringField(TEXT("channel"), CollisionChannelDisplayName(Resp.Key));
+				R->SetStringField(TEXT("response"), CollisionResponseName(Cfg.bDryRun ? Resp.Value : SMC->GetCollisionResponseToChannel(Resp.Key)));
+				RespArr.Add(MakeShared<FJsonValueObject>(R));
+			}
+			C->SetArrayField(TEXT("responses"), RespArr);
+			CompResults.Add(MakeShared<FJsonValueObject>(C));
+		}
+
+		if (bAnyChanged)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			Blueprint->MarkPackageDirty();
+			TArray<FString> CompileErrors;
+			FSmithUEBpAtomicAPI::CompileBlueprint(Blueprint, CompileErrors, true);
+		}
+
+		OutChangedTotal += LocalChanged;
+		Result->SetStringField(TEXT("status"), TEXT("success"));
+		Result->SetNumberField(TEXT("changed"), LocalChanged);
+		Result->SetNumberField(TEXT("skipped"), LocalSkipped);
+		Result->SetArrayField(TEXT("components"), CompResults);
+		return Result;
+	}
+
+	struct FBulkComponentEdit
+	{
+		FString PropertyPath;
+		TSharedPtr<FJsonValue> Value;
+	};
+
+	struct FResolvedPropertyPath
+	{
+		FEditPropertyChain Chain;
+		FProperty* TopLevelProperty = nullptr;
+		FProperty* LeafProperty = nullptr;
+		void* LeafValuePtr = nullptr;
+	};
+
+	struct FPropertyPathSegment
+	{
+		FString Name;
+		bool bHasIndex = false;
+		int32 Index = INDEX_NONE;
+	};
+
+	struct FBulkApplyConfig
+	{
+		FString ComponentClassFilter;
+		FString ComponentFilter;
+		TArray<FBulkComponentEdit> Edits;
+		bool bDryRun = false;
+		bool bDeferCompile = false;
+	};
+
+	FString JsonValueToImportText(const TSharedPtr<FJsonValue>& JsonValue)
+	{
+		if (!JsonValue.IsValid() || JsonValue->IsNull())
+		{
+			return TEXT("None");
+		}
+		switch (JsonValue->Type)
+		{
+			case EJson::String: return JsonValue->AsString();
+			case EJson::Number: return FString::SanitizeFloat(JsonValue->AsNumber());
+			case EJson::Boolean: return JsonValue->AsBool() ? TEXT("True") : TEXT("False");
+			default: break;
+		}
+		FString Serialized;
+		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Serialized);
+		FJsonSerializer::Serialize(JsonValue.ToSharedRef(), TEXT(""), Writer);
+		return Serialized;
+	}
+
+	bool ParsePropertyPathSegment(const FString& SegmentText, FPropertyPathSegment& OutSegment, FString& OutError)
+	{
+		OutSegment = FPropertyPathSegment();
+		const int32 BracketStart = SegmentText.Find(TEXT("["), ESearchCase::CaseSensitive);
+		if (BracketStart == INDEX_NONE)
+		{
+			OutSegment.Name = SegmentText;
+		}
+		else
+		{
+			if (!SegmentText.EndsWith(TEXT("]")))
+			{
+				OutError = FString::Printf(TEXT("Invalid indexed property segment '%s'"), *SegmentText);
+				return false;
+			}
+			OutSegment.Name = SegmentText.Left(BracketStart);
+			const FString IndexText = SegmentText.Mid(BracketStart + 1, SegmentText.Len() - BracketStart - 2);
+			if (!LexTryParseString(OutSegment.Index, *IndexText) || OutSegment.Index < 0)
+			{
+				OutError = FString::Printf(TEXT("Invalid array index in property segment '%s'"), *SegmentText);
+				return false;
+			}
+			OutSegment.bHasIndex = true;
+		}
+
+		if (OutSegment.Name.IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("Invalid empty property segment in '%s'"), *SegmentText);
+			return false;
+		}
+		return true;
+	}
+
+	bool ResolveComponentPropertyPath(UActorComponent* Component, const FString& PropertyPath, FResolvedPropertyPath& OutResolved, FString& OutError)
+	{
+		if (!Component)
+		{
+			OutError = TEXT("Invalid component");
+			return false;
+		}
+
+		TArray<FString> SegmentTexts;
+		PropertyPath.ParseIntoArray(SegmentTexts, TEXT("."), true);
+		if (SegmentTexts.Num() == 0)
+		{
+			OutError = TEXT("property_path is empty");
+			return false;
+		}
+
+		void* Container = Component;
+		UStruct* CurrentStruct = Component->GetClass();
+		for (int32 SegmentIndex = 0; SegmentIndex < SegmentTexts.Num(); ++SegmentIndex)
+		{
+			FPropertyPathSegment Segment;
+			if (!ParsePropertyPathSegment(SegmentTexts[SegmentIndex], Segment, OutError))
+			{
+				return false;
+			}
+
+			if (!CurrentStruct)
+			{
+				OutError = FString::Printf(TEXT("Cannot resolve '%s' after non-struct property in '%s'"), *Segment.Name, *PropertyPath);
+				return false;
+			}
+
+			FProperty* Property = CurrentStruct->FindPropertyByName(FName(*Segment.Name));
+			if (!Property)
+			{
+				OutError = FString::Printf(TEXT("Property not found: '%s' on '%s'"), *Segment.Name, *CurrentStruct->GetName());
+				return false;
+			}
+
+			OutResolved.Chain.AddTail(Property);
+			if (!OutResolved.TopLevelProperty)
+			{
+				OutResolved.TopLevelProperty = Property;
+			}
+			OutResolved.LeafProperty = Property;
+			void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+
+			if (FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+			{
+				if (!Segment.bHasIndex)
+				{
+					if (SegmentIndex != SegmentTexts.Num() - 1)
+					{
+						OutError = FString::Printf(TEXT("Array property '%s' requires an index"), *Segment.Name);
+						return false;
+					}
+					OutResolved.LeafValuePtr = ValuePtr;
+					CurrentStruct = nullptr;
+					Container = ValuePtr;
+					continue;
+				}
+
+				FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
+				if (!ArrayHelper.IsValidIndex(Segment.Index))
+				{
+					OutError = FString::Printf(TEXT("Array index %d out of range for '%s' (num=%d)"), Segment.Index, *Segment.Name, ArrayHelper.Num());
+					return false;
+				}
+
+				void* ElementPtr = ArrayHelper.GetRawPtr(Segment.Index);
+				if (FStructProperty* InnerStructProperty = CastField<FStructProperty>(ArrayProperty->Inner))
+				{
+					OutResolved.Chain.AddTail(ArrayProperty->Inner);
+					OutResolved.LeafProperty = ArrayProperty->Inner;
+					OutResolved.LeafValuePtr = ElementPtr;
+					CurrentStruct = InnerStructProperty->Struct;
+					Container = ElementPtr;
+				}
+				else
+				{
+					OutResolved.Chain.AddTail(ArrayProperty->Inner);
+					OutResolved.LeafProperty = ArrayProperty->Inner;
+					OutResolved.LeafValuePtr = ElementPtr;
+					CurrentStruct = nullptr;
+					Container = ElementPtr;
+				}
+				continue;
+			}
+
+			if (Segment.bHasIndex)
+			{
+				OutError = FString::Printf(TEXT("Property '%s' is not an array"), *Segment.Name);
+				return false;
+			}
+
+			OutResolved.LeafValuePtr = ValuePtr;
+			if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+			{
+				CurrentStruct = StructProperty->Struct;
+				Container = ValuePtr;
+			}
+			else
+			{
+				CurrentStruct = nullptr;
+				Container = ValuePtr;
+			}
+		}
+
+		if (!OutResolved.TopLevelProperty || !OutResolved.LeafProperty || !OutResolved.LeafValuePtr)
+		{
+			OutError = FString::Printf(TEXT("Failed to resolve property_path '%s'"), *PropertyPath);
+			return false;
+		}
+		return true;
+	}
+
+	FString ExportPropertyValue(FProperty* Property, void* ValuePtr, UObject* Owner)
+	{
+		FString Value;
+		if (Property && ValuePtr)
+		{
+			Property->ExportTextItem_Direct(Value, ValuePtr, nullptr, Owner, PPF_None);
+		}
+		return Value;
+	}
+
+	bool ImportPropertyValueWithNotify(UObject* Object, FResolvedPropertyPath& Resolved, const FString& TextValue, FString& OutError)
+	{
+		if (!Object || !Resolved.TopLevelProperty || !Resolved.LeafProperty || !Resolved.LeafValuePtr)
+		{
+			OutError = TEXT("Invalid resolved property path");
+			return false;
+		}
+
+		Resolved.Chain.SetActivePropertyNode(Resolved.LeafProperty);
+		Resolved.Chain.SetActiveMemberPropertyNode(Resolved.TopLevelProperty);
+		Object->PreEditChange(Resolved.Chain);
+		FOutputDeviceNull ErrorDevice;
+		const TCHAR* ImportResult = Resolved.LeafProperty->ImportText_Direct(*TextValue, Resolved.LeafValuePtr, Object, PPF_None, &ErrorDevice);
+		if (!ImportResult)
+		{
+			OutError = FString::Printf(TEXT("Failed to import value '%s' into property '%s'"), *TextValue, *Resolved.LeafProperty->GetName());
+			return false;
+		}
+		FPropertyChangedEvent Event(Resolved.LeafProperty, EPropertyChangeType::ValueSet, MakeArrayView((const UObject* const*)&Object, 1));
+		Event.SetActiveMemberProperty(Resolved.TopLevelProperty);
+		FPropertyChangedChainEvent ChainEvent(Resolved.Chain, Event);
+		Object->PostEditChangeChainProperty(ChainEvent);
+		return true;
+	}
+
+	bool ComponentMatchesClassFilter(UActorComponent* Component, const FString& ComponentClassFilter)
+	{
+		if (!Component || ComponentClassFilter.IsEmpty())
+		{
+			return true;
+		}
+		for (UClass* Class = Component->GetClass(); Class; Class = Class->GetSuperClass())
+		{
+			if (Class->GetName().Equals(ComponentClassFilter, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool ParseMaterialPropertyPath(const FString& PropertyPath, int32& OutIndex)
+	{
+		FPropertyPathSegment Segment;
+		FString Error;
+		if (!ParsePropertyPathSegment(PropertyPath, Segment, Error) || !Segment.bHasIndex)
+		{
+			return false;
+		}
+		if (!Segment.Name.Equals(TEXT("Material"), ESearchCase::IgnoreCase) && !Segment.Name.Equals(TEXT("Materials"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+		OutIndex = Segment.Index;
+		return true;
+	}
+
+	UClass* ResolveChildActorClassForBulk(const FString& ClassPath)
+	{
+		UClass* ChildClass = nullptr;
+		UBlueprint* ChildBP = LoadObject<UBlueprint>(nullptr, *NormalizeObjectPath(ClassPath));
+		if (ChildBP)
+		{
+			if (ChildBP->Status == BS_Dirty || ChildBP->Status == BS_Unknown)
+			{
+				FKismetEditorUtilities::CompileBlueprint(ChildBP, EBlueprintCompileOptions::SkipGarbageCollection);
+			}
+			ChildClass = ChildBP->GeneratedClass;
+		}
+		else
+		{
+			ChildClass = LoadObject<UClass>(nullptr, *NormalizeObjectPath(ClassPath));
+			if (!ChildClass)
+			{
+				FString GeneratedClassPath = ClassPath;
+				if (!GeneratedClassPath.EndsWith(TEXT("_C")))
+				{
+					GeneratedClassPath += TEXT("_C");
+				}
+				ChildClass = LoadObject<UClass>(nullptr, *NormalizeObjectPath(GeneratedClassPath));
+			}
+		}
+		return ChildClass;
+	}
+
+	bool ApplyBulkSpecialEdit(UActorComponent* Component, const FString& PropertyPath, const FString& TextValue, bool bDryRun, FString& InOutBefore, FString& InOutAfter, FString& OutError, bool& bOutHandled)
+	{
+		bOutHandled = true;
+		if (PropertyPath.Equals(TEXT("Collision.ObjectType"), ESearchCase::IgnoreCase))
+		{
+			UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component);
+			if (!Primitive) { OutError = TEXT("Collision.ObjectType requires a PrimitiveComponent"); return false; }
+			InOutBefore = CollisionChannelDisplayName(Primitive->GetCollisionObjectType());
+			ECollisionChannel Channel = ECC_WorldStatic;
+			if (!ResolveCollisionChannelByName(TextValue, Channel)) { OutError = FString::Printf(TEXT("Unknown collision object type '%s'"), *TextValue); return false; }
+			if (!bDryRun)
+			{
+				Primitive->SetCollisionProfileName(UCollisionProfile::CustomCollisionProfileName);
+				Primitive->SetCollisionObjectType(Channel);
+			}
+			InOutAfter = bDryRun ? TextValue : CollisionChannelDisplayName(Primitive->GetCollisionObjectType());
+			return true;
+		}
+
+		if (PropertyPath.StartsWith(TEXT("Collision.Response."), ESearchCase::IgnoreCase))
+		{
+			UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component);
+			if (!Primitive) { OutError = TEXT("Collision.Response requires a PrimitiveComponent"); return false; }
+			const FString ChannelName = PropertyPath.Mid(19);
+			ECollisionChannel Channel = ECC_WorldStatic;
+			if (!ResolveCollisionChannelByName(ChannelName, Channel)) { OutError = FString::Printf(TEXT("Unknown response channel '%s'"), *ChannelName); return false; }
+			ECollisionResponse Response = ECR_Block;
+			if (!ParseCollisionResponse(TextValue, Response)) { OutError = FString::Printf(TEXT("Invalid response '%s' for channel '%s' (use Ignore/Overlap/Block)"), *TextValue, *ChannelName); return false; }
+			InOutBefore = CollisionResponseName(Primitive->GetCollisionResponseToChannel(Channel));
+			if (!bDryRun)
+			{
+				Primitive->SetCollisionProfileName(UCollisionProfile::CustomCollisionProfileName);
+				Primitive->SetCollisionResponseToChannel(Channel, Response);
+			}
+			InOutAfter = bDryRun ? CollisionResponseName(Response) : CollisionResponseName(Primitive->GetCollisionResponseToChannel(Channel));
+			return true;
+		}
+
+		if (PropertyPath.Equals(TEXT("Collision.Profile"), ESearchCase::IgnoreCase))
+		{
+			UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component);
+			if (!Primitive) { OutError = TEXT("Collision.Profile requires a PrimitiveComponent"); return false; }
+			InOutBefore = Primitive->GetCollisionProfileName().ToString();
+			if (!bDryRun)
+			{
+				Primitive->SetCollisionProfileName(FName(*TextValue));
+			}
+			InOutAfter = bDryRun ? TextValue : Primitive->GetCollisionProfileName().ToString();
+			return true;
+		}
+
+		if (PropertyPath.StartsWith(TEXT("Collision.Preset."), ESearchCase::IgnoreCase))
+		{
+			UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component);
+			if (!Primitive) { OutError = TEXT("Collision.Preset requires a PrimitiveComponent"); return false; }
+			const FString ObjectType = PropertyPath.Mid(17);
+			InOutBefore = CollisionChannelDisplayName(Primitive->GetCollisionObjectType());
+			ECollisionChannel Channel = ECC_WorldStatic;
+			if (!ResolveCollisionChannelByName(ObjectType, Channel)) { OutError = FString::Printf(TEXT("Unknown collision preset object type '%s'"), *ObjectType); return false; }
+			if (!bDryRun)
+			{
+				Primitive->SetCollisionProfileName(UCollisionProfile::CustomCollisionProfileName);
+				Primitive->SetCollisionObjectType(Channel);
+			}
+			InOutAfter = bDryRun ? ObjectType : CollisionChannelDisplayName(Primitive->GetCollisionObjectType());
+			return true;
+		}
+
+		if (PropertyPath.Equals(TEXT("StaticMesh"), ESearchCase::IgnoreCase))
+		{
+			UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component);
+			if (!StaticMeshComponent) { OutError = TEXT("StaticMesh requires a StaticMeshComponent"); return false; }
+			InOutBefore = StaticMeshComponent->GetStaticMesh() ? StaticMeshComponent->GetStaticMesh()->GetPathName() : TEXT("None");
+			UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *NormalizeObjectPath(TextValue));
+			if (!Mesh) { OutError = FString::Printf(TEXT("StaticMesh not found: '%s'"), *TextValue); return false; }
+			if (!bDryRun)
+			{
+				StaticMeshComponent->SetStaticMesh(Mesh);
+			}
+			InOutAfter = bDryRun ? Mesh->GetPathName() : (StaticMeshComponent->GetStaticMesh() ? StaticMeshComponent->GetStaticMesh()->GetPathName() : TEXT("None"));
+			return true;
+		}
+
+		int32 MaterialIndex = INDEX_NONE;
+		if (ParseMaterialPropertyPath(PropertyPath, MaterialIndex))
+		{
+			UMeshComponent* MeshComponent = Cast<UMeshComponent>(Component);
+			if (!MeshComponent) { OutError = TEXT("Material[i] requires a MeshComponent"); return false; }
+			InOutBefore = MeshComponent->GetMaterial(MaterialIndex) ? MeshComponent->GetMaterial(MaterialIndex)->GetPathName() : TEXT("None");
+			UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *NormalizeObjectPath(TextValue));
+			if (!Material) { OutError = FString::Printf(TEXT("Material not found: '%s'"), *TextValue); return false; }
+			if (!bDryRun)
+			{
+				MeshComponent->SetMaterial(MaterialIndex, Material);
+			}
+			InOutAfter = bDryRun ? Material->GetPathName() : (MeshComponent->GetMaterial(MaterialIndex) ? MeshComponent->GetMaterial(MaterialIndex)->GetPathName() : TEXT("None"));
+			return true;
+		}
+
+		if (PropertyPath.Equals(TEXT("PostProcessMaterial"), ESearchCase::IgnoreCase))
+		{
+			FPostProcessSettings* PPSettings = nullptr;
+			float* BlendWeightPtr = nullptr;
+			if (UCameraComponent* Camera = Cast<UCameraComponent>(Component))
+			{
+				PPSettings = &Camera->PostProcessSettings;
+				BlendWeightPtr = &Camera->PostProcessBlendWeight;
+			}
+			else if (UPostProcessComponent* PPComp = Cast<UPostProcessComponent>(Component))
+			{
+				PPSettings = &PPComp->Settings;
+				BlendWeightPtr = &PPComp->BlendWeight;
+			}
+			if (!PPSettings) { OutError = TEXT("PostProcessMaterial requires a CameraComponent or PostProcessComponent"); return false; }
+			UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *NormalizeObjectPath(TextValue));
+			if (!Material) { OutError = FString::Printf(TEXT("Material not found: '%s'"), *TextValue); return false; }
+			InOutBefore = FString::FromInt(PPSettings->WeightedBlendables.Array.Num());
+			if (!bDryRun)
+			{
+				FWeightedBlendable Entry;
+				Entry.Weight = 1.0f;
+				Entry.Object = Material;
+				PPSettings->WeightedBlendables.Array.Add(Entry);
+				if (BlendWeightPtr) { *BlendWeightPtr = 1.0f; }
+			}
+			InOutAfter = FString::FromInt(bDryRun ? PPSettings->WeightedBlendables.Array.Num() + 1 : PPSettings->WeightedBlendables.Array.Num());
+			return true;
+		}
+
+		if (PropertyPath.Equals(TEXT("ChildActorClass"), ESearchCase::IgnoreCase))
+		{
+			UChildActorComponent* ChildActorComp = Cast<UChildActorComponent>(Component);
+			if (!ChildActorComp) { OutError = FString::Printf(TEXT("Component '%s' is not a ChildActorComponent"), *Component->GetName()); return false; }
+			UClass* ChildClass = ResolveChildActorClassForBulk(TextValue);
+			if (!ChildClass) { OutError = FString::Printf(TEXT("Failed to resolve ChildActorClass: '%s'"), *TextValue); return false; }
+			InOutBefore = ChildActorComp->GetChildActorClass() ? ChildActorComp->GetChildActorClass()->GetPathName() : TEXT("None");
+			if (!bDryRun)
+			{
+				ChildActorComp->SetChildActorClass(ChildClass);
+			}
+			InOutAfter = bDryRun ? ChildClass->GetPathName() : (ChildActorComp->GetChildActorClass() ? ChildActorComp->GetChildActorClass()->GetPathName() : TEXT("None"));
+			return true;
+		}
+
+		bOutHandled = false;
+		return false;
+	}
+
+	bool ApplyBulkEdit(UActorComponent* Component, const FBulkComponentEdit& Edit, bool bDryRun, TSharedPtr<FJsonObject>& OutEditResult)
+	{
+		OutEditResult = MakeShared<FJsonObject>();
+		OutEditResult->SetStringField(TEXT("property_path"), Edit.PropertyPath);
+		const FString TextValue = JsonValueToImportText(Edit.Value);
+
+		FString Before;
+		FString After;
+		FString Error;
+		bool bHandled = false;
+		if (ApplyBulkSpecialEdit(Component, Edit.PropertyPath, TextValue, bDryRun, Before, After, Error, bHandled))
+		{
+			OutEditResult->SetStringField(TEXT("before"), Before);
+			OutEditResult->SetStringField(TEXT("after"), After);
+			OutEditResult->SetStringField(TEXT("action"), bDryRun ? TEXT("would_change") : TEXT("applied"));
+			OutEditResult->SetBoolField(TEXT("changed"), Before != After);
+			return true;
+		}
+
+		if (bHandled)
+		{
+			OutEditResult->SetStringField(TEXT("action"), TEXT("error"));
+			OutEditResult->SetStringField(TEXT("error"), Error);
+			return false;
+		}
+
+		FResolvedPropertyPath Resolved;
+		if (!ResolveComponentPropertyPath(Component, Edit.PropertyPath, Resolved, Error))
+		{
+			OutEditResult->SetStringField(TEXT("action"), TEXT("error"));
+			OutEditResult->SetStringField(TEXT("error"), Error);
+			return false;
+		}
+
+		Before = ExportPropertyValue(Resolved.LeafProperty, Resolved.LeafValuePtr, Component);
+		if (!bDryRun)
+		{
+			if (!ImportPropertyValueWithNotify(Component, Resolved, TextValue, Error))
+			{
+				OutEditResult->SetStringField(TEXT("before"), Before);
+				OutEditResult->SetStringField(TEXT("action"), TEXT("error"));
+				OutEditResult->SetStringField(TEXT("error"), Error);
+				return false;
+			}
+		}
+		After = bDryRun ? TextValue : ExportPropertyValue(Resolved.LeafProperty, Resolved.LeafValuePtr, Component);
+
+		OutEditResult->SetStringField(TEXT("before"), Before);
+		OutEditResult->SetStringField(TEXT("after"), After);
+		OutEditResult->SetStringField(TEXT("action"), bDryRun ? TEXT("would_change") : TEXT("applied"));
+		OutEditResult->SetBoolField(TEXT("changed"), Before != After);
+		return true;
+	}
+
+	TSharedPtr<FJsonObject> ProcessBlueprintBulkComponentProperties(const FString& BpPath, const FBulkApplyConfig& Cfg, TArray<UBlueprint*>& OutDeferredCompileBlueprints, int32& OutTotalBlueprintsChanged, int32& OutTotalComponentsChanged, int32& OutTotalEditsApplied)
+	{
+		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetStringField(TEXT("bp_path"), BpPath);
+		TArray<TSharedPtr<FJsonValue>> ComponentResults;
+
+		UBlueprint* Blueprint = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+		if (!Blueprint || !Blueprint->SimpleConstructionScript)
+		{
+			Result->SetStringField(TEXT("status"), TEXT("error"));
+			Result->SetStringField(TEXT("error"), TEXT("Invalid blueprint or no SimpleConstructionScript"));
+			Result->SetNumberField(TEXT("changed"), 0);
+			Result->SetNumberField(TEXT("skipped"), 0);
+			Result->SetArrayField(TEXT("components"), ComponentResults);
+			return Result;
+		}
+
+		bool bAnyApplied = false;
+		int32 ComponentsChanged = 0;
+		int32 ComponentsSkipped = 0;
+		int32 EditsApplied = 0;
+		const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpBulkSetCompProp", "SmithUE: Bulk Set BP Component Properties"));
+
+		for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+		{
+			if (!Node || !Node->ComponentTemplate)
+			{
+				continue;
+			}
+			UActorComponent* Component = Node->ComponentTemplate;
+			const FString ComponentName = Node->GetVariableName().ToString();
+			if (!Cfg.ComponentFilter.IsEmpty() && !ComponentName.Equals(Cfg.ComponentFilter, ESearchCase::IgnoreCase) && !Component->GetName().Equals(Cfg.ComponentFilter, ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+			if (!ComponentMatchesClassFilter(Component, Cfg.ComponentClassFilter))
+			{
+				continue;
+			}
+
+			TSharedPtr<FJsonObject> ComponentResult = MakeShared<FJsonObject>();
+			ComponentResult->SetStringField(TEXT("name"), ComponentName);
+			ComponentResult->SetStringField(TEXT("class"), Component->GetClass()->GetName());
+			TArray<TSharedPtr<FJsonValue>> EditResults;
+			bool bComponentApplied = false;
+
+			for (const FBulkComponentEdit& Edit : Cfg.Edits)
+			{
+				if (!Cfg.bDryRun)
+				{
+					Blueprint->Modify();
+					Component->Modify();
+				}
+
+				TSharedPtr<FJsonObject> EditResult;
+				const bool bApplied = ApplyBulkEdit(Component, Edit, Cfg.bDryRun, EditResult);
+				if (bApplied)
+				{
+					++EditsApplied;
+					bComponentApplied = true;
+					bAnyApplied = bAnyApplied || !Cfg.bDryRun;
+				}
+				EditResults.Add(MakeShared<FJsonValueObject>(EditResult));
+			}
+
+			ComponentResult->SetArrayField(TEXT("edits"), EditResults);
+			ComponentResult->SetStringField(TEXT("action"), bComponentApplied ? (Cfg.bDryRun ? TEXT("would_change") : TEXT("changed")) : TEXT("error"));
+			if (bComponentApplied)
+			{
+				++ComponentsChanged;
+			}
+			else
+			{
+				++ComponentsSkipped;
+			}
+			ComponentResults.Add(MakeShared<FJsonValueObject>(ComponentResult));
+		}
+
+		if (bAnyApplied)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			Blueprint->MarkPackageDirty();
+			if (Cfg.bDeferCompile)
+			{
+				FBlueprintCompilationManager::QueueForCompilation(Blueprint);
+				OutDeferredCompileBlueprints.AddUnique(Blueprint);
+			}
+			else
+			{
+				TArray<FString> CompileErrors;
+				FSmithUEBpAtomicAPI::CompileBlueprint(Blueprint, CompileErrors, true);
+			}
+			++OutTotalBlueprintsChanged;
+		}
+
+		OutTotalComponentsChanged += ComponentsChanged;
+		OutTotalEditsApplied += EditsApplied;
+		Result->SetStringField(TEXT("status"), TEXT("success"));
+		Result->SetNumberField(TEXT("changed"), ComponentsChanged);
+		Result->SetNumberField(TEXT("skipped"), ComponentsSkipped);
+		Result->SetNumberField(TEXT("edits_applied"), EditsApplied);
+		Result->SetArrayField(TEXT("components"), ComponentResults);
+		return Result;
+	}
+
 	bool DisconnectPinsImpl(UBlueprint* Blueprint, UEdGraph* Graph, const FString& GraphPath, const FString& SourceNodeId, const FString& SourcePinName, const FString& TargetNodeId, const FString& TargetPinName, FString& OutError)
 	{
 		UEdGraphNode* SourceNode = ResolveNodeId(Graph, GraphPath, SourceNodeId, OutError);
@@ -115,6 +915,8 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_bulk_set_component_property"), TEXT("Blueprint"), TEXT("Bulk-set generic component template properties on own SCS components in one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Supports dotted/indexed property_path (e.g. RelativeLocation.Z, BodyInstance.bSimulatePhysics, OverrideMaterials[0]) plus semantic setters for collision, StaticMesh, Material[i], PostProcessMaterial, and ChildActorClass."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Single Blueprint asset path. Provide this OR folder_path.")), FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder (e.g. /Game/Vehicles); applies to all Blueprints directly under it (non-recursive). Leading /All is stripped. Provide this OR bp_path.")), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Optional component class filter by class/superclass name, e.g. StaticMeshComponent. Empty = all component classes.")), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional component variable/template name. Empty = all matching own SCS components.")), FSmithUEToolParam(TEXT("edits"), TEXT("array"), TEXT("Required array of objects {property_path,value}. property_path supports dotted/indexed paths and semantic keys Collision.ObjectType, Collision.Response.<Channel>, Collision.Profile, StaticMesh, Material[i]/Materials[i], PostProcessMaterial, ChildActorClass."), true, FString(), TEXT("object")), FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview changes without modifying or compiling. Default false.")), FSmithUEToolParam(TEXT("defer_compile"), TEXT("boolean"), TEXT("Queue changed Blueprints and flush compilation once at end. Default false.")) }), &HandleBpBulkSetComponentProperty);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_collision"), TEXT("Blueprint"), TEXT("Bulk-set collision (object type + per-channel responses) on StaticMeshComponent templates inside one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Switches the component to a Custom profile, then applies object type and responses via proper engine setters. Skips components whose StaticMesh has no collision geometry unless disabled."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Single Blueprint asset path. Provide this OR folder_path.")), FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder (e.g. /Game/MyVehicles); applies to all Blueprints directly under it (non-recursive). Provide this OR bp_path.")), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional: only this StaticMeshComponent name. Empty = all StaticMeshComponents.")), FSmithUEToolParam(TEXT("object_type"), TEXT("string"), TEXT("Collision object type display name. Default 'Vehicle'.")), FSmithUEToolParam(TEXT("responses"), TEXT("object"), TEXT("Map of channel display name -> response, e.g. {\"Pawn\":\"Ignore\"}. Response is Ignore/Overlap/Block.")), FSmithUEToolParam(TEXT("skip_if_no_mesh_collision"), TEXT("boolean"), TEXT("Skip a component if its StaticMesh asset has no collision geometry. Default true.")), FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview changes without modifying. Default false.")) }), &HandleBpSetComponentCollision);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_override_function"), TEXT("Blueprint"), TEXT("Override a parent class function in a Blueprint (creates proper override graph with correct signature)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Parent function name to override"), true) }), &HandleBpOverrideFunction);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_compile"), TEXT("Blueprint"), TEXT("Compile a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true) }), &HandleBpCompile);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_reparent"), TEXT("Blueprint"), TEXT("Change the parent class of a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("new_parent_class"), TEXT("string"), TEXT("New parent class name or Blueprint path"), true) }), &HandleBpReparent);
@@ -1054,6 +1856,134 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 }
 
 // ---------------------------------------------------------------------------
+// bp_set_component_collision
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentCollision(const TSharedPtr<FJsonObject>& Params)
+{
+	FString BpPath, FolderPath, Component, ObjectType;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("folder_path"), FolderPath);
+	Params->TryGetStringField(TEXT("component"), Component);
+	if (!Params->TryGetStringField(TEXT("object_type"), ObjectType) || ObjectType.IsEmpty())
+	{
+		ObjectType = TEXT("Vehicle");
+	}
+
+	if (BpPath.IsEmpty() && FolderPath.IsEmpty())
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Provide either 'bp_path' or 'folder_path'"));
+	}
+
+	bool bDryRun = false;
+	Params->TryGetBoolField(TEXT("dry_run"), bDryRun);
+
+	bool bSkipNoCollision = true;
+	if (Params->HasField(TEXT("skip_if_no_mesh_collision")))
+	{
+		Params->TryGetBoolField(TEXT("skip_if_no_mesh_collision"), bSkipNoCollision);
+	}
+
+	FCollisionApplyConfig Cfg;
+	Cfg.ComponentFilter = Component;
+	Cfg.bSkipIfNoMeshCollision = bSkipNoCollision;
+	Cfg.bDryRun = bDryRun;
+
+	// Resolve object type channel by display name.
+	{
+		ECollisionChannel Channel = ECC_WorldStatic;
+		if (!ResolveCollisionChannelByName(ObjectType, Channel))
+		{
+			return FSmithUECommonUtils::CreateErrorResponse(
+				FString::Printf(TEXT("Unknown collision object type '%s'"), *ObjectType));
+		}
+		Cfg.ObjectType = Channel;
+		Cfg.bSetObjectType = true;
+	}
+
+	// Parse responses map (channel display name -> Ignore/Overlap/Block).
+	const TSharedPtr<FJsonObject>* RespObj = nullptr;
+	if (Params->TryGetObjectField(TEXT("responses"), RespObj) && RespObj && RespObj->IsValid())
+	{
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*RespObj)->Values)
+		{
+			ECollisionChannel Channel = ECC_WorldStatic;
+			if (!ResolveCollisionChannelByName(Pair.Key, Channel))
+			{
+				return FSmithUECommonUtils::CreateErrorResponse(
+					FString::Printf(TEXT("Unknown response channel '%s'"), *Pair.Key));
+			}
+			FString RespStr;
+			if (Pair.Value.IsValid())
+			{
+				RespStr = Pair.Value->AsString();
+			}
+			ECollisionResponse Resp = ECR_Block;
+			if (!ParseCollisionResponse(RespStr, Resp))
+			{
+				return FSmithUECommonUtils::CreateErrorResponse(
+					FString::Printf(TEXT("Invalid response '%s' for channel '%s' (use Ignore/Overlap/Block)"), *RespStr, *Pair.Key));
+			}
+			Cfg.Responses.Add(TPair<ECollisionChannel, ECollisionResponse>(Channel, Resp));
+		}
+	}
+
+	// Collect target blueprint paths.
+	TArray<FString> BpPaths;
+	if (!BpPath.IsEmpty())
+	{
+		BpPaths.Add(BpPath);
+	}
+	if (!FolderPath.IsEmpty())
+	{
+		FString Folder = FolderPath;
+		// Content Browser selection often comes as a virtual "/All/Game/..." path.
+		if (Folder.StartsWith(TEXT("/All/")))
+		{
+			Folder = Folder.RightChop(4); // strip "/All"
+		}
+		else if (Folder.Equals(TEXT("/All")))
+		{
+			Folder = TEXT("/Game");
+		}
+
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		FARFilter Filter;
+		Filter.PackagePaths.Add(FName(*Folder));
+		Filter.bRecursivePaths = false;
+		Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+		TArray<FAssetData> Assets;
+		ARM.Get().GetAssets(Filter, Assets);
+		for (const FAssetData& Asset : Assets)
+		{
+			BpPaths.AddUnique(Asset.GetObjectPathString());
+		}
+	}
+
+	if (BpPaths.Num() == 0)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("No Blueprints found for the given bp_path/folder_path"));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpSetCompCollision", "SmithUE: Set Component Collision"));
+
+	TArray<TSharedPtr<FJsonValue>> BpResults;
+	int32 TotalChanged = 0;
+	for (const FString& Path : BpPaths)
+	{
+		BpResults.Add(MakeShared<FJsonValueObject>(ProcessBlueprintCollision(Path, Cfg, TotalChanged)));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("dry_run"), bDryRun);
+	Data->SetStringField(TEXT("object_type"), ObjectType);
+	Data->SetNumberField(TEXT("blueprint_count"), BpPaths.Num());
+	Data->SetNumberField(TEXT("total_components_changed"), TotalChanged);
+	Data->SetArrayField(TEXT("blueprints"), BpResults);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
 // bp_override_function
 // ---------------------------------------------------------------------------
 
@@ -1181,6 +2111,113 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpOverrideFunction(const TSha
 		}
 	}
 
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBulkSetComponentProperty(const TSharedPtr<FJsonObject>& Params)
+{
+	FString BpPath, FolderPath, ComponentClass, Component;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("folder_path"), FolderPath);
+	Params->TryGetStringField(TEXT("component_class"), ComponentClass);
+	Params->TryGetStringField(TEXT("component"), Component);
+
+	if (BpPath.IsEmpty() && FolderPath.IsEmpty())
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Provide either 'bp_path' or 'folder_path'"));
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* EditValues = nullptr;
+	if (!Params->TryGetArrayField(TEXT("edits"), EditValues) || !EditValues || EditValues->Num() == 0)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required non-empty array param: 'edits'"));
+	}
+
+	FBulkApplyConfig Cfg;
+	Cfg.ComponentClassFilter = ComponentClass;
+	Cfg.ComponentFilter = Component;
+	Params->TryGetBoolField(TEXT("dry_run"), Cfg.bDryRun);
+	Params->TryGetBoolField(TEXT("defer_compile"), Cfg.bDeferCompile);
+
+	for (const TSharedPtr<FJsonValue>& EditValue : *EditValues)
+	{
+		const TSharedPtr<FJsonObject>* EditObj = nullptr;
+		if (!EditValue.IsValid() || !EditValue->TryGetObject(EditObj) || !EditObj || !EditObj->IsValid())
+		{
+			return FSmithUECommonUtils::CreateErrorResponse(TEXT("Each edits entry must be an object"));
+		}
+
+		FBulkComponentEdit Edit;
+		if (!(*EditObj)->TryGetStringField(TEXT("property_path"), Edit.PropertyPath) || Edit.PropertyPath.IsEmpty())
+		{
+			return FSmithUECommonUtils::CreateErrorResponse(TEXT("Each edits entry requires non-empty 'property_path'"));
+		}
+		Edit.Value = (*EditObj)->Values.FindRef(TEXT("value"));
+		if (!Edit.Value.IsValid())
+		{
+			return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Edit '%s' requires 'value'"), *Edit.PropertyPath));
+		}
+		Cfg.Edits.Add(Edit);
+	}
+
+	TArray<FString> BpPaths;
+	if (!BpPath.IsEmpty())
+	{
+		BpPaths.Add(BpPath);
+	}
+	if (!FolderPath.IsEmpty())
+	{
+		FString Folder = FolderPath;
+		if (Folder.StartsWith(TEXT("/All/")))
+		{
+			Folder = Folder.RightChop(4);
+		}
+		else if (Folder.Equals(TEXT("/All")))
+		{
+			Folder = TEXT("/Game");
+		}
+
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		FARFilter Filter;
+		Filter.PackagePaths.Add(FName(*Folder));
+		Filter.bRecursivePaths = false;
+		Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+		TArray<FAssetData> Assets;
+		ARM.Get().GetAssets(Filter, Assets);
+		for (const FAssetData& Asset : Assets)
+		{
+			BpPaths.AddUnique(Asset.GetObjectPathString());
+		}
+	}
+
+	if (BpPaths.Num() == 0)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("No Blueprints found for the given bp_path/folder_path"));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> BpResults;
+	TArray<UBlueprint*> DeferredCompileBlueprints;
+	int32 TotalBlueprintsChanged = 0;
+	int32 TotalComponentsChanged = 0;
+	int32 TotalEditsApplied = 0;
+	for (const FString& Path : BpPaths)
+	{
+		BpResults.Add(MakeShared<FJsonValueObject>(ProcessBlueprintBulkComponentProperties(Path, Cfg, DeferredCompileBlueprints, TotalBlueprintsChanged, TotalComponentsChanged, TotalEditsApplied)));
+	}
+
+	if (!Cfg.bDryRun && Cfg.bDeferCompile && DeferredCompileBlueprints.Num() > 0)
+	{
+		FBlueprintCompilationManager::FlushCompilationQueueAndReinstance();
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("dry_run"), Cfg.bDryRun);
+	Data->SetBoolField(TEXT("defer_compile"), Cfg.bDeferCompile);
+	Data->SetNumberField(TEXT("blueprint_count"), BpPaths.Num());
+	Data->SetNumberField(TEXT("total_blueprints_changed"), TotalBlueprintsChanged);
+	Data->SetNumberField(TEXT("total_components_changed"), TotalComponentsChanged);
+	Data->SetNumberField(TEXT("total_edits_applied"), TotalEditsApplied);
+	Data->SetArrayField(TEXT("blueprints"), BpResults);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
