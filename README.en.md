@@ -79,31 +79,35 @@ Unreal Engine 5.2 Editor
 
 ## Command Reference
 
-SmithUE provides **178 tools** organized across **19 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **211 tools** organized across **23 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
 ### Domain Overview
 
 | Domain | Tools | Description |
 |---|---|---|
-| System | 5 | Server connectivity, session management |
-| Project | 4 | Project info, plugins, folders, source files |
+| Blueprint | 33 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace, bulk component edit |
 | Material | 20 | Materials, material instances, MPC, material functions |
-| Asset | 12 | Asset CRUD, browser operations, AI texture generation |
-| Editor | 8 | Actor spawning, properties, post-process, project settings |
-| Interaction | 7 | Console/editor commands, undo/redo, key simulation |
-| Blueprint | 17 | BP creation, nodes, functions, variables, components, DSL compiler |
-| Viewport | 6 | Camera control, screenshots, actor selection |
-| Observation | 7 | Panels, editor state, actor properties, world outline |
+| Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
+| Asset | 14 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
-| Niagara | 17 | Particle system creation, emitters, modules, renderers |
 | Level | 11 | Level management, landscape, foliage |
-| Data | 6 | DataTables, UserDefinedStructs, UserDefinedEnums |
-| Sequencer | 6 | LevelSequence creation, bindings, tracks, keyframes |
-| Environment | 11 | Post-process, fog, sky, lights, physics, splines |
+| Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
 | PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
+| Editor | 9 | Actor spawning, properties, post-process, project settings |
+| Data | 8 | DataTables, structs, enums, data assets |
+| Observation | 8 | Panels, editor state, actor properties, world outline |
+| Interaction | 7 | Console/editor commands, undo/redo, key simulation |
 | Animation | 7 | AnimMontage, AnimBlueprint, sections, notifies |
+| Viewport | 6 | Camera control, screenshots, actor selection, view modes |
+| Sequencer | 6 | LevelSequence creation, bindings, tracks, keyframes |
 | Input | 6 | Enhanced Input: InputAction, InputMappingContext |
+| System | 5 | Server connectivity, metrics, protocol info |
+| Project | 4 | Project info, plugins, folders, source files |
+| Curve | 4 | Curve assets (Float/LinearColor/Vector) + color atlas |
 | UMG | 4 | Widget Blueprint creation, widget tree, properties |
+| Debug | 3 | Blueprint breakpoints: set, clear, list |
+| RenderTarget | 2 | Texture render targets |
+| Physics | 2 | Physical materials (friction/restitution/density) |
 
 ---
 
