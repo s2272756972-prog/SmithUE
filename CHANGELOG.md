@@ -1,5 +1,17 @@
 # SmithUE Changelog
 
+## v1.10.0
+
+### 新增工具（+3，合计 217 工具 / 23 个领域）
+- **`get_asset_property`**：通用 UObject 属性读取器（set_asset_property 的读对偶）
+- **`scan_assets`**：文件夹作用域资产扫描，返回 v1 linter 元数据（命名/路径/父类/材质槽/LOD/碰撞）
+- **`bp_describe_components`**：Blueprint 组件树读回，供合规 linter 比对（继承盲区显式标注）
+
+### 架构演进
+- 企业级资产装配与合规标准化引擎定位正式确立
+- 三层分离：C++ 原子原语 / smithue-cli 规范引擎 / 宿主工程 spec 文件
+- `docs/usage/` 使用文档 hub 建立（与 `docs/spec/` 开发文档拆分）
+
 ## v1.8.0 — Blueprint Breakpoint & Navigation
 
 ### Added

@@ -1,15 +1,15 @@
 # SmithUE Tool Reference
 
-> **214 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **217 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
 | Domain | Tools | Description |
 |--------|-------|-------------|
-| Blueprint | 34 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace |
+| Blueprint | 35 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace |
 | Material | 20 | Materials, material instances, MPC, material functions |
 | Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
-| Asset | 16 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
+| Asset | 18 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
 | Level | 11 | Level management, landscape, foliage |
 | Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
@@ -66,6 +66,7 @@
 | `bp_diff` | Structural comparison of two Blueprints across parent, components, variables, functions, interfaces, and overrides. |
 | `bp_trace_value` | Trace data-flow upstream or downstream from a node data pin in a Blueprint graph. |
 | `bp_describe_graph` | Describe nodes in a Blueprint graph. mode: full(default)/compact/summary/node_pins/exec_chain. exec_chain mode follows exec pins from entry points (add entry_node param to start from specific N-id). |
+| `bp_describe_components` | Read back a Blueprint component tree and governance properties (collision/Mobility/materials). Single BP or folder batch mode. Inherited components explicitly flagged as inherited_unverifiable. |
 | `bp_compile_code` | Compile Blueprint DSL into a Blueprint |
 | `bp_batch_op` | Execute multiple Blueprint atomic operations in a single transaction. Supports op aliases (connect/link/disconnect/unlink/set_default/set_value/create/add_node/delete/remove_node). Max 50 ops. Partial commit: failures do not stop subsequent ops. |
 | `bp_validate_code` | Validate Blueprint DSL syntax without compiling |
@@ -130,6 +131,8 @@
 | `delete_asset` | Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway. |
 | `move_asset` | Move an asset to a new path (different folder and/or name). Updates all references. |
 | `asset_editor` | Open or close asset editors. Supports single or multiple assets. |
+| `get_asset_property` | Read a property value from a loaded asset by dotted path (e.g. LightmapCoordinateIndex, StaticMaterials[0]). Asset must be loaded (is_loaded=true). |
+| `scan_assets` | Folder-scoped asset scan. Returns v1 linter metadata: naming, path, parent class, material slots, LOD count, collision presence. |
 | `set_asset_property` | Set any property on a loaded UObject asset (Texture2D, StaticMesh, SkeletalMesh, Material, etc.) by dotted property path. Use for texture compression, LOD settings, mesh properties, etc. |
 | `save_asset` | Save a single asset to disk |
 | `save_all_dirty` | Save all dirty (modified) assets to disk |

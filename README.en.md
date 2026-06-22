@@ -79,7 +79,7 @@ Unreal Engine 5.2 Editor
 
 ## Command Reference
 
-SmithUE provides **214 tools** organized across **23 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **217 tools** organized across **23 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
 ### Domain Overview
 

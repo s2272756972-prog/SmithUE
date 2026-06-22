@@ -1,0 +1,7 @@
+README 217: true
+uplugin 1.10.0: true
+uplugin Version 8: true
+TOOLS get_asset_property: true
+TOOLS scan_assets: true
+TOOLS bp_describe_components: true
+CHANGELOG v1.10.0: true

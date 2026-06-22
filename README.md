@@ -84,6 +84,10 @@ mklink /D "{OtherProject}\Plugins\SmithUE" "{SourceProject}\Plugins\SmithUE"
 
 ---
 
+SmithUE 不只是"操作蓝图的工具"，而是**企业级资产装配与合规标准化引擎**：插件提供通用原子 HTTP 原语，smithue-cli 承载业务规范层（spec 驱动的工厂与合规 linter），规范以 git 可追踪文本存于宿主工程，AI agent 说人话即可批量生成合规蓝图并审计合规性。
+
+---
+
 ## 架构
 
 ```
@@ -98,7 +102,7 @@ SmithUE UE5 插件 (HTTP :动态端口)
 
 ## 命令参考
 
-SmithUE 提供了分布在 **23 个功能域** 中的 **214 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **23 个功能域** 中的 **217 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 
