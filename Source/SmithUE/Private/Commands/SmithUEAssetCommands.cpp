@@ -15,7 +15,11 @@
 #include "ObjectTools.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "FileHelpers.h"
+#include "Misc/OutputDeviceNull.h"
+#include "Serialization/JsonSerializer.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UObjectGlobals.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,6 +27,224 @@
 
 namespace
 {
+    struct FAssetPropertyPathSegment
+    {
+        FString Name;
+        int32 Index = INDEX_NONE;
+        bool bHasIndex = false;
+    };
+
+    struct FAssetResolvedPropertyPath
+    {
+        FEditPropertyChain Chain;
+        FProperty* TopLevelProperty = nullptr;
+        FProperty* LeafProperty = nullptr;
+        void* LeafValuePtr = nullptr;
+    };
+
+    FString AssetJsonValueToImportText(const TSharedPtr<FJsonValue>& JsonValue)
+    {
+        if (!JsonValue.IsValid() || JsonValue->IsNull())
+        {
+            return TEXT("None");
+        }
+        switch (JsonValue->Type)
+        {
+            case EJson::String: return JsonValue->AsString();
+            case EJson::Number: return FString::SanitizeFloat(JsonValue->AsNumber());
+            case EJson::Boolean: return JsonValue->AsBool() ? TEXT("True") : TEXT("False");
+            default: break;
+        }
+        FString Serialized;
+        TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Serialized);
+        FJsonSerializer::Serialize(JsonValue.ToSharedRef(), TEXT(""), Writer);
+        return Serialized;
+    }
+
+    bool ParseAssetPropertyPathSegment(const FString& SegmentText, FAssetPropertyPathSegment& OutSegment, FString& OutError)
+    {
+        OutSegment = FAssetPropertyPathSegment();
+        const int32 BracketStart = SegmentText.Find(TEXT("["), ESearchCase::CaseSensitive);
+        if (BracketStart == INDEX_NONE)
+        {
+            OutSegment.Name = SegmentText;
+        }
+        else
+        {
+            if (!SegmentText.EndsWith(TEXT("]")))
+            {
+                OutError = FString::Printf(TEXT("Invalid indexed property segment '%s'"), *SegmentText);
+                return false;
+            }
+            OutSegment.Name = SegmentText.Left(BracketStart);
+            const FString IndexText = SegmentText.Mid(BracketStart + 1, SegmentText.Len() - BracketStart - 2);
+            if (!LexTryParseString(OutSegment.Index, *IndexText) || OutSegment.Index < 0)
+            {
+                OutError = FString::Printf(TEXT("Invalid array index in property segment '%s'"), *SegmentText);
+                return false;
+            }
+            OutSegment.bHasIndex = true;
+        }
+
+        if (OutSegment.Name.IsEmpty())
+        {
+            OutError = FString::Printf(TEXT("Invalid empty property segment in '%s'"), *SegmentText);
+            return false;
+        }
+        return true;
+    }
+
+    bool ResolveAssetObjectPropertyPath(UObject* Object, const FString& PropertyPath, FAssetResolvedPropertyPath& OutResolved, FString& OutError)
+    {
+        if (!Object)
+        {
+            OutError = TEXT("Invalid object");
+            return false;
+        }
+
+        TArray<FString> SegmentTexts;
+        PropertyPath.ParseIntoArray(SegmentTexts, TEXT("."), true);
+        if (SegmentTexts.Num() == 0)
+        {
+            OutError = TEXT("property_path is empty");
+            return false;
+        }
+
+        void* Container = Object;
+        UStruct* CurrentStruct = Object->GetClass();
+        for (int32 SegmentIndex = 0; SegmentIndex < SegmentTexts.Num(); ++SegmentIndex)
+        {
+            FAssetPropertyPathSegment Segment;
+            if (!ParseAssetPropertyPathSegment(SegmentTexts[SegmentIndex], Segment, OutError))
+            {
+                return false;
+            }
+
+            if (!CurrentStruct)
+            {
+                OutError = FString::Printf(TEXT("Cannot resolve '%s' after non-struct property in '%s'"), *Segment.Name, *PropertyPath);
+                return false;
+            }
+
+            FProperty* Property = CurrentStruct->FindPropertyByName(FName(*Segment.Name));
+            if (!Property)
+            {
+                OutError = FString::Printf(TEXT("Property not found: '%s' on '%s'"), *Segment.Name, *CurrentStruct->GetName());
+                return false;
+            }
+
+            OutResolved.Chain.AddTail(Property);
+            if (!OutResolved.TopLevelProperty)
+            {
+                OutResolved.TopLevelProperty = Property;
+            }
+            OutResolved.LeafProperty = Property;
+            void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+
+            if (FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+            {
+                if (!Segment.bHasIndex)
+                {
+                    if (SegmentIndex != SegmentTexts.Num() - 1)
+                    {
+                        OutError = FString::Printf(TEXT("Array property '%s' requires an index"), *Segment.Name);
+                        return false;
+                    }
+                    OutResolved.LeafValuePtr = ValuePtr;
+                    CurrentStruct = nullptr;
+                    Container = ValuePtr;
+                    continue;
+                }
+
+                FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
+                if (!ArrayHelper.IsValidIndex(Segment.Index))
+                {
+                    OutError = FString::Printf(TEXT("Array index %d out of range for '%s' (num=%d)"), Segment.Index, *Segment.Name, ArrayHelper.Num());
+                    return false;
+                }
+
+                void* ElementPtr = ArrayHelper.GetRawPtr(Segment.Index);
+                if (FStructProperty* InnerStructProperty = CastField<FStructProperty>(ArrayProperty->Inner))
+                {
+                    OutResolved.Chain.AddTail(ArrayProperty->Inner);
+                    OutResolved.LeafProperty = ArrayProperty->Inner;
+                    OutResolved.LeafValuePtr = ElementPtr;
+                    CurrentStruct = InnerStructProperty->Struct;
+                    Container = ElementPtr;
+                }
+                else
+                {
+                    OutResolved.Chain.AddTail(ArrayProperty->Inner);
+                    OutResolved.LeafProperty = ArrayProperty->Inner;
+                    OutResolved.LeafValuePtr = ElementPtr;
+                    CurrentStruct = nullptr;
+                    Container = ElementPtr;
+                }
+                continue;
+            }
+
+            if (Segment.bHasIndex)
+            {
+                OutError = FString::Printf(TEXT("Property '%s' is not an array"), *Segment.Name);
+                return false;
+            }
+
+            OutResolved.LeafValuePtr = ValuePtr;
+            if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+            {
+                CurrentStruct = StructProperty->Struct;
+                Container = ValuePtr;
+            }
+            else
+            {
+                CurrentStruct = nullptr;
+                Container = ValuePtr;
+            }
+        }
+
+        if (!OutResolved.TopLevelProperty || !OutResolved.LeafProperty || !OutResolved.LeafValuePtr)
+        {
+            OutError = FString::Printf(TEXT("Failed to resolve property_path '%s'"), *PropertyPath);
+            return false;
+        }
+        return true;
+    }
+
+    FString ExportAssetPropertyValue(FProperty* Property, void* ValuePtr, UObject* Owner)
+    {
+        FString Value;
+        if (Property && ValuePtr)
+        {
+            Property->ExportTextItem_Direct(Value, ValuePtr, nullptr, Owner, PPF_None);
+        }
+        return Value;
+    }
+
+    bool ImportAssetPropertyValueWithNotify(UObject* Object, FAssetResolvedPropertyPath& Resolved, const FString& TextValue, FString& OutError)
+    {
+        if (!Object || !Resolved.TopLevelProperty || !Resolved.LeafProperty || !Resolved.LeafValuePtr)
+        {
+            OutError = TEXT("Invalid resolved property path");
+            return false;
+        }
+
+        Resolved.Chain.SetActivePropertyNode(Resolved.LeafProperty);
+        Resolved.Chain.SetActiveMemberPropertyNode(Resolved.TopLevelProperty);
+        Object->PreEditChange(Resolved.Chain);
+        FOutputDeviceNull ErrorDevice;
+        const TCHAR* ImportResult = Resolved.LeafProperty->ImportText_Direct(*TextValue, Resolved.LeafValuePtr, Object, PPF_None, &ErrorDevice);
+        if (!ImportResult)
+        {
+            OutError = FString::Printf(TEXT("Failed to import value '%s' into property '%s'"), *TextValue, *Resolved.LeafProperty->GetName());
+            return false;
+        }
+        FPropertyChangedEvent Event(Resolved.LeafProperty, EPropertyChangeType::ValueSet, MakeArrayView((const UObject* const*)&Object, 1));
+        Event.SetActiveMemberProperty(Resolved.TopLevelProperty);
+        FPropertyChangedChainEvent ChainEvent(Resolved.Chain, Event);
+        Object->PostEditChangeChainProperty(ChainEvent);
+        return true;
+    }
+
     TSharedPtr<FJsonObject> AssetDataToJson(const FAssetData& AssetData, bool bDetailed)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
@@ -185,6 +407,16 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("asset_paths"), TEXT("array"), TEXT("Array of asset paths (e.g. [\"/Game/Materials/M_A\", \"/Game/Materials/M_B\"])"), true)
             }),
         &HandleAssetEditor);
+
+    Registry.Register(FSmithUEToolSchema(TEXT("set_asset_property"), TEXT("Asset"),
+        TEXT("Set any property on a loaded UObject asset (Texture2D, StaticMesh, SkeletalMesh, Material, etc.) by dotted property path. Use for texture compression, LOD settings, mesh properties, etc."),
+        {
+            FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), TEXT("Full asset path (e.g. /Game/BP/T_Wood_Normal.T_Wood_Normal)"), true),
+            FSmithUEToolParam(TEXT("property_path"), TEXT("string"), TEXT("Dotted property path (e.g. CompressionSettings, SRGB, LightMapResolution, BodySetup.CollisionTraceFlag)"), true),
+            FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value to set (string representation; enums use name like TC_Normalmap)"), true),
+            FSmithUEToolParam(TEXT("save"), TEXT("boolean"), TEXT("Auto-save the asset after modification (default: true)"))
+        }),
+        &HandleSetAssetProperty);
 
     Registry.Register(
         FSmithUEToolSchema(
@@ -759,6 +991,81 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleAssetEditor(const TSharedPt
 
     UE_LOG(LogSmithUE, Log, TEXT("asset_editor: %s %d/%d assets"),
         *Action, SuccessCount, PathsArray->Num());
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: set_asset_property
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleSetAssetProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("asset_path"), TEXT("property_path"), TEXT("value")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString AssetPath;
+    Params->TryGetStringField(TEXT("asset_path"), AssetPath);
+    FString PropertyPath;
+    Params->TryGetStringField(TEXT("property_path"), PropertyPath);
+    const TSharedPtr<FJsonValue> ValueJson = Params->TryGetField(TEXT("value"));
+    const FString TextValue = AssetJsonValueToImportText(ValueJson);
+    const bool bSave = !Params->HasField(TEXT("save")) || Params->GetBoolField(TEXT("save"));
+
+    if (AssetPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("asset_path cannot be empty"));
+    }
+    if (PropertyPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("property_path cannot be empty"));
+    }
+
+    UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+    if (!Asset)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to load asset: %s"), *AssetPath));
+    }
+
+    FAssetResolvedPropertyPath Resolved;
+    if (!ResolveAssetObjectPropertyPath(Asset, PropertyPath, Resolved, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    const FString Before = ExportAssetPropertyValue(Resolved.LeafProperty, Resolved.LeafValuePtr, Asset);
+    Asset->Modify();
+    if (!ImportAssetPropertyValueWithNotify(Asset, Resolved, TextValue, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+    const FString After = ExportAssetPropertyValue(Resolved.LeafProperty, Resolved.LeafValuePtr, Asset);
+    const bool bChanged = Before != After;
+    Asset->MarkPackageDirty();
+
+    bool bSaved = false;
+    if (bSave)
+    {
+        bSaved = UEditorAssetLibrary::SaveAsset(AssetPath, false);
+        if (!bSaved)
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Property was set but failed to save asset: %s"), *AssetPath));
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("asset_path"), AssetPath);
+    Data->SetStringField(TEXT("property_path"), PropertyPath);
+    Data->SetStringField(TEXT("before"), Before);
+    Data->SetStringField(TEXT("after"), After);
+    Data->SetBoolField(TEXT("changed"), bChanged);
+    Data->SetBoolField(TEXT("saved"), bSaved);
+
+    UE_LOG(LogSmithUE, Log, TEXT("set_asset_property: %s.%s %s -> %s"), *AssetPath, *PropertyPath, *Before, *After);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

@@ -58,6 +58,7 @@ namespace
 		bool bCreateMaterial = false;
 		FString SavePath;
 		FString AssetName;
+		FString TextureType;
 	};
 
 	struct FAudioTask
@@ -407,6 +408,44 @@ namespace
 		return false;
 	}
 
+	void ApplyGeneratedTextureTypeSettings(const FString& TextureAssetPath, const FString& TextureType)
+	{
+		UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *TextureAssetPath);
+		if (!Tex)
+		{
+			return;
+		}
+
+		bool bNeedsSave = false;
+		if (TextureType.Equals(TEXT("Normal"), ESearchCase::IgnoreCase))
+		{
+			Tex->CompressionSettings = TC_Normalmap;
+			Tex->SRGB = false;
+			bNeedsSave = true;
+		}
+		else if (TextureType.Equals(TEXT("AO"), ESearchCase::IgnoreCase) ||
+			TextureType.Equals(TEXT("Roughness"), ESearchCase::IgnoreCase) ||
+			TextureType.Equals(TEXT("Metallic"), ESearchCase::IgnoreCase) ||
+			TextureType.Equals(TEXT("Mask"), ESearchCase::IgnoreCase))
+		{
+			Tex->CompressionSettings = TC_Masks;
+			Tex->SRGB = false;
+			bNeedsSave = true;
+		}
+		else if (TextureType.Equals(TEXT("Height"), ESearchCase::IgnoreCase))
+		{
+			Tex->CompressionSettings = TC_Displacementmap;
+			Tex->SRGB = false;
+			bNeedsSave = true;
+		}
+
+		if (bNeedsSave)
+		{
+			Tex->UpdateResource();
+			Tex->MarkPackageDirty();
+		}
+	}
+
 	bool CreateMaterialFromTexture(const FString& TextureAssetPath, const FString& MaterialName, const FString& PackagePath, FString& OutMaterialPath, FString& OutError)
 	{
 		OutMaterialPath = FString::Printf(TEXT("%s/M_%s"), *PackagePath, *MaterialName);
@@ -529,6 +568,7 @@ namespace
 			Task.ErrorMessage = ImportError;
 			return;
 		}
+		ApplyGeneratedTextureTypeSettings(Task.AssetPath, Task.TextureType);
 
 		// Optional: create material
 		if (Task.bCreateMaterial)
@@ -618,6 +658,7 @@ void FSmithUETextureCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 				FSmithUEToolParam(TEXT("model"), TEXT("string"), TEXT("Model name to pass to the API (e.g. dall-e-3, imagen-4.0)")),
 				FSmithUEToolParam(TEXT("aspect_ratio"), TEXT("string"), TEXT("Image size/ratio (e.g. 1024x1024, 16:9)")),
 				FSmithUEToolParam(TEXT("create_material"), TEXT("boolean"), TEXT("Auto-create a material with this texture (default: false)")),
+				FSmithUEToolParam(TEXT("texture_type"), TEXT("string"), TEXT("Texture type for auto-setting compression + SRGB after import: Diffuse (default), Normal, AO, Roughness, Metallic, Height, Mask. Normal sets TC_Normalmap+SRGB=false; AO/Roughness/Metallic/Mask set TC_Masks+SRGB=false; Height sets TC_Displacementmap+SRGB=false.")),
 			}),
 		&HandleGenerateTexture);
 
@@ -685,6 +726,8 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 	}
 	FString AspectRatio = Params->GetStringField(TEXT("aspect_ratio"));
 	bool bCreateMaterial = Params->HasField(TEXT("create_material")) && Params->GetBoolField(TEXT("create_material"));
+	FString TextureType = Params->GetStringField(TEXT("texture_type"));
+	if (TextureType.IsEmpty()) { TextureType = TEXT("Diffuse"); }
 
 	// Create task
 	FString TaskId = FGuid::NewGuid().ToString();
@@ -693,6 +736,7 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 	Task->SavePath = SavePath;
 	Task->AssetName = AssetName;
 	Task->bCreateMaterial = bCreateMaterial;
+	Task->TextureType = TextureType;
 	TaskStore.Add(TaskId, Task);
 
 	// Detect API format and build request
@@ -748,6 +792,7 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 					Task.ErrorMessage = ImportError;
 					return;
 				}
+				ApplyGeneratedTextureTypeSettings(Task.AssetPath, Task.TextureType);
 
 				if (Task.bCreateMaterial)
 				{
