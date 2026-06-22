@@ -1073,7 +1073,7 @@ namespace
 		Result->SetStringField(TEXT("source"), Source);
 
 		USceneComponent* SceneComponent = Cast<USceneComponent>(Component);
-		Result->SetStringField(TEXT("mobility"), SceneComponent ? MobilityToString(SceneComponent->GetMobility()) : TEXT(""));
+		Result->SetStringField(TEXT("mobility"), SceneComponent ? MobilityToString(SceneComponent->Mobility) : TEXT(""));
 
 		TSharedPtr<FJsonObject> Collision = MakeShared<FJsonObject>();
 		if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))

@@ -1,0 +1,73 @@
+{
+  "_task": "T7 — register audit primitives + rebuild + CLI live exec",
+  "_date": "2026-06-22",
+  "_plugin_version": "1.9.0",
+  "_tool_count": 217,
+  "get_asset_property": {
+    "input": {
+      "asset_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+      "property": "BlueprintType"
+    },
+    "output": {
+      "status": "success",
+      "data": {
+        "asset_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+        "property": "BlueprintType",
+        "value": "BPTYPE_Normal"
+      }
+    },
+    "note": "SM_ComplianceProbe_Cube StaticMesh not present in project; BP used as representative. LightmapCoordinateIndex is a StaticMesh CDO property not exposed on Blueprint assets."
+  },
+  "scan_assets": {
+    "input": {
+      "folder_path": "/Game/SmithUETest"
+    },
+    "output": {
+      "status": "success",
+      "data": {
+        "assets": [
+          {
+            "name": "BP_SM_ComplianceProbe_Cube",
+            "path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube.BP_SM_ComplianceProbe_Cube",
+            "package_name": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+            "package_path": "/Game/SmithUETest",
+            "class": "Blueprint",
+            "parent_class": "/Script/CoreUObject.Class'/Script/Engine.Actor'",
+            "material_slots": 0,
+            "material_slot_paths": [],
+            "lod_count": 0,
+            "min_lod": 0,
+            "has_collision": false
+          },
+          {
+            "name": "BP_ReadbackProbe_Parent",
+            "path": "/Game/SmithUETest/BP_ReadbackProbe_Parent.BP_ReadbackProbe_Parent",
+            "package_name": "/Game/SmithUETest/BP_ReadbackProbe_Parent",
+            "package_path": "/Game/SmithUETest",
+            "class": "Blueprint",
+            "parent_class": "/Script/CoreUObject.Class'/Script/Engine.Actor'",
+            "material_slots": 0,
+            "material_slot_paths": [],
+            "lod_count": 0,
+            "min_lod": 0,
+            "has_collision": false
+          },
+          {
+            "name": "BP_ReadbackProbe_Child",
+            "path": "/Game/SmithUETest/BP_ReadbackProbe_Child.BP_ReadbackProbe_Child",
+            "package_name": "/Game/SmithUETest/BP_ReadbackProbe_Child",
+            "package_path": "/Game/SmithUETest",
+            "class": "Blueprint",
+            "parent_class": "/Script/Engine.BlueprintGeneratedClass'/Game/SmithUETest/BP_ReadbackProbe_Parent.BP_ReadbackProbe_Parent_C'",
+            "material_slots": 0,
+            "material_slot_paths": [],
+            "lod_count": 0,
+            "min_lod": 0,
+            "has_collision": false
+          }
+        ]
+      }
+    },
+    "note": "3 assets in /Game/SmithUETest: all Blueprints. Fields confirmed: material_slots, lod_count, has_collision all present."
+  }
+}

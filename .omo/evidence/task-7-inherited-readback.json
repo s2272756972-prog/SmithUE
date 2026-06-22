@@ -1,0 +1,80 @@
+{
+  "_task": "T7 — inherited component readback via bp_describe_components",
+  "_date": "2026-06-22",
+  "_plugin_version": "1.9.0",
+  "child_bp_own_first": {
+    "input": {
+      "bp_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube"
+    },
+    "output": {
+      "status": "success",
+      "data": {
+        "total_blueprints": 1,
+        "blueprints": [
+          {
+            "bp_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+            "bp_name": "BP_SM_ComplianceProbe_Cube",
+            "parent_class": "/Script/Engine.Actor",
+            "component_count": 1,
+            "components": [
+              {
+                "name": "StaticMeshComponent",
+                "class": "StaticMeshComponent",
+                "source": "own",
+                "mobility": "Static",
+                "collision": {
+                  "profile": "BlockAll",
+                  "enabled": "QueryAndPhysics"
+                },
+                "mesh": null,
+                "materials": [],
+                "inherited_unverifiable": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "child_bp_inherited": {
+    "input": {
+      "bp_path": "/Game/SmithUETest/BP_ReadbackProbe_Child"
+    },
+    "output": {
+      "status": "success",
+      "data": {
+        "total_blueprints": 1,
+        "blueprints": [
+          {
+            "bp_path": "/Game/SmithUETest/BP_ReadbackProbe_Child",
+            "bp_name": "BP_ReadbackProbe_Child",
+            "parent_class": "/Game/SmithUETest/BP_ReadbackProbe_Parent.BP_ReadbackProbe_Parent_C",
+            "component_count": 0,
+            "components": [
+              {
+                "name": "InheritedStaticMeshComponent",
+                "class": "StaticMeshComponent",
+                "source": "inherited",
+                "mobility": "Movable",
+                "collision": {
+                  "profile": "BlockAll",
+                  "enabled": "QueryAndPhysics"
+                },
+                "mesh": null,
+                "materials": [],
+                "inherited_unverifiable": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "findings": {
+      "inherited_unverifiable": true,
+      "source": "inherited",
+      "parent": "BP_ReadbackProbe_Parent",
+      "component_count_own": 0,
+      "note": "Child BP has 0 own components; inherited component correctly reported with inherited_unverifiable=true and source=inherited."
+    }
+  }
+}
