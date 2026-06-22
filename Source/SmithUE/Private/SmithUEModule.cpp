@@ -3,6 +3,7 @@
 #include "SmithUEModule.h"
 #include "Transport/SmithUEHttpServer.h"
 #include "SmithUESettings.h"
+#include "SmithUESettingsCustomization.h"
 #include "Utils/SmithUEUpdateChecker.h"
 
 #include "Commands/SmithUEAssetCommands.h"
@@ -32,6 +33,7 @@
 #include "UI/SSmithUEStatusIndicator.h"
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
+#include "PropertyEditorModule.h"
 #include "ToolMenus.h"
 #include "Containers/Ticker.h"
 #include "ToolRegistry/SmithUEToolRegistry.h"
@@ -75,6 +77,12 @@ void FSmithUEModule::StartupModule()
 	FSmithUEAnimCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEInputCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEUMGCommands::RegisterTools(FSmithUEToolRegistry::Get());
+
+	// Register project settings detail customization (clickable URLs)
+	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
+	PropertyModule.RegisterCustomClassLayout(
+		USmithUESettings::StaticClass()->GetFName(),
+		FOnGetDetailCustomizationInstance::CreateStatic(&FSmithUESettingsCustomization::MakeInstance));
 
 	if (GEditor != nullptr)
 	{
@@ -137,6 +145,12 @@ void FSmithUEModule::ShutdownModule()
 	if (UObjectInitialized() && UToolMenus::IsToolMenuUIEnabled())
 	{
 		UToolMenus::Get()->RemoveSection(TEXT("LevelEditor.StatusBar.ToolBar"), TEXT("SmithUE"));
+	}
+
+	if (FModuleManager::Get().IsModuleLoaded(TEXT("PropertyEditor")))
+	{
+		FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
+		PropertyModule.UnregisterCustomClassLayout(USmithUESettings::StaticClass()->GetFName());
 	}
 
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module shut down."));

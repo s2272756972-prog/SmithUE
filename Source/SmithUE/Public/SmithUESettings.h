@@ -43,12 +43,24 @@ public:
 		meta=(ToolTip="Check for SmithUE plugin updates automatically on Editor startup."))
 	bool bCheckForUpdatesOnStartup = true;
 
-	/** Default AI image generation endpoint. Leave empty to use Pollinations.ai (free). */
-	UPROPERTY(config, EditAnywhere, Category="AI Generation", meta=(DisplayName="Default Image Endpoint"))
+	/** Guide: visit Pollinations.ai to register and get your free API key for audio generation.
+	 *  Image generation (generate_texture) is free and requires no key.
+	 *  Audio generation (generate_audio) requires a Pollinations API key (free quota available). */
+	UPROPERTY(VisibleAnywhere, Category="AI Generation",
+		meta=(DisplayName="Get Started: Pollinations.ai",
+			  ToolTip="Visit https://pollinations.ai to create an account and get your free API key. Image generation is free (no key needed). Audio generation requires a key."))
+	FString PollinationsGuideUrl = TEXT("https://pollinations.ai  (Image: free, no key | Audio: free key required)");
+
+	/** Default AI image generation endpoint. Leave empty to use Pollinations.ai (free, no key needed). */
+	UPROPERTY(config, EditAnywhere, Category="AI Generation",
+		meta=(DisplayName="Default Image Endpoint",
+			  ToolTip="AI image generation API URL. Leave empty to use Pollinations.ai (free, no registration). For DALL-E: https://api.openai.com/v1/images/generations"))
 	FString DefaultImageEndpoint;
 
-	/** Default API key for the image endpoint. Not needed for Pollinations.ai. */
-	UPROPERTY(config, EditAnywhere, Category="AI Generation", meta=(DisplayName="Default API Key"))
+	/** Default API key for the image endpoint. Not needed for Pollinations.ai image generation. */
+	UPROPERTY(config, EditAnywhere, Category="AI Generation",
+		meta=(DisplayName="Default Image API Key",
+			  ToolTip="API key for non-Pollinations image endpoints (DALL-E, Imagen, etc). Pollinations image generation is free and needs no key."))
 	FString DefaultApiKey;
 
 	/** Default model name (e.g. flux, dall-e-3). Leave empty for provider default. */
