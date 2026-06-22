@@ -21,6 +21,7 @@
 #include "Materials/MaterialExpressionTextureSample.h"
 #include "Async/Async.h"
 #include "GenericPlatform/GenericPlatformHttp.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -73,6 +74,60 @@ namespace
 	// In-memory task store (game thread only, no locking needed)
 	TMap<FString, TSharedPtr<FTextureTask>> TaskStore;
 	TMap<FString, TSharedPtr<FAudioTask>> AudioTaskStore;
+
+	using FDownloadCompleteCallback = TFunction<void(const FString& FilePath, bool bSuccess, const FString& Error)>;
+
+	void DownloadViaCurl(const FString& Url, const FString& OutputFilePath, FDownloadCompleteCallback&& Callback, const TArray<FString>& Headers = TArray<FString>())
+	{
+		TSharedRef<FDownloadCompleteCallback> CallbackRef = MakeShared<FDownloadCompleteCallback>(MoveTemp(Callback));
+		TArray<FString> HeaderCopies = Headers;
+
+		AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [Url, OutputFilePath, HeaderCopies, CallbackRef]()
+		{
+			FString Args(TEXT("-s -L"));
+			for (const FString& Header : HeaderCopies)
+			{
+				Args += FString::Printf(TEXT(" -H \"%s\""), *Header);
+			}
+			Args += FString::Printf(TEXT(" -o \"%s\" \"%s\""), *OutputFilePath, *Url);
+
+			FProcHandle Proc = FPlatformProcess::CreateProc(TEXT("curl.exe"), *Args, false, true, true, nullptr, 0, nullptr, nullptr);
+			if (!Proc.IsValid())
+			{
+				AsyncTask(ENamedThreads::GameThread, [CallbackRef]()
+				{
+					(*CallbackRef)(FString(), false, TEXT("Failed to launch curl.exe subprocess"));
+				});
+				return;
+			}
+
+			FPlatformProcess::WaitForProc(Proc);
+			int32 ReturnCode = 0;
+			FPlatformProcess::GetProcReturnCode(Proc, &ReturnCode);
+			FPlatformProcess::CloseProc(Proc);
+
+			AsyncTask(ENamedThreads::GameThread, [OutputFilePath, ReturnCode, CallbackRef]()
+			{
+				if (ReturnCode != 0)
+				{
+					(*CallbackRef)(OutputFilePath, false, FString::Printf(TEXT("curl.exe exited with code %d"), ReturnCode));
+					return;
+				}
+				if (!IFileManager::Get().FileExists(*OutputFilePath))
+				{
+					(*CallbackRef)(OutputFilePath, false, TEXT("curl completed but output file not found"));
+					return;
+				}
+				const int64 FileSize = IFileManager::Get().FileSize(*OutputFilePath);
+				if (FileSize < 500)
+				{
+					(*CallbackRef)(OutputFilePath, false, FString::Printf(TEXT("Downloaded file too small (%lld bytes) - likely an error response"), FileSize));
+					return;
+				}
+				(*CallbackRef)(OutputFilePath, true, FString());
+			});
+		});
+	}
 
 	// ---------------------------------------------------------------------------
 	// API Format Detection
@@ -647,18 +702,78 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 		TaskStore.Remove(TaskId);
 		return FSmithUECommonUtils::CreateErrorResponse(TEXT("api_key is required for the selected image endpoint"));
 	}
-	FString RequestBody = BuildRequestBody(Format, Prompt, ModelName, AspectRatio);
+		FString RequestBody = BuildRequestBody(Format, Prompt, ModelName, AspectRatio);
 
-	// Fire HTTP request
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
-	HttpRequest->SetTimeout(300.0f);
-	HttpRequest->SetVerb(TEXT("POST"));
-	HttpRequest->SetURL(Endpoint);
-	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+		if (Format == EApiFormat::Pollinations)
+		{
+			// Pollinations CDN blocks UE's libcurl TLS fingerprint. Use curl.exe subprocess.
+			FString EncodedPrompt = FGenericPlatformHttp::UrlEncode(Prompt);
+			int32 W = 1024, H = 1024;
+			if (!AspectRatio.IsEmpty())
+		{
+			FString Left, Right;
+			if (AspectRatio.Split(TEXT("x"), &Left, &Right))
+			{
+				W = FCString::Atoi(*Left);
+				H = FCString::Atoi(*Right);
+			}
+		}
+		FString PollModel = ModelName.IsEmpty() ? TEXT("flux") : ModelName;
+			FString PollUrl = FString::Printf(
+				TEXT("https://image.pollinations.ai/prompt/%s?width=%d&height=%d&model=%s&nologo=true&enhance=true"),
+				*EncodedPrompt, W, H, *PollModel);
 
-	// Auth header depends on format. Pollinations is free and requires no auth.
-	if (Format != EApiFormat::Pollinations)
-	{
+			FString OutputPath = FPaths::ProjectSavedDir() / FString::Printf(TEXT("GeneratedTextures/%s.png"), *AssetName);
+			FString Dir = FPaths::GetPath(OutputPath);
+			if (!IFileManager::Get().DirectoryExists(*Dir)) { IFileManager::Get().MakeDirectory(*Dir, true); }
+
+			DownloadViaCurl(PollUrl, OutputPath, [TaskId](const FString& FilePath, bool bOk, const FString& Err)
+			{
+				TSharedPtr<FTextureTask>* TaskPtr = TaskStore.Find(TaskId);
+				if (!TaskPtr || !TaskPtr->IsValid()) { return; }
+				FTextureTask& Task = **TaskPtr;
+				if (!bOk)
+				{
+					Task.Status = ETextureTaskStatus::Failed;
+					Task.ErrorMessage = Err;
+					return;
+				}
+
+				Task.ImageFilePath = FilePath;
+
+				FString ImportError;
+				if (!ImportTextureAsset(FilePath, Task.AssetName, Task.SavePath, Task.AssetPath, ImportError))
+				{
+					Task.Status = ETextureTaskStatus::Failed;
+					Task.ErrorMessage = ImportError;
+					return;
+				}
+
+				if (Task.bCreateMaterial)
+				{
+					FString MatError;
+					CreateMaterialFromTexture(Task.AssetPath, Task.AssetName, Task.SavePath, Task.MaterialPath, MatError);
+				}
+
+				Task.Status = ETextureTaskStatus::Completed;
+				UE_LOG(LogSmithUE, Log, TEXT("generate_texture: Task %s completed (curl) → %s"), *TaskId, *Task.AssetPath);
+			});
+
+			UE_LOG(LogSmithUE, Log, TEXT("generate_texture: Started task %s (Pollinations via curl)"), *TaskId);
+
+			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+			Data->SetStringField(TEXT("task_id"), TaskId);
+			Data->SetStringField(TEXT("status"), TEXT("processing"));
+			return FSmithUECommonUtils::CreateSuccessResponse(Data);
+		}
+
+		// Fire HTTP request for non-Pollinations formats.
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
+		HttpRequest->SetTimeout(300.0f);
+		HttpRequest->SetVerb(TEXT("POST"));
+		HttpRequest->SetURL(Endpoint);
+		HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
 		bool bIsGoogle = (Format == EApiFormat::Imagen || Format == EApiFormat::GoogleNative);
 		if (bIsGoogle)
 		{
@@ -668,12 +783,11 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 		{
 			HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *ApiKey));
 		}
-	}
+		HttpRequest->SetContentAsString(RequestBody);
 
-	HttpRequest->SetContentAsString(RequestBody);
-	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[TaskId, Format](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bSuccess)
-		{
+		HttpRequest->OnProcessRequestComplete().BindLambda(
+			[TaskId, Format](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bSuccess)
+			{
 			OnApiResponseReceived(Req, Resp, bSuccess, TaskId, Format);
 		});
 	HttpRequest->ProcessRequest();
@@ -736,23 +850,47 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateAudio(const TShar
 	Task->AssetName = AssetName;
 	AudioTaskStore.Add(TaskId, Task);
 
-	// Fire async HTTP GET
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
-	HttpRequest->SetURL(Url);
-	HttpRequest->SetVerb(TEXT("GET"));
-	HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *ApiKey));
-	HttpRequest->SetHeader(TEXT("Accept"), TEXT("audio/mpeg"));
-	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[TaskId](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
-		{
-			AsyncTask(ENamedThreads::GameThread, [TaskId, Req, Resp, bOk]()
-			{
-				OnAudioResponseReceived(Req, Resp, bOk, TaskId);
-			});
-		});
-	HttpRequest->ProcessRequest();
+		FString OutputPath = FPaths::ProjectSavedDir() / FString::Printf(TEXT("GeneratedAudio/%s.mp3"), *AssetName);
+		FString Dir = FPaths::GetPath(OutputPath);
+		if (!IFileManager::Get().DirectoryExists(*Dir)) { IFileManager::Get().MakeDirectory(*Dir, true); }
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		TArray<FString> Headers;
+		Headers.Add(FString::Printf(TEXT("Authorization: Bearer %s"), *ApiKey));
+		Headers.Add(TEXT("Accept: audio/mpeg"));
+		DownloadViaCurl(Url, OutputPath, [TaskId](const FString& FilePath, bool bOk, const FString& Err)
+		{
+			TSharedPtr<FAudioTask>* TaskPtr = AudioTaskStore.Find(TaskId);
+			if (!TaskPtr || !TaskPtr->IsValid()) { return; }
+			FAudioTask& Task = **TaskPtr;
+			if (!bOk)
+			{
+				Task.Status = ETextureTaskStatus::Failed;
+				Task.ErrorMessage = Err;
+				return;
+			}
+
+			Task.AudioFilePath = FilePath;
+
+			FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+			USoundFactory* Factory = NewObject<USoundFactory>();
+			TArray<FString> Files;
+			Files.Add(FilePath);
+			TArray<UObject*> Imported = AssetToolsModule.Get().ImportAssets(Files, Task.SavePath, Factory, false);
+			if (Imported.Num() > 0 && Imported[0])
+			{
+				Imported[0]->MarkPackageDirty();
+				Task.AssetPath = Imported[0]->GetPathName();
+				Task.Status = ETextureTaskStatus::Completed;
+				UE_LOG(LogSmithUE, Log, TEXT("generate_audio: Task %s completed (curl) → %s"), *TaskId, *Task.AssetPath);
+			}
+			else
+			{
+				Task.Status = ETextureTaskStatus::Failed;
+				Task.ErrorMessage = TEXT("Failed to import audio as USoundWave asset");
+			}
+		}, Headers);
+
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("task_id"), TaskId);
 	Data->SetStringField(TEXT("status"), TEXT("processing"));
 	Data->SetStringField(TEXT("voice"), Voice);
