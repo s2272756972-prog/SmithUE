@@ -1,0 +1,44 @@
+scan_assets 响应字段 -> T1 规则映射：
+  name               -> 规则 1 (BP 命名模式：对资产名执行外部模式匹配)
+  package_name       -> 规则 1 (BP 命名模式：对包名执行外部模式匹配)
+  package_path       -> 规则 2 (输出文件夹：检查资产所在目录是否符合目标/禁止路径规则)
+  parent_class       -> 规则 3 (父/基类：检查父类白名单或必须继承某基类)
+  material_slots     -> 规则 7 (材质槽填充：获取网格槽总数，与 material_slot_paths 配合验证全部填充)
+  material_slot_paths -> 规则 7 (材质槽填充：各槽已填路径，空字符串表示未填充槽)
+  lod_count          -> 规则 8 (LOD0 存在：LODs >= 1 作为 LOD0 存在的 v1 判据)
+  min_lod            -> 规则 8 (LOD0 存在：MinLOD=0 配合 lod_count 验证 LOD0 可用)
+  has_collision      -> 辅助字段 (支持规则 5 的 mesh 碰撞前置检查：无碰撞几何体时可提前告警)
+  path               -> 全局定位 (资产完整对象路径，用于后续 get_asset_property / bp_describe_components 调用)
+  class              -> 资产类型区分 (决定哪些规则字段适用，如 Blueprint vs StaticMesh 的分支判断)
+
+bp_describe_components 组件字段 -> T1 规则映射：
+  name               -> 规则 4 (必需组件名：验证组件变量名是否符合命名规范或必需组件名单)
+  class              -> 规则 4 (必需组件类：验证是否存在必需的组件类型，如 StaticMeshComponent)
+  source             -> 规则 4 辅助 (区分 own/inherited，配合 inherited_unverifiable 决定是否可检查)
+  mobility           -> 规则 6 (Mobility：验证组件 Mobility 枚举值，如必须为 Static)
+  collision.profile  -> 规则 5 (碰撞 preset：验证碰撞预设名称，如 BlockAll)
+  collision.enabled  -> 规则 5 (碰撞开关：验证碰撞启用模式，如 QueryAndPhysics)
+  materials          -> 规则 7 (材质槽填充，组件层面：验证组件材质数组非空且数量不少于网格槽数)
+  mesh               -> 规则 7 辅助 (网格路径：配合 materials 验证 mesh 已挂载且材质完整)
+  inherited_unverifiable -> 规则 9 盲区标注 (true 表示继承自父 BP 且当前读回能力无法确认属性；
+                           v1 linter 遇到此标注时跳过对应规则 4/5/6/7 的检查，不得静默判定通过或失败)
+
+断言：零孤立字段
+  scan_assets 所有字段均已映射到至少一条规则或全局用途：✓
+  bp_describe_components 所有字段均已映射到至少一条规则或盲区标注：✓
+
+规则覆盖验证：
+  规则 1 (BP 命名)       <- scan_assets.name, scan_assets.package_name
+  规则 2 (输出文件夹)    <- scan_assets.package_path
+  规则 3 (父/基类)       <- scan_assets.parent_class
+  规则 4 (必需组件)      <- bp_describe_components.name, bp_describe_components.class
+  规则 5 (碰撞 preset)   <- bp_describe_components.collision.profile, collision.enabled
+                           [辅助前置] scan_assets.has_collision
+  规则 6 (Mobility)      <- bp_describe_components.mobility
+  规则 7 (材质槽填充)    <- scan_assets.material_slots, scan_assets.material_slot_paths
+                           bp_describe_components.materials, bp_describe_components.mesh
+  规则 8 (LOD0 存在)     <- scan_assets.lod_count, scan_assets.min_lod
+  规则 9 盲区标注        <- bp_describe_components.inherited_unverifiable
+
+不在 scan_assets / bp_describe_components 范围的规则：
+  规则 4-6 (继承组件属性) — 需 bp_describe_components，不在 scan_assets 范围，已正确分层
