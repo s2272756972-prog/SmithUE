@@ -245,24 +245,14 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 获取添加新命令的详细步骤。
 
-### AI 辅助开发技能
+### AI 辅助开发
 
-SmithUE 在 `Docs/smithue-dev/SKILL.md` 提供了一份 AI 开发技能文件。该文件旨在教会 AI 编码助手如何为本项目做出贡献。
+AI 编码助手（OpenCode、Claude Code、Cline 等）应读取仓库根目录的以下文件：
 
-**安装：**
+- **[AGENTS.md](AGENTS.md)** — 仓库边界、构建命令、测试、高频踩坑
+- **[docs/spec/](docs/spec/)** — 工具开发规范（TOOL_SPEC + NAMING + PITFALLS）
 
-将技能目录复制到 AI 工具的技能路径：
-
-```bash
-# OpenCode (项目级)
-cp -r Plugins/SmithUE/Docs/smithue-dev {YourProject}/.agents/skills/
-
-# OpenCode (用户级)
-cp -r Plugins/SmithUE/Docs/smithue-dev ~/.agents/skills/
-
-# Claude Code
-cp -r Plugins/SmithUE/Docs/smithue-dev ~/.claude/skills/
-```
+运行时操作编辑器（非开发）的 `smithue-control` 技能随 [smithue-cli](https://www.npmjs.com/package/smithue-cli) 发布（`smithue-cli skill --install`）。
 
 ---
 

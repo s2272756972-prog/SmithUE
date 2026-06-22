@@ -229,21 +229,14 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions on adding new commands.
 
-### AI-Assisted Development Skill
-SmithUE provides an AI development skill file at `Docs/smithue-dev/SKILL.md`. This file teaches AI coding assistants how to contribute to the project.
+### AI-Assisted Development
 
-**Install:**
-Copy the skill directory to your AI tool's skill location:
-```bash
-# OpenCode (project-level)
-cp -r Plugins/SmithUE/Docs/smithue-dev {YourProject}/.agents/skills/
+AI coding assistants (OpenCode, Claude Code, Cline, etc.) should read these repo-root files:
 
-# OpenCode (user-level)
-cp -r Plugins/SmithUE/Docs/smithue-dev ~/.agents/skills/
+- **[AGENTS.md](AGENTS.md)** — repo boundaries, build commands, test systems, pitfalls
+- **[docs/spec/](docs/spec/)** — tool authoring conventions (TOOL_SPEC + NAMING + PITFALLS)
 
-# Claude Code
-cp -r Plugins/SmithUE/Docs/smithue-dev ~/.claude/skills/
-```
+The runtime `smithue-control` skill (for operating the editor, not development) ships with [smithue-cli](https://www.npmjs.com/package/smithue-cli) (`smithue-cli skill --install`).
 
 ---
 

@@ -64,18 +64,14 @@ Adding a new command takes about 15 minutes. It lets AI agents interact with Unr
 
 ### AI-Assisted Development
 
-If you use an AI coding tool like OpenCode, Claude Code, or Cline to contribute to SmithUE, install the bundled development skill. It helps your AI assistant understand the architecture, conventions, and workflow.
+AI coding assistants (OpenCode, Claude Code, Cline, etc.) should read these files in the repo root for full context:
 
-```
-# Skill file location:
-Docs/smithue-dev/SKILL.md
-```
+- **[AGENTS.md](AGENTS.md)** — repo boundaries, build commands, test systems, high-frequency pitfalls
+- **[docs/spec/TOOL_SPEC.md](docs/spec/TOOL_SPEC.md)** — tool authoring conventions, schema, thread safety, 6-step checklist
+- **[docs/spec/NAMING.md](docs/spec/NAMING.md)** — tool/param naming rules, canonical dictionary, description-for-routing
+- **[docs/spec/PITFALLS.md](docs/spec/PITFALLS.md)** — 13 documented pitfalls
 
-Installation per tool:
-
-- **OpenCode**: Copy `Docs/smithue-dev/` to `~/.agents/skills/smithue-dev/`
-- **Claude Code**: Run `claude skill add ./Docs/smithue-dev/SKILL.md`
-- **Other tools**: Add the content of `Docs/smithue-dev/SKILL.md` to your AI tool's system prompt or skill configuration.
+For runtime operation of the editor (not development), the `smithue-control` skill ships with [smithue-cli](https://www.npmjs.com/package/smithue-cli) (`smithue-cli skill --install`).
 
 ### Prerequisites
 
@@ -104,9 +100,8 @@ SmithUE/
 │   ├── Private/Transport/   # HTTP JSON server, dynamic port, /ready
 │   ├── Private/UI/          # Editor status indicator
 │   └── Public/ToolRegistry/ # Schema and Registry core
-├── Docs/
-│   └── smithue-dev/         # AI development skill
-│       └── SKILL.md
+├── docs/
+│   └── spec/                # TOOL_SPEC, NAMING, PITFALLS
 ├── CONTRIBUTING.md
 └── SmithUE.uplugin
 ```
