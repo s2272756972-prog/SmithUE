@@ -1,0 +1,124 @@
+{
+  "task": "T1 inherited component blind spot probe",
+  "generated_at": "2026-06-22",
+  "fixture": {
+    "parent_blueprint": "/Game/SmithUETest/BP_ReadbackProbe_Parent",
+    "child_blueprint": "/Game/SmithUETest/BP_ReadbackProbe_Child",
+    "inherited_component_name": "InheritedStaticMeshComponent"
+  },
+  "raw_outputs": {
+    "child_get_asset_info": {
+      "status": "success",
+      "data": {
+        "name": "BP_ReadbackProbe_Child",
+        "path": "/Game/SmithUETest/BP_ReadbackProbe_Child.BP_ReadbackProbe_Child",
+        "package_path": "/Game/SmithUETest",
+        "class": "Blueprint",
+        "package_name": "/Game/SmithUETest/BP_ReadbackProbe_Child",
+        "is_loaded": true,
+        "is_dirty": false,
+        "tags": {
+          "GeneratedClass": "/Script/Engine.BlueprintGeneratedClass'/Game/SmithUETest/BP_ReadbackProbe_Child.BP_ReadbackProbe_Child_C'",
+          "ParentClass": "/Script/Engine.BlueprintGeneratedClass'/Game/SmithUETest/BP_ReadbackProbe_Parent.BP_ReadbackProbe_Parent_C'",
+          "NativeParentClass": "/Script/CoreUObject.Class'/Script/Engine.Actor'",
+          "ClassFlags": "12847108",
+          "BlueprintType": "BPTYPE_Normal",
+          "IsDataOnly": "True",
+          "NumReplicatedProperties": "0",
+          "NativeComponents": "0",
+          "BlueprintComponents": "1",
+          "BlueprintPath": "BP_ReadbackProbe_Child",
+          "ImportedNamespaces": "()"
+        },
+        "dependencies": [
+          "/Game/SmithUETest/BP_ReadbackProbe_Parent"
+        ],
+        "referencers": []
+      }
+    },
+    "child_bp_get_summary": {
+      "status": "success",
+      "data": {
+        "bp_path": "/Game/SmithUETest/BP_ReadbackProbe_Child",
+        "parent_class": "/Game/SmithUETest/BP_ReadbackProbe_Parent.BP_ReadbackProbe_Parent_C",
+        "compile_status": "up_to_date",
+        "interfaces": [],
+        "variables": [],
+        "functions": [
+          {
+            "name": "UserConstructionScript",
+            "node_count": 2
+          }
+        ],
+        "event_graphs": [
+          {
+            "name": "EventGraph",
+            "node_count": 6
+          }
+        ],
+        "components": []
+      }
+    },
+    "parent_bp_get_component_details": {
+      "status": "success",
+      "data": {
+        "bp_path": "/Game/SmithUETest/BP_ReadbackProbe_Parent",
+        "components": [
+          {
+            "name": "InheritedStaticMeshComponent",
+            "class": "StaticMeshComponent",
+            "source": "scs",
+            "mobility": "Movable",
+            "transform": {
+              "location": "X=0.000 Y=0.000 Z=0.000",
+              "rotation": "P=0.000000 Y=0.000000 R=0.000000",
+              "scale": "X=1.000 Y=1.000 Z=1.000"
+            },
+            "absolute": {
+              "location": false,
+              "rotation": false,
+              "scale": false
+            },
+            "visibility": {
+              "visible": true,
+              "hidden_in_game": false
+            },
+            "physics": {
+              "simulate_physics": false,
+              "enable_gravity": true
+            },
+            "collision": {
+              "profile": "BlockAll",
+              "enabled": "QueryAndPhysics"
+            },
+            "materials": [
+              "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"
+            ],
+            "mesh": "/Game/SmithUETest/SM_ComplianceProbe_Cube.SM_ComplianceProbe_Cube"
+          }
+        ]
+      }
+    },
+    "child_bp_get_component_details_include_inherited_true": {
+      "status": "success",
+      "data": {
+        "bp_path": "/Game/SmithUETest/BP_ReadbackProbe_Child",
+        "components": []
+      }
+    },
+    "child_bp_get_component_details_include_inherited_false": {
+      "status": "success",
+      "data": {
+        "bp_path": "/Game/SmithUETest/BP_ReadbackProbe_Child",
+        "components": []
+      }
+    }
+  },
+  "conclusion": {
+    "inherited_component_visible_on_parent": true,
+    "inherited_component_visible_on_child_with_include_inherited_true": false,
+    "inherited_component_visible_on_child_with_include_inherited_false": false,
+    "status": "blind_spot_confirmed",
+    "note": "The child BP exposes parent_class and dependency metadata, but component details on the child return an empty components array even when include_inherited=true."
+  }
+}

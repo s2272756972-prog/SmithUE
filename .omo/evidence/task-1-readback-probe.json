@@ -1,0 +1,572 @@
+{
+  "task": "T1 read-back fidelity spike",
+  "generated_at": "2026-06-22",
+  "environment": {
+    "port": 13721,
+    "plugin_version": "1.9.0",
+    "ready": true,
+    "pie_active": false
+  },
+  "fixture": {
+    "folder": "/Game/SmithUETest",
+    "static_mesh": "/Game/SmithUETest/SM_ComplianceProbe_Cube",
+    "ideal_blueprint": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+    "inherited_parent_blueprint": "/Game/SmithUETest/BP_ReadbackProbe_Parent",
+    "inherited_child_blueprint": "/Game/SmithUETest/BP_ReadbackProbe_Child"
+  },
+  "selected_blueprint_tool_schemas": [
+    {
+      "name": "bp_create",
+      "category": "Blueprint",
+      "description": "Create a new Blueprint asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "description": "Blueprint asset name",
+          "required": true
+        },
+        {
+          "name": "parent_class",
+          "type": "string",
+          "description": "Parent class name",
+          "required": true
+        },
+        {
+          "name": "save_path",
+          "type": "string",
+          "description": "Destination content path",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bp_add_component",
+      "category": "Blueprint",
+      "description": "Add a component to a Blueprint SCS",
+      "params": [
+        {
+          "name": "bp_path",
+          "type": "string",
+          "description": "Blueprint asset path",
+          "required": true
+        },
+        {
+          "name": "component_class",
+          "type": "string",
+          "description": "Component class name",
+          "required": true,
+          "example": "StaticMeshComponent"
+        },
+        {
+          "name": "component",
+          "type": "string",
+          "description": "Component instance name",
+          "required": true
+        },
+        {
+          "name": "static_mesh",
+          "type": "string",
+          "description": "Optional StaticMesh asset path for StaticMeshComponent",
+          "required": false
+        },
+        {
+          "name": "parent",
+          "type": "string",
+          "description": "Optional parent component name to attach to",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "bp_bulk_set_component_property",
+      "category": "Blueprint",
+      "description": "Bulk-set generic component template properties on own SCS components in one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Supports dotted/indexed property_path (e.g. RelativeLocation.Z, BodyInstance.bSimulatePhysics, OverrideMaterials[0]) plus semantic setters for collision, StaticMesh, Material[i], PostProcessMaterial, and ChildActorClass. Set include_inherited=true to edit parent-Blueprint SCS inherited components as child ICH override templates.",
+      "params": [
+        {
+          "name": "bp_path",
+          "type": "string",
+          "description": "Single Blueprint asset path. Provide this OR folder_path.",
+          "required": false
+        },
+        {
+          "name": "folder_path",
+          "type": "string",
+          "description": "Content folder (e.g. /Game/Vehicles); applies to all Blueprints directly under it (non-recursive). Leading /All is stripped. Provide this OR bp_path.",
+          "required": false
+        },
+        {
+          "name": "component_class",
+          "type": "string",
+          "description": "Optional component class filter by class/superclass name, e.g. StaticMeshComponent. Empty = all component classes.",
+          "required": false,
+          "example": "StaticMeshComponent"
+        },
+        {
+          "name": "component",
+          "type": "string",
+          "description": "Optional component variable/template name. Empty = all matching own SCS components.",
+          "required": false
+        },
+        {
+          "name": "edits",
+          "type": "array",
+          "description": "Required array of objects {property_path,value}. property_path supports dotted/indexed paths and semantic keys Collision.ObjectType, Collision.Response.<Channel>, Collision.Profile, StaticMesh, Material[i]/Materials[i], PostProcessMaterial, ChildActorClass.",
+          "required": true,
+          "itemsType": "object",
+          "example": "[{\"property_path\":\"RelativeLocation.Z\",\"value\":500}]"
+        },
+        {
+          "name": "include_inherited",
+          "type": "boolean",
+          "description": "Also target parent-Blueprint SCS inherited components by creating/reusing child InheritableComponentHandler override templates. Default false.",
+          "required": false
+        },
+        {
+          "name": "dry_run",
+          "type": "boolean",
+          "description": "Preview changes without modifying or compiling. Default false.",
+          "required": false
+        },
+        {
+          "name": "defer_compile",
+          "type": "boolean",
+          "description": "Queue changed Blueprints and flush compilation once at end. Default false.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "bp_compile",
+      "category": "Blueprint",
+      "description": "Compile a Blueprint",
+      "params": [
+        {
+          "name": "bp_path",
+          "type": "string",
+          "description": "Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bp_get_summary",
+      "category": "Blueprint",
+      "description": "Get Blueprint metadata summary",
+      "params": [
+        {
+          "name": "bp_path",
+          "type": "string",
+          "description": "Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bp_get_component_details",
+      "category": "Blueprint",
+      "description": "Read component template properties (mobility, transform, absolute flags, physics, collision, visibility, mesh, materials) for a Blueprint. Covers own SCS + inherited components. Closes the gap where bp_get_summary only shows hierarchy.",
+      "params": [
+        {
+          "name": "bp_path",
+          "type": "string",
+          "description": "Blueprint asset path",
+          "required": true
+        },
+        {
+          "name": "component",
+          "type": "string",
+          "description": "Optional: only this component name. Empty = all.",
+          "required": false
+        },
+        {
+          "name": "props",
+          "type": "string",
+          "description": "Optional comma filter: transform,mobility,physics,rendering,mesh,collision. Default all.",
+          "required": false
+        },
+        {
+          "name": "include_inherited",
+          "type": "boolean",
+          "description": "Include inherited (parent/native) components. Default true.",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "raw_outputs": {
+    "status": {
+      "port": 13721,
+      "pid": 0,
+      "project_name": "",
+      "ready": true,
+      "version": "1.9.0",
+      "pie_active": false,
+      "selection_mode": "explicit"
+    },
+    "list_assets": {
+      "status": "success",
+      "data": {
+        "assets": [
+          {
+            "name": "BP_SM_ComplianceProbe_Cube",
+            "path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube.BP_SM_ComplianceProbe_Cube",
+            "package_path": "/Game/SmithUETest",
+            "class": "Blueprint"
+          },
+          {
+            "name": "SM_ComplianceProbe_Cube",
+            "path": "/Game/SmithUETest/SM_ComplianceProbe_Cube.SM_ComplianceProbe_Cube",
+            "package_path": "/Game/SmithUETest",
+            "class": "StaticMesh"
+          },
+          {
+            "name": "BP_ReadbackProbe_Parent",
+            "path": "/Game/SmithUETest/BP_ReadbackProbe_Parent.BP_ReadbackProbe_Parent",
+            "package_path": "/Game/SmithUETest",
+            "class": "Blueprint"
+          },
+          {
+            "name": "BP_ReadbackProbe_Child",
+            "path": "/Game/SmithUETest/BP_ReadbackProbe_Child.BP_ReadbackProbe_Child",
+            "package_path": "/Game/SmithUETest",
+            "class": "Blueprint"
+          }
+        ],
+        "count": 4,
+        "folder_path": "/Game/SmithUETest"
+      }
+    },
+    "get_asset_info_blueprint": {
+      "status": "success",
+      "data": {
+        "name": "BP_SM_ComplianceProbe_Cube",
+        "path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube.BP_SM_ComplianceProbe_Cube",
+        "package_path": "/Game/SmithUETest",
+        "class": "Blueprint",
+        "package_name": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+        "is_loaded": true,
+        "is_dirty": true,
+        "tags": {
+          "GeneratedClass": "/Script/Engine.BlueprintGeneratedClass'/Game/SmithUETest/BP_SM_ComplianceProbe_Cube.BP_SM_ComplianceProbe_Cube_C'",
+          "ParentClass": "/Script/CoreUObject.Class'/Script/Engine.Actor'",
+          "NativeParentClass": "/Script/CoreUObject.Class'/Script/Engine.Actor'",
+          "ClassFlags": "12847108",
+          "BlueprintType": "BPTYPE_Normal",
+          "IsDataOnly": "False",
+          "NumReplicatedProperties": "0",
+          "NativeComponents": "0",
+          "BlueprintComponents": "1",
+          "BlueprintPath": "BP_SM_ComplianceProbe_Cube",
+          "ImportedNamespaces": "()"
+        },
+        "dependencies": [],
+        "referencers": []
+      }
+    },
+    "get_asset_info_static_mesh": {
+      "status": "success",
+      "data": {
+        "name": "SM_ComplianceProbe_Cube",
+        "path": "/Game/SmithUETest/SM_ComplianceProbe_Cube.SM_ComplianceProbe_Cube",
+        "package_path": "/Game/SmithUETest",
+        "class": "StaticMesh",
+        "package_name": "/Game/SmithUETest/SM_ComplianceProbe_Cube",
+        "is_loaded": true,
+        "is_dirty": true,
+        "tags": {
+          "Materials": "1",
+          "Vertices": "54",
+          "Triangles": "48",
+          "AssetImportData": "[]",
+          "NeverStream": "False",
+          "NaniteVertices": "0",
+          "NaniteFallbackPercent": "100.0",
+          "LODGroup": "None",
+          "DistanceFieldSize": "126132",
+          "ApproxSize": "100x100x100",
+          "SectionsWithCollision": "1",
+          "NaniteEnabled": "False",
+          "EstNaniteCompressedSize": "0",
+          "CollisionComplexity": "CTF_UseSimpleAndComplex",
+          "EstTotalCompressedSize": "1103",
+          "HasHiResMesh": "False",
+          "MinLOD": "0",
+          "UVChannels": "2",
+          "CollisionPrims": "1",
+          "DefaultCollision": "BlockAll",
+          "LODs": "1",
+          "NaniteTriangles": "0",
+          "QualityLevelMinLOD": "0"
+        },
+        "dependencies": [],
+        "referencers": [
+          "/Game/SmithUETest/BP_ReadbackProbe_Parent"
+        ]
+      }
+    },
+    "bp_get_summary": {
+      "status": "success",
+      "data": {
+        "bp_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+        "parent_class": "/Script/Engine.Actor",
+        "compile_status": "up_to_date",
+        "interfaces": [],
+        "variables": [],
+        "functions": [
+          {
+            "name": "UserConstructionScript",
+            "node_count": 1
+          }
+        ],
+        "event_graphs": [
+          {
+            "name": "EventGraph",
+            "node_count": 3
+          }
+        ],
+        "components": [
+          {
+            "name": "StaticMeshComponent",
+            "class": "StaticMeshComponent"
+          }
+        ]
+      }
+    },
+    "bp_get_component_details": {
+      "status": "success",
+      "data": {
+        "bp_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+        "components": [
+          {
+            "name": "StaticMeshComponent",
+            "class": "StaticMeshComponent",
+            "source": "scs",
+            "mobility": "Static",
+            "transform": {
+              "location": "X=0.000 Y=0.000 Z=0.000",
+              "rotation": "P=0.000000 Y=0.000000 R=0.000000",
+              "scale": "X=1.000 Y=1.000 Z=1.000"
+            },
+            "absolute": {
+              "location": false,
+              "rotation": false,
+              "scale": false
+            },
+            "visibility": {
+              "visible": true,
+              "hidden_in_game": false
+            },
+            "physics": {
+              "simulate_physics": false,
+              "enable_gravity": true
+            },
+            "collision": {
+              "profile": "BlockAll",
+              "enabled": "QueryAndPhysics"
+            },
+            "materials": [
+              "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"
+            ],
+            "mesh": "/Game/SmithUETest/SM_ComplianceProbe_Cube.SM_ComplianceProbe_Cube"
+          }
+        ]
+      }
+    },
+    "set_asset_property_probe": {
+      "command": "smithue-cli exec set_asset_property",
+      "params": {
+        "asset_path": "/Game/SmithUETest/SM_ComplianceProbe_Cube",
+        "property_path": "BodySetup.CollisionTraceFlag",
+        "value": "CTF_UseSimpleAndComplex",
+        "save": false
+      },
+      "output": {
+        "ok": false,
+        "error": {
+          "message": "Cannot resolve 'CollisionTraceFlag' after non-struct property in 'BodySetup.CollisionTraceFlag'",
+          "full_message": "Cannot resolve 'CollisionTraceFlag' after non-struct property in 'BodySetup.CollisionTraceFlag'",
+          "code": 4,
+          "exit": 4
+        }
+      },
+      "interpretation": "set_asset_property is a write primitive and does not provide a universal get-property counterpart; this dotted object-pointer path also failed. v1 read-back must rely on explicit read primitives and AssetRegistry tags."
+    }
+  },
+  "observations": [
+    {
+      "id": 1,
+      "rule": "BP naming pattern",
+      "status": "observable",
+      "primitives": [
+        "get_asset_info.data.name",
+        "get_asset_info.data.package_name",
+        "bp_get_summary.data.bp_path"
+      ],
+      "evidence": {
+        "name": "BP_SM_ComplianceProbe_Cube",
+        "package_name": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+        "bp_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube"
+      }
+    },
+    {
+      "id": 2,
+      "rule": "Output folder path",
+      "status": "observable",
+      "primitives": [
+        "list_assets.data.assets[].package_path",
+        "get_asset_info.data.package_path"
+      ],
+      "evidence": {
+        "listed_folder": "/Game/SmithUETest",
+        "package_path": "/Game/SmithUETest"
+      }
+    },
+    {
+      "id": 3,
+      "rule": "Parent/base class",
+      "status": "observable",
+      "primitives": [
+        "bp_get_summary.data.parent_class",
+        "get_asset_info.data.tags.ParentClass",
+        "get_asset_info.data.tags.NativeParentClass"
+      ],
+      "evidence": {
+        "summary_parent_class": "/Script/Engine.Actor",
+        "asset_parent_class": "/Script/CoreUObject.Class'/Script/Engine.Actor'",
+        "native_parent_class": "/Script/CoreUObject.Class'/Script/Engine.Actor'"
+      }
+    },
+    {
+      "id": 4,
+      "rule": "Required component name/class",
+      "status": "observable",
+      "primitives": [
+        "bp_get_component_details.data.components[].name",
+        "bp_get_component_details.data.components[].class",
+        "bp_get_summary.data.components[]"
+      ],
+      "evidence": [
+        {
+          "name": "StaticMeshComponent",
+          "class": "StaticMeshComponent",
+          "source": "scs"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "rule": "Collision preset",
+      "status": "observable",
+      "primitives": [
+        "bp_get_component_details.data.components[].collision.profile",
+        "bp_get_component_details.data.components[].collision.enabled"
+      ],
+      "evidence": [
+        {
+          "name": "StaticMeshComponent",
+          "collision": {
+            "profile": "BlockAll",
+            "enabled": "QueryAndPhysics"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "rule": "Mobility",
+      "status": "observable",
+      "primitives": [
+        "bp_get_component_details.data.components[].mobility"
+      ],
+      "evidence": [
+        {
+          "name": "StaticMeshComponent",
+          "mobility": "Static"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "rule": "Material slots filled",
+      "status": "observable_with_caveat",
+      "primitives": [
+        "bp_get_component_details.data.components[].materials[]",
+        "get_asset_info(StaticMesh).data.tags.Materials"
+      ],
+      "evidence": {
+        "component_materials": [
+          {
+            "name": "StaticMeshComponent",
+            "materials": [
+              "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"
+            ]
+          }
+        ],
+        "static_mesh_material_slot_count": "1"
+      },
+      "caveat": "Can check count/non-empty state by comparing component material array with StaticMesh material count. Does not expose richer slot metadata beyond paths/counts."
+    },
+    {
+      "id": 8,
+      "rule": "LOD0 exists",
+      "status": "observable",
+      "primitives": [
+        "get_asset_info(StaticMesh).data.tags.LODs",
+        "get_asset_info(StaticMesh).data.tags.MinLOD"
+      ],
+      "evidence": {
+        "LODs": "1",
+        "MinLOD": "0"
+      }
+    },
+    {
+      "id": 9,
+      "rule": "Inherited component properties on child Blueprint",
+      "status": "needs_new_primitive",
+      "primitives": [
+        "bp_get_component_details(include_inherited=true)"
+      ],
+      "evidence": {
+        "child_parent_class": "/Game/SmithUETest/BP_ReadbackProbe_Parent.BP_ReadbackProbe_Parent_C",
+        "parent_components": [
+          {
+            "name": "InheritedStaticMeshComponent",
+            "class": "StaticMeshComponent",
+            "source": "scs",
+            "mobility": "Movable",
+            "transform": {
+              "location": "X=0.000 Y=0.000 Z=0.000",
+              "rotation": "P=0.000000 Y=0.000000 R=0.000000",
+              "scale": "X=1.000 Y=1.000 Z=1.000"
+            },
+            "absolute": {
+              "location": false,
+              "rotation": false,
+              "scale": false
+            },
+            "visibility": {
+              "visible": true,
+              "hidden_in_game": false
+            },
+            "physics": {
+              "simulate_physics": false,
+              "enable_gravity": true
+            },
+            "collision": {
+              "profile": "BlockAll",
+              "enabled": "QueryAndPhysics"
+            },
+            "materials": [
+              "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"
+            ],
+            "mesh": "/Game/SmithUETest/SM_ComplianceProbe_Cube.SM_ComplianceProbe_Cube"
+          }
+        ],
+        "child_components_with_include_inherited_true": [],
+        "child_components_with_include_inherited_false": []
+      },
+      "conclusion": "Parent BP SCS component is fully readable on the parent asset, but not returned when querying the child BP even with include_inherited=true. Effective inherited component read-back requires a new primitive or explicit parent-chain merge with override support."
+    }
+  ]
+}
