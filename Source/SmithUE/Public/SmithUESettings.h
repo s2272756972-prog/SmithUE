@@ -43,6 +43,29 @@ public:
 		meta=(ToolTip="Check for SmithUE plugin updates automatically on Editor startup."))
 	bool bCheckForUpdatesOnStartup = true;
 
+	/** Default AI image generation endpoint. Leave empty to use Pollinations.ai (free). */
+	UPROPERTY(config, EditAnywhere, Category="AI Generation", meta=(DisplayName="Default Image Endpoint"))
+	FString DefaultImageEndpoint;
+
+	/** Default API key for the image endpoint. Not needed for Pollinations.ai. */
+	UPROPERTY(config, EditAnywhere, Category="AI Generation", meta=(DisplayName="Default API Key"))
+	FString DefaultApiKey;
+
+	/** Default model name (e.g. flux, dall-e-3). Leave empty for provider default. */
+	UPROPERTY(config, EditAnywhere, Category="AI Generation", meta=(DisplayName="Default Model"))
+	FString DefaultModel;
+
+	/** Pollinations.ai API key for audio generation (gen.pollinations.ai/audio). Get one free at pollinations.ai */
+	UPROPERTY(config, EditAnywhere, Category="AI Generation",
+		meta=(DisplayName="Pollinations Audio API Key",
+			  ToolTip="Required for generate_audio. Get a free key at https://pollinations.ai. Leave empty if providing api_key directly in the tool call."))
+	FString DefaultAudioApiKey;
+
+	static const USmithUESettings* Get()
+	{
+		return GetDefault<USmithUESettings>();
+	}
+
 	// UDeveloperSettings interface
 	// GetContainerName must return "Project" to appear under Project Settings → Plugins.
 	// Default for EditorPerProjectUserSettings is "Editor" (→ Editor Preferences), not "Project".

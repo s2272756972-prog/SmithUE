@@ -11,5 +11,6 @@ public:
 
 private:
 	static TSharedPtr<FJsonObject> HandleGenerateTexture(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleGenerateAudio(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleCheckGenerationTask(const TSharedPtr<FJsonObject>& Params);
 };

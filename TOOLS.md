@@ -1,6 +1,6 @@
 # SmithUE Tool Reference
 
-> **212 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **213 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
@@ -9,7 +9,7 @@
 | Blueprint | 34 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace |
 | Material | 20 | Materials, material instances, MPC, material functions |
 | Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
-| Asset | 14 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
+| Asset | 15 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
 | Level | 11 | Level management, landscape, foliage |
 | Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
@@ -134,7 +134,8 @@
 | `save_all_dirty` | Save all dirty (modified) assets to disk |
 | `get_content_browser_selection` | Get the folders and assets currently selected in the Content Browser |
 | `sync_content_browser` | Navigate the Content Browser to a folder or asset and bring it to focus |
-| `generate_texture` | Generate a texture from a text prompt using an external AI image generation API. Returns a task_id for polling. |
+| `generate_texture` | Generate a texture from a text prompt using an AI image generation API. Uses Pollinations.ai (free, no API key) by default. Provide endpoint + api_key for DALL-E, Imagen, or other providers. Returns a task_id for polling. |
+| `generate_audio` | Generate a sound asset (USoundWave) from text using Pollinations.ai TTS. Requires a Pollinations API key (free at pollinations.ai). Set it in Project Settings > Plugins > SmithUE, or pass api_key directly. |
 | `check_generation_task` | Check the status of an asynchronous texture generation task |
 
 ## Analysis

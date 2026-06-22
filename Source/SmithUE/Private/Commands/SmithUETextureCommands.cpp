@@ -4,6 +4,7 @@
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "SmithUEModule.h"
+#include "SmithUESettings.h"
 
 #include "AssetToolsModule.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -18,11 +19,15 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionTextureSample.h"
+#include "Async/Async.h"
+#include "GenericPlatform/GenericPlatformHttp.h"
 #include "Misc/Base64.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
+#include "Sound/SoundWave.h"
+#include "Factories/SoundFactory.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 
@@ -54,8 +59,20 @@ namespace
 		FString AssetName;
 	};
 
+	struct FAudioTask
+	{
+		FString TaskId;
+		ETextureTaskStatus Status = ETextureTaskStatus::Processing;
+		FString ErrorMessage;
+		FString AssetPath;
+		FString AudioFilePath;
+		FString SavePath;
+		FString AssetName;
+	};
+
 	// In-memory task store (game thread only, no locking needed)
 	TMap<FString, TSharedPtr<FTextureTask>> TaskStore;
+	TMap<FString, TSharedPtr<FAudioTask>> AudioTaskStore;
 
 	// ---------------------------------------------------------------------------
 	// API Format Detection
@@ -66,11 +83,16 @@ namespace
 		DallE,       // OpenAI DALL-E /images/generations
 		Imagen,      // Google Imagen /predict
 		OpenAIChat,  // together.xyz / openrouter / chat/completions
-		GoogleNative // generativelanguage.googleapis.com (Gemini)
+		GoogleNative, // generativelanguage.googleapis.com (Gemini)
+		Pollinations // free, no auth, returns raw image bytes
 	};
 
 	EApiFormat DetectApiFormat(const FString& Endpoint)
 	{
+		if (Endpoint.Contains(TEXT("pollinations.ai")))
+		{
+			return EApiFormat::Pollinations;
+		}
 		if (Endpoint.Contains(TEXT("images/generations")) || Endpoint.Contains(TEXT("api.openai.com/v1/images")))
 		{
 			return EApiFormat::DallE;
@@ -155,6 +177,28 @@ namespace
 			Payload->SetObjectField(TEXT("generationConfig"), GenConfig);
 			break;
 		}
+		case EApiFormat::Pollinations:
+		{
+			Payload->SetStringField(TEXT("prompt"), Prompt);
+			int32 W = 1024;
+			int32 H = 1024;
+			if (!AspectRatio.IsEmpty())
+			{
+				FString Left;
+				FString Right;
+				if (AspectRatio.Split(TEXT("x"), &Left, &Right))
+				{
+					W = FCString::Atoi(*Left);
+					H = FCString::Atoi(*Right);
+				}
+			}
+			Payload->SetNumberField(TEXT("width"), W);
+			Payload->SetNumberField(TEXT("height"), H);
+			Payload->SetStringField(TEXT("model"), ModelName.IsEmpty() ? TEXT("flux") : ModelName);
+			Payload->SetBoolField(TEXT("nologo"), true);
+			Payload->SetBoolField(TEXT("enhance"), true);
+			break;
+		}
 		}
 
 		FString Body;
@@ -171,6 +215,8 @@ namespace
 	{
 		switch (Format)
 		{
+		case EApiFormat::Pollinations:
+			break;
 		case EApiFormat::DallE:
 		{
 			const TArray<TSharedPtr<FJsonValue>>& Data = Json->GetArrayField(TEXT("data"));
@@ -365,32 +411,46 @@ namespace
 			return;
 		}
 
-		// Parse JSON response
-		TSharedPtr<FJsonObject> Json;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
-		if (!FJsonSerializer::Deserialize(Reader, Json) || !Json.IsValid())
-		{
-			Task.Status = ETextureTaskStatus::Failed;
-			Task.ErrorMessage = TEXT("Failed to parse API response JSON");
-			return;
-		}
-
-		// Extract base64 image data
-		FString Base64Data = ExtractBase64FromResponse(Format, Json);
-		if (Base64Data.IsEmpty())
-		{
-			Task.Status = ETextureTaskStatus::Failed;
-			Task.ErrorMessage = TEXT("No image data found in API response");
-			return;
-		}
-
-		// Decode base64 → PNG bytes
 		TArray<uint8> ImageBytes;
-		if (!FBase64::Decode(Base64Data, ImageBytes) || ImageBytes.Num() == 0)
+		if (Format == EApiFormat::Pollinations)
 		{
-			Task.Status = ETextureTaskStatus::Failed;
-			Task.ErrorMessage = TEXT("Failed to decode base64 image data");
-			return;
+			// Pollinations returns raw image bytes directly.
+			ImageBytes = Response->GetContent();
+			if (ImageBytes.Num() == 0)
+			{
+				Task.Status = ETextureTaskStatus::Failed;
+				Task.ErrorMessage = TEXT("Empty image response from Pollinations");
+				return;
+			}
+		}
+		else
+		{
+			// Parse JSON response
+			TSharedPtr<FJsonObject> Json;
+			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+			if (!FJsonSerializer::Deserialize(Reader, Json) || !Json.IsValid())
+			{
+				Task.Status = ETextureTaskStatus::Failed;
+				Task.ErrorMessage = TEXT("Failed to parse API response JSON");
+				return;
+			}
+
+			// Extract base64 image data
+			FString Base64Data = ExtractBase64FromResponse(Format, Json);
+			if (Base64Data.IsEmpty())
+			{
+				Task.Status = ETextureTaskStatus::Failed;
+				Task.ErrorMessage = TEXT("No image data found in API response");
+				return;
+			}
+
+			// Decode base64 → PNG bytes
+			if (!FBase64::Decode(Base64Data, ImageBytes) || ImageBytes.Num() == 0)
+			{
+				Task.Status = ETextureTaskStatus::Failed;
+				Task.ErrorMessage = TEXT("Failed to decode base64 image data");
+				return;
+			}
 		}
 
 		// Save PNG to disk
@@ -426,6 +486,63 @@ namespace
 		Task.Status = ETextureTaskStatus::Completed;
 		UE_LOG(LogSmithUE, Log, TEXT("generate_texture: Task %s completed → %s"), *TaskId, *Task.AssetPath);
 	}
+
+	void OnAudioResponseReceived(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, const FString& TaskId)
+	{
+		TSharedPtr<FAudioTask>* TaskPtr = AudioTaskStore.Find(TaskId);
+		if (!TaskPtr || !TaskPtr->IsValid()) { return; }
+		FAudioTask& Task = **TaskPtr;
+
+		if (!bWasSuccessful || !Response.IsValid() || Response->GetResponseCode() != 200)
+		{
+			Task.Status = ETextureTaskStatus::Failed;
+			Task.ErrorMessage = Response.IsValid()
+				? FString::Printf(TEXT("HTTP %d: %s"), Response->GetResponseCode(), *Response->GetContentAsString().Left(300))
+				: TEXT("Request failed — no response");
+			return;
+		}
+
+		// Raw audio bytes (mp3)
+		const TArray<uint8>& AudioBytes = Response->GetContent();
+		if (AudioBytes.Num() == 0)
+		{
+			Task.Status = ETextureTaskStatus::Failed;
+			Task.ErrorMessage = TEXT("Empty audio response");
+			return;
+		}
+
+		// Save mp3 to disk
+		FString Filename = FString::Printf(TEXT("GeneratedAudio/%s.mp3"), *Task.AssetName);
+		FString FullPath = FPaths::ProjectSavedDir() / Filename;
+		FString Dir = FPaths::GetPath(FullPath);
+		if (!IFileManager::Get().DirectoryExists(*Dir)) { IFileManager::Get().MakeDirectory(*Dir, true); }
+		if (!FFileHelper::SaveArrayToFile(AudioBytes, *FullPath))
+		{
+			Task.Status = ETextureTaskStatus::Failed;
+			Task.ErrorMessage = TEXT("Failed to save audio file to disk");
+			return;
+		}
+		Task.AudioFilePath = FullPath;
+
+		// Import as USoundWave asset
+		FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+		USoundFactory* Factory = NewObject<USoundFactory>();
+		TArray<FString> Files;
+		Files.Add(FullPath);
+		TArray<UObject*> Imported = AssetToolsModule.Get().ImportAssets(Files, Task.SavePath, Factory, false);
+		if (Imported.Num() > 0 && Imported[0])
+		{
+			Imported[0]->MarkPackageDirty();
+			Task.AssetPath = Imported[0]->GetPathName();
+			Task.Status = ETextureTaskStatus::Completed;
+			UE_LOG(LogSmithUE, Log, TEXT("generate_audio: Task %s completed → %s"), *TaskId, *Task.AssetPath);
+		}
+		else
+		{
+			Task.Status = ETextureTaskStatus::Failed;
+			Task.ErrorMessage = TEXT("Failed to import audio as USoundWave asset");
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -436,11 +553,11 @@ void FSmithUETextureCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 {
 	Registry.Register(
 		FSmithUEToolSchema(TEXT("generate_texture"), TEXT("Asset"),
-			TEXT("Generate a texture from a text prompt using an external AI image generation API. Returns a task_id for polling."),
+			TEXT("Generate a texture from a text prompt using an AI image generation API. Uses Pollinations.ai (free, no API key) by default. Provide endpoint + api_key for DALL-E, Imagen, or other providers. Returns a task_id for polling."),
 			{
 				FSmithUEToolParam(TEXT("prompt"), TEXT("string"), TEXT("Text prompt describing the desired texture"), true),
-				FSmithUEToolParam(TEXT("endpoint"), TEXT("string"), TEXT("AI API endpoint URL (auto-detects DALL-E/Imagen/OpenAI/Google format)"), true),
-				FSmithUEToolParam(TEXT("api_key"), TEXT("string"), TEXT("API authentication key (Bearer token or Google API key)"), true),
+				FSmithUEToolParam(TEXT("endpoint"), TEXT("string"), TEXT("AI API endpoint URL (default: https://image.pollinations.ai/; auto-detects Pollinations/DALL-E/Imagen/OpenAI/Google format)")),
+				FSmithUEToolParam(TEXT("api_key"), TEXT("string"), TEXT("API authentication key (not needed for Pollinations.ai)")),
 				FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Content Browser path for the asset (default: /Game/GeneratedTextures)")),
 				FSmithUEToolParam(TEXT("asset_name"), TEXT("string"), TEXT("Custom asset name (default: auto-generated timestamp)")),
 				FSmithUEToolParam(TEXT("model"), TEXT("string"), TEXT("Model name to pass to the API (e.g. dall-e-3, imagen-4.0)")),
@@ -448,6 +565,18 @@ void FSmithUETextureCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 				FSmithUEToolParam(TEXT("create_material"), TEXT("boolean"), TEXT("Auto-create a material with this texture (default: false)")),
 			}),
 		&HandleGenerateTexture);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("generate_audio"), TEXT("Asset"),
+		TEXT("Generate a sound asset (USoundWave) from text using Pollinations.ai TTS. Requires a Pollinations API key (free at pollinations.ai). Set it in Project Settings > Plugins > SmithUE, or pass api_key directly."),
+		{
+			FSmithUEToolParam(TEXT("text"), TEXT("string"), TEXT("Text to synthesize into speech/audio"), true),
+			FSmithUEToolParam(TEXT("api_key"), TEXT("string"), TEXT("Pollinations.ai API key. If omitted, reads from Project Settings > SmithUE > Pollinations Audio API Key.")),
+			FSmithUEToolParam(TEXT("voice"), TEXT("string"), TEXT("Voice name: alloy, echo, fable, onyx, nova (default), shimmer")),
+			FSmithUEToolParam(TEXT("model"), TEXT("string"), TEXT("TTS model (default: openai-tts)")),
+			FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Content Browser path for the asset (default: /Game/GeneratedAudio)")),
+			FSmithUEToolParam(TEXT("asset_name"), TEXT("string"), TEXT("Custom asset name (default: auto-generated)"))
+		}),
+		&HandleGenerateAudio);
 
 	Registry.Register(
 		FSmithUEToolSchema(TEXT("check_generation_task"), TEXT("Asset"),
@@ -465,12 +594,25 @@ void FSmithUETextureCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSharedPtr<FJsonObject>& Params)
 {
 	FString Prompt = Params->GetStringField(TEXT("prompt"));
-	FString Endpoint = Params->GetStringField(TEXT("endpoint"));
-	FString ApiKey = Params->GetStringField(TEXT("api_key"));
 
 	if (Prompt.IsEmpty()) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("prompt is required")); }
-	if (Endpoint.IsEmpty()) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("endpoint is required")); }
-	if (ApiKey.IsEmpty()) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("api_key is required")); }
+
+	const USmithUESettings* Settings = USmithUESettings::Get();
+	FString Endpoint = Params->GetStringField(TEXT("endpoint"));
+	if (Endpoint.IsEmpty() && Settings)
+	{
+		Endpoint = Settings->DefaultImageEndpoint;
+	}
+	if (Endpoint.IsEmpty())
+	{
+		Endpoint = TEXT("https://image.pollinations.ai/");
+	}
+
+	FString ApiKey = Params->GetStringField(TEXT("api_key"));
+	if (ApiKey.IsEmpty() && Settings)
+	{
+		ApiKey = Settings->DefaultApiKey;
+	}
 
 	FString SavePath = Params->GetStringField(TEXT("save_path"));
 	if (SavePath.IsEmpty()) { SavePath = TEXT("/Game/GeneratedTextures"); }
@@ -482,6 +624,10 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 	}
 
 	FString ModelName = Params->GetStringField(TEXT("model"));
+	if (ModelName.IsEmpty() && Settings)
+	{
+		ModelName = Settings->DefaultModel;
+	}
 	FString AspectRatio = Params->GetStringField(TEXT("aspect_ratio"));
 	bool bCreateMaterial = Params->HasField(TEXT("create_material")) && Params->GetBoolField(TEXT("create_material"));
 
@@ -496,6 +642,11 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 
 	// Detect API format and build request
 	EApiFormat Format = DetectApiFormat(Endpoint);
+	if (Format != EApiFormat::Pollinations && ApiKey.IsEmpty())
+	{
+		TaskStore.Remove(TaskId);
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("api_key is required for the selected image endpoint"));
+	}
 	FString RequestBody = BuildRequestBody(Format, Prompt, ModelName, AspectRatio);
 
 	// Fire HTTP request
@@ -505,15 +656,18 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 	HttpRequest->SetURL(Endpoint);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 
-	// Auth header depends on format
-	bool bIsGoogle = (Format == EApiFormat::Imagen || Format == EApiFormat::GoogleNative);
-	if (bIsGoogle)
+	// Auth header depends on format. Pollinations is free and requires no auth.
+	if (Format != EApiFormat::Pollinations)
 	{
-		HttpRequest->SetHeader(TEXT("x-goog-api-key"), ApiKey);
-	}
-	else
-	{
-		HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *ApiKey));
+		bool bIsGoogle = (Format == EApiFormat::Imagen || Format == EApiFormat::GoogleNative);
+		if (bIsGoogle)
+		{
+			HttpRequest->SetHeader(TEXT("x-goog-api-key"), ApiKey);
+		}
+		else
+		{
+			HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *ApiKey));
+		}
 	}
 
 	HttpRequest->SetContentAsString(RequestBody);
@@ -534,6 +688,79 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateTexture(const TSh
 }
 
 // ---------------------------------------------------------------------------
+// HandleGenerateAudio
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleGenerateAudio(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Text, ApiKey, Voice, Model, SavePath, AssetName;
+	Params->TryGetStringField(TEXT("text"), Text);
+	if (Text.IsEmpty())
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required param: text"));
+	}
+
+	Params->TryGetStringField(TEXT("api_key"), ApiKey);
+	Params->TryGetStringField(TEXT("voice"), Voice);
+	Params->TryGetStringField(TEXT("model"), Model);
+	Params->TryGetStringField(TEXT("save_path"), SavePath);
+	Params->TryGetStringField(TEXT("asset_name"), AssetName);
+
+	// Fallback chain: param → settings → error
+	const USmithUESettings* Settings = USmithUESettings::Get();
+	if (ApiKey.IsEmpty() && Settings) { ApiKey = Settings->DefaultAudioApiKey; }
+	if (ApiKey.IsEmpty())
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			TEXT("api_key required for audio generation. Get a free key at https://pollinations.ai and set it in Project Settings > Plugins > SmithUE > Pollinations Audio API Key."));
+	}
+
+	if (Voice.IsEmpty()) { Voice = TEXT("nova"); }
+	if (Model.IsEmpty()) { Model = TEXT("openai-tts"); }
+	if (SavePath.IsEmpty()) { SavePath = TEXT("/Game/GeneratedAudio"); }
+	if (AssetName.IsEmpty())
+	{
+		AssetName = FString::Printf(TEXT("SW_Generated_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(8));
+	}
+
+	// Build Pollinations audio URL: GET /audio/{url-encoded-text}?voice=&model=
+	FString EncodedText = FGenericPlatformHttp::UrlEncode(Text);
+	FString Url = FString::Printf(TEXT("https://gen.pollinations.ai/audio/%s?voice=%s&model=%s"),
+		*EncodedText, *Voice, *Model);
+
+	// Create task
+	FString TaskId = FGuid::NewGuid().ToString(EGuidFormats::Digits).ToUpper();
+	TSharedPtr<FAudioTask> Task = MakeShared<FAudioTask>();
+	Task->TaskId = TaskId;
+	Task->SavePath = SavePath;
+	Task->AssetName = AssetName;
+	AudioTaskStore.Add(TaskId, Task);
+
+	// Fire async HTTP GET
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
+	HttpRequest->SetURL(Url);
+	HttpRequest->SetVerb(TEXT("GET"));
+	HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *ApiKey));
+	HttpRequest->SetHeader(TEXT("Accept"), TEXT("audio/mpeg"));
+	HttpRequest->OnProcessRequestComplete().BindLambda(
+		[TaskId](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
+		{
+			AsyncTask(ENamedThreads::GameThread, [TaskId, Req, Resp, bOk]()
+			{
+				OnAudioResponseReceived(Req, Resp, bOk, TaskId);
+			});
+		});
+	HttpRequest->ProcessRequest();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("task_id"), TaskId);
+	Data->SetStringField(TEXT("status"), TEXT("processing"));
+	Data->SetStringField(TEXT("voice"), Voice);
+	Data->SetStringField(TEXT("model"), Model);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
 // HandleCheckGenerationTask
 // ---------------------------------------------------------------------------
 
@@ -543,7 +770,34 @@ TSharedPtr<FJsonObject> FSmithUETextureCommands::HandleCheckGenerationTask(const
 	if (TaskId.IsEmpty()) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("task_id is required")); }
 
 	TSharedPtr<FTextureTask>* TaskPtr = TaskStore.Find(TaskId);
-	if (!TaskPtr || !TaskPtr->IsValid()) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Task not found: %s"), *TaskId)); }
+	if (!TaskPtr || !TaskPtr->IsValid())
+	{
+		TSharedPtr<FAudioTask>* AudioTaskPtr = AudioTaskStore.Find(TaskId);
+		if (!AudioTaskPtr || !AudioTaskPtr->IsValid()) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Task not found: %s"), *TaskId)); }
+
+		const FAudioTask& AudioTask = **AudioTaskPtr;
+
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("task_id"), TaskId);
+
+		switch (AudioTask.Status)
+		{
+		case ETextureTaskStatus::Processing:
+			Data->SetStringField(TEXT("status"), TEXT("processing"));
+			break;
+		case ETextureTaskStatus::Completed:
+			Data->SetStringField(TEXT("status"), TEXT("completed"));
+			Data->SetStringField(TEXT("asset_path"), AudioTask.AssetPath);
+			if (!AudioTask.AudioFilePath.IsEmpty()) { Data->SetStringField(TEXT("audio_file"), AudioTask.AudioFilePath); }
+			break;
+		case ETextureTaskStatus::Failed:
+			Data->SetStringField(TEXT("status"), TEXT("failed"));
+			Data->SetStringField(TEXT("error"), AudioTask.ErrorMessage);
+			break;
+		}
+
+		return FSmithUECommonUtils::CreateSuccessResponse(Data);
+	}
 
 	const FTextureTask& Task = **TaskPtr;
 
