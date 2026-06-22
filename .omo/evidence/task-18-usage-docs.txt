@@ -1,0 +1,8 @@
+PARADIGM.md L0: FOUND
+PARADIGM.md L1: FOUND
+PARADIGM.md L2: FOUND
+SPI.md 端口文件: FOUND
+SPI.md /ready: FOUND
+workflows/asset-to-blueprint.md factory: FOUND
+workflows/compliance-lint.md lint: FOUND
+workflows/spec-infer.md spec infer: FOUND
