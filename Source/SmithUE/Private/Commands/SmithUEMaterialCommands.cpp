@@ -1270,6 +1270,63 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
         }
     }
 
+    // Handle UMaterialExpressionTextureSample - sampler_type and texture
+    UMaterialExpressionTextureSample* TexSampleExpr = Cast<UMaterialExpressionTextureSample>(Expr);
+    if (TexSampleExpr)
+    {
+        FString SamplerTypeStr;
+        if (Props->TryGetStringField(TEXT("sampler_type"), SamplerTypeStr))
+        {
+            if (SamplerTypeStr.Equals(TEXT("Color"), ESearchCase::IgnoreCase) || SamplerTypeStr.Equals(TEXT("SAMPLERTYPE_Color"), ESearchCase::IgnoreCase))
+            {
+                TexSampleExpr->SamplerType = SAMPLERTYPE_Color;
+            }
+            else if (SamplerTypeStr.Equals(TEXT("Normal"), ESearchCase::IgnoreCase) || SamplerTypeStr.Equals(TEXT("SAMPLERTYPE_Normal"), ESearchCase::IgnoreCase))
+            {
+                TexSampleExpr->SamplerType = SAMPLERTYPE_Normal;
+            }
+            else if (SamplerTypeStr.Equals(TEXT("Masks"), ESearchCase::IgnoreCase) || SamplerTypeStr.Equals(TEXT("SAMPLERTYPE_Masks"), ESearchCase::IgnoreCase))
+            {
+                TexSampleExpr->SamplerType = SAMPLERTYPE_Masks;
+            }
+            else if (SamplerTypeStr.Equals(TEXT("Alpha"), ESearchCase::IgnoreCase) || SamplerTypeStr.Equals(TEXT("SAMPLERTYPE_Alpha"), ESearchCase::IgnoreCase))
+            {
+                TexSampleExpr->SamplerType = SAMPLERTYPE_Alpha;
+            }
+            else if (SamplerTypeStr.Equals(TEXT("Grayscale"), ESearchCase::IgnoreCase) || SamplerTypeStr.Equals(TEXT("SAMPLERTYPE_Grayscale"), ESearchCase::IgnoreCase))
+            {
+                TexSampleExpr->SamplerType = SAMPLERTYPE_Grayscale;
+            }
+            else if (SamplerTypeStr.Equals(TEXT("LinearColor"), ESearchCase::IgnoreCase) || SamplerTypeStr.Equals(TEXT("SAMPLERTYPE_LinearColor"), ESearchCase::IgnoreCase))
+            {
+                TexSampleExpr->SamplerType = SAMPLERTYPE_LinearColor;
+            }
+            else if (SamplerTypeStr.Equals(TEXT("LinearGrayscale"), ESearchCase::IgnoreCase) || SamplerTypeStr.Equals(TEXT("SAMPLERTYPE_LinearGrayscale"), ESearchCase::IgnoreCase))
+            {
+                TexSampleExpr->SamplerType = SAMPLERTYPE_LinearGrayscale;
+            }
+            else
+            {
+                return FSmithUECommonUtils::CreateErrorResponse(
+                    FString::Printf(TEXT("Unknown sampler_type: %s (use Color, Normal, Masks, Alpha, Grayscale, LinearColor, LinearGrayscale)"), *SamplerTypeStr));
+            }
+            Changed.Add(TEXT("sampler_type"));
+        }
+
+        FString TexturePath;
+        if (Props->TryGetStringField(TEXT("texture"), TexturePath))
+        {
+            UTexture* Tex = LoadObject<UTexture>(nullptr, *TexturePath);
+            if (!Tex)
+            {
+                return FSmithUECommonUtils::CreateErrorResponse(
+                    FString::Printf(TEXT("Texture not found: %s"), *TexturePath));
+            }
+            TexSampleExpr->Texture = Tex;
+            Changed.Add(TEXT("texture"));
+        }
+    }
+
     if (Changed.Num() == 0)
     {
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("No recognized properties were set. Check expression type and property names."));
