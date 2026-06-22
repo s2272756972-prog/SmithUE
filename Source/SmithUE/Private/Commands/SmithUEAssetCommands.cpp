@@ -4,6 +4,7 @@
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "SmithUEModule.h"
+#include "Utils/SmithUEAssetPropertyUtils.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "EditorAssetLibrary.h"
@@ -34,13 +35,7 @@ namespace
         bool bHasIndex = false;
     };
 
-    struct FAssetResolvedPropertyPath
-    {
-        FEditPropertyChain Chain;
-        FProperty* TopLevelProperty = nullptr;
-        FProperty* LeafProperty = nullptr;
-        void* LeafValuePtr = nullptr;
-    };
+    // FAssetResolvedPropertyPath is defined in Utils/SmithUEAssetPropertyUtils.h
 
     FString AssetJsonValueToImportText(const TSharedPtr<FJsonValue>& JsonValue)
     {
@@ -89,122 +84,6 @@ namespace
         if (OutSegment.Name.IsEmpty())
         {
             OutError = FString::Printf(TEXT("Invalid empty property segment in '%s'"), *SegmentText);
-            return false;
-        }
-        return true;
-    }
-
-    bool ResolveAssetObjectPropertyPath(UObject* Object, const FString& PropertyPath, FAssetResolvedPropertyPath& OutResolved, FString& OutError)
-    {
-        if (!Object)
-        {
-            OutError = TEXT("Invalid object");
-            return false;
-        }
-
-        TArray<FString> SegmentTexts;
-        PropertyPath.ParseIntoArray(SegmentTexts, TEXT("."), true);
-        if (SegmentTexts.Num() == 0)
-        {
-            OutError = TEXT("property_path is empty");
-            return false;
-        }
-
-        void* Container = Object;
-        UStruct* CurrentStruct = Object->GetClass();
-        for (int32 SegmentIndex = 0; SegmentIndex < SegmentTexts.Num(); ++SegmentIndex)
-        {
-            FAssetPropertyPathSegment Segment;
-            if (!ParseAssetPropertyPathSegment(SegmentTexts[SegmentIndex], Segment, OutError))
-            {
-                return false;
-            }
-
-            if (!CurrentStruct)
-            {
-                OutError = FString::Printf(TEXT("Cannot resolve '%s' after non-struct property in '%s'"), *Segment.Name, *PropertyPath);
-                return false;
-            }
-
-            FProperty* Property = CurrentStruct->FindPropertyByName(FName(*Segment.Name));
-            if (!Property)
-            {
-                OutError = FString::Printf(TEXT("Property not found: '%s' on '%s'"), *Segment.Name, *CurrentStruct->GetName());
-                return false;
-            }
-
-            OutResolved.Chain.AddTail(Property);
-            if (!OutResolved.TopLevelProperty)
-            {
-                OutResolved.TopLevelProperty = Property;
-            }
-            OutResolved.LeafProperty = Property;
-            void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
-
-            if (FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
-            {
-                if (!Segment.bHasIndex)
-                {
-                    if (SegmentIndex != SegmentTexts.Num() - 1)
-                    {
-                        OutError = FString::Printf(TEXT("Array property '%s' requires an index"), *Segment.Name);
-                        return false;
-                    }
-                    OutResolved.LeafValuePtr = ValuePtr;
-                    CurrentStruct = nullptr;
-                    Container = ValuePtr;
-                    continue;
-                }
-
-                FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
-                if (!ArrayHelper.IsValidIndex(Segment.Index))
-                {
-                    OutError = FString::Printf(TEXT("Array index %d out of range for '%s' (num=%d)"), Segment.Index, *Segment.Name, ArrayHelper.Num());
-                    return false;
-                }
-
-                void* ElementPtr = ArrayHelper.GetRawPtr(Segment.Index);
-                if (FStructProperty* InnerStructProperty = CastField<FStructProperty>(ArrayProperty->Inner))
-                {
-                    OutResolved.Chain.AddTail(ArrayProperty->Inner);
-                    OutResolved.LeafProperty = ArrayProperty->Inner;
-                    OutResolved.LeafValuePtr = ElementPtr;
-                    CurrentStruct = InnerStructProperty->Struct;
-                    Container = ElementPtr;
-                }
-                else
-                {
-                    OutResolved.Chain.AddTail(ArrayProperty->Inner);
-                    OutResolved.LeafProperty = ArrayProperty->Inner;
-                    OutResolved.LeafValuePtr = ElementPtr;
-                    CurrentStruct = nullptr;
-                    Container = ElementPtr;
-                }
-                continue;
-            }
-
-            if (Segment.bHasIndex)
-            {
-                OutError = FString::Printf(TEXT("Property '%s' is not an array"), *Segment.Name);
-                return false;
-            }
-
-            OutResolved.LeafValuePtr = ValuePtr;
-            if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
-            {
-                CurrentStruct = StructProperty->Struct;
-                Container = ValuePtr;
-            }
-            else
-            {
-                CurrentStruct = nullptr;
-                Container = ValuePtr;
-            }
-        }
-
-        if (!OutResolved.TopLevelProperty || !OutResolved.LeafProperty || !OutResolved.LeafValuePtr)
-        {
-            OutError = FString::Printf(TEXT("Failed to resolve property_path '%s'"), *PropertyPath);
             return false;
         }
         return true;
@@ -313,6 +192,126 @@ namespace
         EditorSubsystem->CloseAllEditorsForAsset(Asset);
         return true;
     }
+}
+
+// ---------------------------------------------------------------------------
+// ResolveAssetObjectPropertyPath (global — shared with SmithUEAssetAuditCommands)
+// ---------------------------------------------------------------------------
+
+bool ResolveAssetObjectPropertyPath(UObject* Object, const FString& PropertyPath, FAssetResolvedPropertyPath& OutResolved, FString& OutError)
+{
+    if (!Object)
+    {
+        OutError = TEXT("Invalid object");
+        return false;
+    }
+
+    TArray<FString> SegmentTexts;
+    PropertyPath.ParseIntoArray(SegmentTexts, TEXT("."), true);
+    if (SegmentTexts.Num() == 0)
+    {
+        OutError = TEXT("property_path is empty");
+        return false;
+    }
+
+    void* Container = Object;
+    UStruct* CurrentStruct = Object->GetClass();
+    for (int32 SegmentIndex = 0; SegmentIndex < SegmentTexts.Num(); ++SegmentIndex)
+    {
+        FAssetPropertyPathSegment Segment;
+        if (!ParseAssetPropertyPathSegment(SegmentTexts[SegmentIndex], Segment, OutError))
+        {
+            return false;
+        }
+
+        if (!CurrentStruct)
+        {
+            OutError = FString::Printf(TEXT("Cannot resolve '%s' after non-struct property in '%s'"), *Segment.Name, *PropertyPath);
+            return false;
+        }
+
+        FProperty* Property = CurrentStruct->FindPropertyByName(FName(*Segment.Name));
+        if (!Property)
+        {
+            OutError = FString::Printf(TEXT("Property not found: '%s' on '%s'"), *Segment.Name, *CurrentStruct->GetName());
+            return false;
+        }
+
+        OutResolved.Chain.AddTail(Property);
+        if (!OutResolved.TopLevelProperty)
+        {
+            OutResolved.TopLevelProperty = Property;
+        }
+        OutResolved.LeafProperty = Property;
+        void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+
+        if (FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+        {
+            if (!Segment.bHasIndex)
+            {
+                if (SegmentIndex != SegmentTexts.Num() - 1)
+                {
+                    OutError = FString::Printf(TEXT("Array property '%s' requires an index"), *Segment.Name);
+                    return false;
+                }
+                OutResolved.LeafValuePtr = ValuePtr;
+                CurrentStruct = nullptr;
+                Container = ValuePtr;
+                continue;
+            }
+
+            FScriptArrayHelper ArrayHelper(ArrayProperty, ValuePtr);
+            if (!ArrayHelper.IsValidIndex(Segment.Index))
+            {
+                OutError = FString::Printf(TEXT("Array index %d out of range for '%s' (num=%d)"), Segment.Index, *Segment.Name, ArrayHelper.Num());
+                return false;
+            }
+
+            void* ElementPtr = ArrayHelper.GetRawPtr(Segment.Index);
+            if (FStructProperty* InnerStructProperty = CastField<FStructProperty>(ArrayProperty->Inner))
+            {
+                OutResolved.Chain.AddTail(ArrayProperty->Inner);
+                OutResolved.LeafProperty = ArrayProperty->Inner;
+                OutResolved.LeafValuePtr = ElementPtr;
+                CurrentStruct = InnerStructProperty->Struct;
+                Container = ElementPtr;
+            }
+            else
+            {
+                OutResolved.Chain.AddTail(ArrayProperty->Inner);
+                OutResolved.LeafProperty = ArrayProperty->Inner;
+                OutResolved.LeafValuePtr = ElementPtr;
+                CurrentStruct = nullptr;
+                Container = ElementPtr;
+            }
+            continue;
+        }
+
+        if (Segment.bHasIndex)
+        {
+            OutError = FString::Printf(TEXT("Property '%s' is not an array"), *Segment.Name);
+            return false;
+        }
+
+        OutResolved.LeafValuePtr = ValuePtr;
+        if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+        {
+            CurrentStruct = StructProperty->Struct;
+            Container = ValuePtr;
+        }
+        else
+        {
+            CurrentStruct = nullptr;
+            Container = ValuePtr;
+        }
+    }
+
+    if (!OutResolved.TopLevelProperty || !OutResolved.LeafProperty || !OutResolved.LeafValuePtr)
+    {
+        OutError = FString::Printf(TEXT("Failed to resolve property_path '%s'"), *PropertyPath);
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------

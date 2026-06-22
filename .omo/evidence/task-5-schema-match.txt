@@ -1,0 +1,49 @@
+T5 Schema Match Evidence
+Generated: 2026-06-22
+Source: Source/SmithUE/Private/Commands/SmithUEAssetAuditCommands.cpp
+
+=== get_asset_property ===
+Contract fields (T2): asset_path, property → response: {asset_path, property, value}
+
+Request params registered:
+  Line 29: FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), ..., required=true)
+  Line 30: FSmithUEToolParam(TEXT("property"),   TEXT("string"), ..., required=true)
+
+Response fields set:
+  Line 133: Data->SetStringField(TEXT("asset_path"), AssetPath)
+  Line 134: Data->SetStringField(TEXT("property"), PropertyPath)
+  Line 135: Data->SetField(TEXT("value"), JsonVal)
+
+✅ get_asset_property response matches T2 contract: {asset_path, property, value}
+
+=== scan_assets ===
+Contract fields (T2): assets[{name, path, package_name, package_path, class, parent_class,
+                               material_slots, material_slot_paths, lod_count, min_lod, has_collision}]
+
+Response fields set per asset:
+  Line 190: name          → AD.AssetName.ToString()
+  Line 191: path          → AD.GetObjectPathString()
+  Line 192: package_name  → AD.PackageName.ToString()
+  Line 193: package_path  → AD.PackagePath.ToString()
+  Line 194: class         → AD.AssetClassPath.GetAssetName().ToString()
+  Line 200/202: parent_class → null or tag value
+  Line 209: material_slots → int from "Materials" tag
+  Line 211: material_slot_paths → empty array (fast path, no LoadObject)
+  Line 220: lod_count     → int from "LODs" tag
+  Line 221: min_lod       → int from "MinLOD" tag
+  Line 228: has_collision → bool (CollisionPrims > 0)
+
+  Line 234: top-level "assets" array
+
+✅ scan_assets response matches T2 contract: all 11 per-asset fields present
+
+=== Files Created ===
+  Source/SmithUE/Public/Utils/SmithUEAssetPropertyUtils.h        — shared resolver header
+  Source/SmithUE/Public/Commands/SmithUEAssetAuditCommands.h     — command class header
+  Source/SmithUE/Private/Commands/SmithUEAssetAuditCommands.cpp  — implementation
+
+=== SmithUEAssetCommands.cpp Minimal Edits ===
+  Edit 1: Added #include "Utils/SmithUEAssetPropertyUtils.h" after #include "SmithUEModule.h"
+  Edit 2: Replaced FAssetResolvedPropertyPath struct with comment (moved to shared header)
+  Edit 3: Moved ResolveAssetObjectPropertyPath() out of anonymous namespace to global scope
+          (function body unchanged; still callable by anon-ns helpers in same TU)
