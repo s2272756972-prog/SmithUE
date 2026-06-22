@@ -25,3 +25,9 @@
 - get_asset_property 请求：asset_path + property（点号路径）
 - scan_assets 响应关键字段：parent_class、material_slots、lod_count、has_collision
 - bp_describe_components 组件字段：mobility/collision.profile/materials/inherited_unverifiable
+
+## [2026-06-22] Task: T6 bp_describe_components
+- 自身 SCS: SimpleConstructionScript->GetAllNodes() 可读
+- ICH override: Blueprint->GetInheritableComponentHandler(false) → GetAllTemplates()
+- 父 BP SCS 继承（非 ICH）: 标 inherited_unverifiable=true
+- 三态：source=own / inherited_override / inherited（unverifiable）
