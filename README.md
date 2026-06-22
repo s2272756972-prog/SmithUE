@@ -98,7 +98,7 @@ SmithUE UE5 插件 (HTTP :动态端口)
 
 ## 命令参考
 
-SmithUE 提供了分布在 **23 个功能域** 中的 **211 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **23 个功能域** 中的 **214 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 

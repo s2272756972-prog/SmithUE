@@ -64,18 +64,12 @@ SmithUE 的成长离不开社区的贡献。**即使你不会写代码，也可�
 
 ### AI 辅助开发
 
-如果你使用 OpenCode、Claude Code 或 Cline 等 AI 编码工具参与 SmithUE 的开发，建议安装配套的开发技能。它会帮助你的 AI 助手理解项目的架构、规范和工作流程。
+AI 编码助手（OpenCode、Claude Code、Cline 等）应读取仓库根目录的以下文件：
 
-```
-# Skill 文件位置：
-Docs/smithue-dev/SKILL.md
-```
+- **[AGENTS.md](AGENTS.md)** — 仓库边界、构建命令、测试、高频踩坑
+- **[docs/spec/](docs/spec/)** — 工具开发规范（TOOL_SPEC + NAMING + PITFALLS）
 
-各工具安装方式：
-
-- **OpenCode**: 将 `Docs/smithue-dev/` 复制到 `~/.agents/skills/smithue-dev/`
-- **Claude Code**: 运行 `claude skill add ./Docs/smithue-dev/SKILL.md`
-- **其他工具**: 将 `Docs/smithue-dev/SKILL.md` 的内容添加到 AI 工具的 system prompt 或 skill 配置中。
+运行时操作编辑器（非开发）的 `smithue-control` 技能随 [smithue-cli](https://www.npmjs.com/package/smithue-cli) 发布（`smithue-cli skill --install`）。
 
 ### 环境要求
 
@@ -107,8 +101,7 @@ SmithUE/
 ├── Scripts/
 │   └── SmithUE-MCP/         # TypeScript MCP Server
 ├── Docs/
-│   └── smithue-dev/         # AI 开发技能
-│       └── SKILL.md
+│   └── spec/                # TOOL_SPEC, NAMING, PITFALLS
 ├── CONTRIBUTING.md
 └── SmithUE.uplugin
 ```
@@ -197,7 +190,7 @@ MCP Server 会自动从 Plugin 中发现新命令。不需要修改 TypeScript �
 - **响应格式**: 所有处理函数必须通过 `FSmithUECommonUtils::CreateSuccessResponse(Data)` 或 `CreateErrorResponse(Message)` 返回 JSON 对象。最终的封包将包含 `status: "success"|"error"` 和 `data: {...}`。
 - **日志**: 在 Plugin 中使用 `SMITHUE_LOG` 宏来记录统一的日志。
 - **验证**: 始终在处理函数开始处验证参数。对于无效或缺失的输入，返回清晰的错误信息。
-- **分类**: 命令分为 18 个领域（System, Project, Material, Asset, Editor, Interaction, Blueprint, Viewport, Observation, Analysis, Niagara, Level, Data, Sequencer, Environment, PIE, Animation, Input）。当 3 个或更多相关命令形成一个独特的组时，可以添加新领域。详情请参考 `Docs/smithue-dev/SKILL.md`。
+- **分类**: 命令分为 23 个域（Blueprint, Material, Niagara, Asset, Analysis, Level, Environment, PIE, Editor, Data, Observation, Interaction, Animation, Viewport, Sequencer, Input, System, Project, Curve, UMG, Debug, RenderTarget, Physics）。新增 3 个以上相关命令时可独立成域。
 - **完整参考**: 查看 [TOOLS.md](TOOLS.md) 获取包含参数 Schema 的完整工具参考。
 - **兼容性**: 仅针对 Unreal Engine 5.2。避免使用 5.3 或更高版本中引入的 API。
 
