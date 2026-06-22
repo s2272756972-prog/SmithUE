@@ -1,6 +1,6 @@
 # SmithUE Tool Reference
 
-> **213 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **214 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
@@ -9,7 +9,7 @@
 | Blueprint | 34 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace |
 | Material | 20 | Materials, material instances, MPC, material functions |
 | Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
-| Asset | 15 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
+| Asset | 16 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
 | Level | 11 | Level management, landscape, foliage |
 | Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
@@ -130,6 +130,7 @@
 | `delete_asset` | Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway. |
 | `move_asset` | Move an asset to a new path (different folder and/or name). Updates all references. |
 | `asset_editor` | Open or close asset editors. Supports single or multiple assets. |
+| `set_asset_property` | Set any property on a loaded UObject asset (Texture2D, StaticMesh, SkeletalMesh, Material, etc.) by dotted property path. Use for texture compression, LOD settings, mesh properties, etc. |
 | `save_asset` | Save a single asset to disk |
 | `save_all_dirty` | Save all dirty (modified) assets to disk |
 | `get_content_browser_selection` | Get the folders and assets currently selected in the Content Browser |
