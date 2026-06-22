@@ -83,7 +83,7 @@ To develop and compile the SmithUE plugin, you need:
 
 - Unreal Engine 5.2 installed
 - Visual Studio 2022 with the "Game development with C++" workload
-- Node.js 18+ for the MCP Server
+- Node.js is only required if you are developing the separate `smithue-cli` repo; it is not needed for this plugin repo
 - Git for cloning the repository
 
 ### Getting Started
@@ -95,17 +95,15 @@ cd SmithUE
 
 ### Repository Structure
 
-The project is divided into the C++ plugin and the TypeScript MCP server:
+The project is divided into the C++ plugin (this repo) and the separate `smithue-cli` client repo:
 
 ```text
 SmithUE/
 ├── Source/SmithUE/
 │   ├── Private/Commands/    # Domain command implementations
-│   ├── Private/Transport/   # HTTP server & connection manager
+│   ├── Private/Transport/   # HTTP JSON server, dynamic port, /ready
 │   ├── Private/UI/          # Editor status indicator
 │   └── Public/ToolRegistry/ # Schema and Registry core
-├── Scripts/
-│   └── SmithUE-MCP/         # TypeScript MCP Server
 ├── Docs/
 │   └── smithue-dev/         # AI development skill
 │       └── SKILL.md
@@ -113,7 +111,7 @@ SmithUE/
 └── SmithUE.uplugin
 ```
 
-Note: Adding new UE commands does not require changes to `Scripts/SmithUE-MCP/`. The MCP Server auto-discovers commands from the plugin.
+Note: Adding new UE commands does not require changes to `smithue-cli`. The CLI auto-discovers commands from the plugin at runtime via `/api/v1/tools`.
 
 ### How to Add a New Command
 
@@ -184,13 +182,16 @@ Adjust `{EngineRoot}`, `{ProjectRoot}`, and `{ProjectName}` to match your local 
 
 #### Step 6: Test Your Command
 
-You can test the command directly via HTTP before trying it through the MCP server:
+You can test the command directly through the CLI or by curling the plugin's dynamic port:
 
 ```bash
-curl -X POST http://localhost:13721/api/v1/execute -H "Content-Type: application/json" -d '{"command":"my_new_command","params":{"param_name":"test"}}'
+npx smithue-cli exec my_new_command '{"params":{"param_name":"test"}}'
+
+# Or read %LOCALAPPDATA%\.smithue\<pid>.port and curl that port directly
+curl -X POST http://localhost:<dynamic-port>/api/v1/execute -H "Content-Type: application/json" -d '{"command":"my_new_command","params":{"param_name":"test"}}'
 ```
 
-The MCP Server auto-discovers new commands from the plugin. No TypeScript changes are needed.
+`13721` is only an example in older docs; the real port is dynamic and comes from the port file.
 
 ### Code Conventions
 
@@ -237,4 +238,4 @@ TSharedPtr<FJsonObject> FSmithUEObservationCommands::HandleListActors(const TSha
 - [ ] Handler returns the correct JSON envelope format.
 - [ ] Parameters are validated and errors are handled gracefully.
 - [ ] Command is registered in the appropriate domain-specific file.
-- [ ] Functionality has been verified via `curl` or the MCP server.
+- [ ] Functionality has been verified via `smithue-cli exec` or by curling the dynamic port from `%LOCALAPPDATA%\.smithue\<pid>.port`.

@@ -32,6 +32,7 @@ private:
 	static TSharedPtr<FJsonObject> HandleBpRemoveVariable(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpAddComponent(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpRemoveComponent(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpRenameComponent(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpSetComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpBulkSetComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpSetComponentCollision(const TSharedPtr<FJsonObject>& Params);

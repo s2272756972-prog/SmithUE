@@ -1,12 +1,12 @@
 # SmithUE Tool Reference
 
-> **211 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
+> **212 tools across 23 domains** — Full-stack AI editor automation for Unreal Engine 5.2
 
 ## Domain Overview
 
 | Domain | Tools | Description |
 |--------|-------|-------------|
-| Blueprint | 33 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace |
+| Blueprint | 34 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace |
 | Material | 20 | Materials, material instances, MPC, material functions |
 | Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
 | Asset | 14 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
@@ -47,6 +47,7 @@
 | `bp_remove_variable` | Remove a Blueprint member variable by name |
 | `bp_add_component` | Add a component to a Blueprint SCS |
 | `bp_remove_component` | Remove a component from a Blueprint SCS |
+| `bp_rename_component` | Rename a Blueprint SCS component variable (updates all graph references) |
 | `bp_set_component_property` | Set a property on a Blueprint SCS or inherited component template |
 | `bp_bulk_set_component_property` | Bulk-set generic component template properties on own SCS components in one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Supports dotted/indexed property_path (e.g. RelativeLocation.Z, BodyInstance.bSimulatePhysics, OverrideMaterials[0]) plus semantic setters for collision, StaticMesh, Material[i], PostProcessMaterial, and ChildActorClass. Set include_inherited=true to edit parent-Blueprint SCS inherited components as child ICH override templates. |
 | `bp_set_component_collision` | Bulk-set collision (object type + per-channel responses) on StaticMeshComponent templates inside one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Switches the component to a Custom profile, then applies object type and responses via proper engine setters. Skips components whose StaticMesh has no collision geometry unless disabled. |

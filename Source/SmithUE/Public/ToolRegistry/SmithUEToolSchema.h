@@ -14,6 +14,7 @@ struct FSmithUEToolParam
 	FString DefaultValue;
 	FString ItemsType;
 	TArray<FString> AllowedValues;
+	FString Example;
 
 	FSmithUEToolParam(FString InName, FString InType, FString InDesc, bool bInRequired = false, FString InDefault = FString(), FString InItemsType = FString())
 		: Name(MoveTemp(InName))
@@ -24,6 +25,9 @@ struct FSmithUEToolParam
 		, ItemsType(MoveTemp(InItemsType))
 	{
 	}
+
+	FSmithUEToolParam& SetExample(FString InExample) { Example = MoveTemp(InExample); return *this; }
+	FSmithUEToolParam& SetAllowedValues(TArray<FString> InValues) { AllowedValues = MoveTemp(InValues); return *this; }
 
 	TSharedPtr<FJsonObject> ToJsonSchema() const
 	{
@@ -48,6 +52,10 @@ struct FSmithUEToolParam
 				EnumArray.Add(MakeShared<FJsonValueString>(Val));
 			}
 			JsonObject->SetArrayField(TEXT("allowedValues"), EnumArray);
+		}
+		if (!Example.IsEmpty())
+		{
+			JsonObject->SetStringField(TEXT("example"), Example);
 		}
 		return JsonObject;
 	}
