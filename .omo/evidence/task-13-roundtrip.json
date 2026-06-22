@@ -1,0 +1,31 @@
+{
+  "task": "T13-roundtrip",
+  "timestamp": "2026-06-22",
+  "bp_path": "/Game/SmithUETest/BP_IntegTest_Crate",
+  "spec_id": "prop",
+  "bp_snapshot": {
+    "parent_class": "/Script/Engine.Actor",
+    "components": [
+      {
+        "name": "StaticMeshComponent",
+        "class": "StaticMeshComponent",
+        "source": "own",
+        "mobility": "Static",
+        "collision": {
+          "profile": "BlockAll",
+          "enabled": "QueryAndPhysics"
+        },
+        "mesh": "/Engine/BasicShapes/Cube.Cube",
+        "materials": [
+          "/Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"
+        ],
+        "inherited_unverifiable": false
+      }
+    ]
+  },
+  "lint_result": {
+    "findings": [],
+    "unverifiable": []
+  },
+  "verdict": "PASS"
+}

@@ -50,3 +50,23 @@
 - bp_describe_components: BP_SM_ComplianceProbe_Cube 组件树读回成功（1 个 StaticMeshComponent，source=own，mobility=Static）
 - BP_ReadbackProbe_Child 继承组件: inherited_unverifiable=true（source=inherited，mobility=Movable）
 - SmithUEBpAtomicAPI.cpp 修复: USceneComponent::GetMobility() → ::Mobility（UE5.2 直接属性访问，GetMobility() 方法不存在）
+
+## [2026-06-22] Task: T10 classification engine
+- matchesSpec: ownership.folderGlobs（/**前缀匹配）+ rules.naming.pattern（regex）
+- multi-match: first-match wins + warning（不静默）
+- no-match: specId=null, status='no-match'
+- CLI litmus: 分类规则纯 spec 驱动，零业务硬编码
+
+## [2026-06-22] Task: T11 factory planner
+- planFactory: classify → deriveBpName → check collision/existing/owned → create_bp steps
+- deriveBpName: 已符合 pattern 直接用，否则去 SM_/SKM_ 前缀加 BP_
+- skip_name_collision: >1 资产推导出同 BP 名，检测+拒绝，不加后缀
+- CLI litmus: steps 由 spec.rules.components 驱动，无业务硬编码
+
+## [2026-06-22] Task: T13 integration join
+- Round-trip: factory-equivalent BP → lint 0 findings [PASS]
+- Mutation-detection: mutate collision.profile OverlapAll → lint 1 finding (rule=collision.profile) [PASS]
+- Fixture 对账: recorded vs contract schema keys 完全一致（8字段均匹配）；value层分歧：recorded.materials=[]（无网格），contract.materials=[BasicShapeMaterial]（理想态）
+- collision set property_path: `BodyInstance.CollisionProfileName`（有效；默认值已是 BlockAll，Mobility 由 Movable→Static 需显式设置）
+- bp_add_component static_mesh 参数可在添加组件时直接赋网格，使 materials 槽填充（WorldGridMaterial），满足 materialSlotsFilled:true
+- bp_create 参数: name + parent_class + save_path（不是 bp_path）

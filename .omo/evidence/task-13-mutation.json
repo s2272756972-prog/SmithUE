@@ -1,0 +1,44 @@
+{
+  "task": "T13-mutation-detection",
+  "timestamp": "2026-06-22",
+  "bp_path": "/Game/SmithUETest/BP_IntegTest_Crate",
+  "spec_id": "prop",
+  "mutation": {
+    "property_path": "BodyInstance.CollisionProfileName",
+    "before": "BlockAll",
+    "after": "OverlapAll"
+  },
+  "bp_snapshot": {
+    "components": [
+      {
+        "name": "StaticMeshComponent",
+        "class": "StaticMeshComponent",
+        "source": "own",
+        "mobility": "Static",
+        "collision": {
+          "profile": "OverlapAll",
+          "enabled": "QueryAndPhysics"
+        },
+        "mesh": "/Engine/BasicShapes/Cube.Cube",
+        "materials": [
+          "/Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"
+        ],
+        "inherited_unverifiable": false
+      }
+    ]
+  },
+  "lint_result": {
+    "findings": [
+      {
+        "asset_path": "/Game/SmithUETest/BP_IntegTest_Crate",
+        "bp_path": "/Game/SmithUETest/BP_IntegTest_Crate",
+        "rule": "collision.profile",
+        "expected": "BlockAll",
+        "actual": "OverlapAll",
+        "severity": "error"
+      }
+    ],
+    "unverifiable": []
+  },
+  "verdict": "PASS"
+}

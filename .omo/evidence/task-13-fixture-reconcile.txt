@@ -1,0 +1,51 @@
+=== T13 Fixture Reconcile: recorded vs contract ===
+Date: 2026-06-22
+
+Files compared:
+  recorded: fixtures/recorded/bp_describe_components.json
+  contract: fixtures/bp_describe_components.contract.json
+
+recorded component[0] keys: name, class, source, mobility, collision, mesh, materials, inherited_unverifiable
+contract component[0] keys: name, class, source, mobility, collision, materials, mesh, inherited_unverifiable
+
+in contract but NOT in recorded: none
+in recorded but NOT in contract: none
+
+Verdict: CONSISTENT - all component keys match
+
+--- Value comparison (recorded component[0]) ---
+{
+  "name": "StaticMeshComponent",
+  "class": "StaticMeshComponent",
+  "source": "own",
+  "mobility": "Static",
+  "collision": {
+    "profile": "BlockAll",
+    "enabled": "QueryAndPhysics"
+  },
+  "mesh": null,
+  "materials": [],
+  "inherited_unverifiable": false
+}
+
+--- Value comparison (contract component[0]) ---
+{
+  "name": "StaticMeshComponent",
+  "class": "StaticMeshComponent",
+  "source": "own",
+  "mobility": "Static",
+  "collision": {
+    "profile": "BlockAll",
+    "enabled": "QueryAndPhysics"
+  },
+  "materials": [
+    "/Engine/BasicShapes/BasicShapeMaterial"
+  ],
+  "mesh": "/Engine/BasicShapes/Cube.Cube",
+  "inherited_unverifiable": false
+}
+
+Notes:
+  - recorded.materials=[] (no mesh assigned to actual BP in editor)
+  - contract.materials has BasicShapeMaterial (ideal/target state)
+  - Both shapes of data are valid; round-trip test will use mesh-assigned BP
