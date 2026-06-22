@@ -291,7 +291,7 @@ void FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Analysis"),
             TEXT("Compile a Blueprint and return compiler errors and warnings"),
             {
-                FSmithUEToolParam(TEXT("blueprint_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
             }),
         &HandleBpGetCompileErrors);
 
@@ -301,7 +301,7 @@ void FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Analysis"),
             TEXT("Reconstruct all nodes in a Blueprint"),
             {
-                FSmithUEToolParam(TEXT("blueprint_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
             }),
         &HandleBpRefreshAllNodes);
 
@@ -311,7 +311,7 @@ void FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Analysis"),
             TEXT("Find unconnected Blueprint exec and data pins"),
             {
-                FSmithUEToolParam(TEXT("blueprint_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
             }),
         &HandleBpFindUnconnectedPins);
 
@@ -321,7 +321,7 @@ void FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Analysis"),
             TEXT("Remove non-existent Blueprint variable references and refresh nodes"),
             {
-                FSmithUEToolParam(TEXT("blueprint_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
+                FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true)
             }),
         &HandleBpFixBrokenReferences);
 
@@ -429,13 +429,14 @@ void FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpGetCompileErrors(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
-    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("blueprint_path")}, Error))
+    if (!Params->HasField(TEXT("bp_path")) && !Params->HasField(TEXT("blueprint_path")))
     {
-        return FSmithUECommonUtils::CreateErrorResponse(Error);
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required param: bp_path"));
     }
 
     FString BlueprintPath;
-    Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+    if (!Params->TryGetStringField(TEXT("bp_path"), BlueprintPath))
+        Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
     UBlueprint* Blueprint = LoadBlueprintForDebug(BlueprintPath);
     if (!Blueprint)
     {
@@ -450,7 +451,7 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpGetCompileErrors(const TS
     AddCompilerMessagesFromGraphs(Blueprint, Messages, ErrorCount, WarningCount);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+    Data->SetStringField(TEXT("bp_path"), BlueprintPath);
     Data->SetStringField(TEXT("status"), Blueprint->Status == BS_Error ? TEXT("error") : TEXT("ok"));
     Data->SetNumberField(TEXT("error_count"), ErrorCount);
     Data->SetNumberField(TEXT("warning_count"), WarningCount);
@@ -466,13 +467,14 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpGetCompileErrors(const TS
 TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpRefreshAllNodes(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
-    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("blueprint_path")}, Error))
+    if (!Params->HasField(TEXT("bp_path")) && !Params->HasField(TEXT("blueprint_path")))
     {
-        return FSmithUECommonUtils::CreateErrorResponse(Error);
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required param: bp_path"));
     }
 
     FString BlueprintPath;
-    Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+    if (!Params->TryGetStringField(TEXT("bp_path"), BlueprintPath))
+        Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
     UBlueprint* Blueprint = LoadBlueprintForDebug(BlueprintPath);
     if (!Blueprint)
     {
@@ -505,7 +507,7 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpRefreshAllNodes(const TSh
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+    Data->SetStringField(TEXT("bp_path"), BlueprintPath);
     Data->SetNumberField(TEXT("graph_count"), GraphCount);
     Data->SetNumberField(TEXT("nodes_refreshed"), NodeCount);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
@@ -518,13 +520,14 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpRefreshAllNodes(const TSh
 TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpFindUnconnectedPins(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
-    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("blueprint_path")}, Error))
+    if (!Params->HasField(TEXT("bp_path")) && !Params->HasField(TEXT("blueprint_path")))
     {
-        return FSmithUECommonUtils::CreateErrorResponse(Error);
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required param: bp_path"));
     }
 
     FString BlueprintPath;
-    Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+    if (!Params->TryGetStringField(TEXT("bp_path"), BlueprintPath))
+        Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
     UBlueprint* Blueprint = LoadBlueprintForDebug(BlueprintPath);
     if (!Blueprint)
     {
@@ -565,7 +568,7 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpFindUnconnectedPins(const
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+    Data->SetStringField(TEXT("bp_path"), BlueprintPath);
     Data->SetNumberField(TEXT("unconnected_pin_count"), Pins.Num());
     Data->SetArrayField(TEXT("pins"), Pins);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
@@ -578,13 +581,14 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpFindUnconnectedPins(const
 TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpFixBrokenReferences(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
-    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("blueprint_path")}, Error))
+    if (!Params->HasField(TEXT("bp_path")) && !Params->HasField(TEXT("blueprint_path")))
     {
-        return FSmithUECommonUtils::CreateErrorResponse(Error);
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required param: bp_path"));
     }
 
     FString BlueprintPath;
-    Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
+    if (!Params->TryGetStringField(TEXT("bp_path"), BlueprintPath))
+        Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath);
     UBlueprint* Blueprint = LoadBlueprintForDebug(BlueprintPath);
     if (!Blueprint)
     {
@@ -625,7 +629,7 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleBpFixBrokenReferences(const
     AddCompilerMessagesFromGraphs(Blueprint, Messages, ErrorCount, WarningCount);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+    Data->SetStringField(TEXT("bp_path"), BlueprintPath);
     Data->SetNumberField(TEXT("invalid_variables_before"), InvalidVariablesBefore);
     Data->SetNumberField(TEXT("invalid_variables_after"), InvalidVariablesAfter);
     Data->SetNumberField(TEXT("nodes_refreshed"), NodesRefreshed);

@@ -1104,9 +1104,9 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_variable"), TEXT("Blueprint"), TEXT("Remove a Blueprint member variable by name"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name to remove"), true) }), &HandleBpRemoveVariable);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_name"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
+  Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Component class name"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
+  Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
+  Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_property"), TEXT("Blueprint"), TEXT("Set a property on a Blueprint SCS or inherited component template"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component name (SCS or inherited)"), true), FSmithUEToolParam(TEXT("property_name"), TEXT("string"), TEXT("Property name, or 'PostProcessMaterial' to add a blendable material"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Property value (string/number/bool), or material asset path for PostProcessMaterial"), true) }), &HandleBpSetComponentProperty);
 		Registry.Register(FSmithUEToolSchema(TEXT("bp_bulk_set_component_property"), TEXT("Blueprint"), TEXT("Bulk-set generic component template properties on own SCS components in one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Supports dotted/indexed property_path (e.g. RelativeLocation.Z, BodyInstance.bSimulatePhysics, OverrideMaterials[0]) plus semantic setters for collision, StaticMesh, Material[i], PostProcessMaterial, and ChildActorClass. Set include_inherited=true to edit parent-Blueprint SCS inherited components as child ICH override templates."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Single Blueprint asset path. Provide this OR folder_path.")), FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder (e.g. /Game/Vehicles); applies to all Blueprints directly under it (non-recursive). Leading /All is stripped. Provide this OR bp_path.")), FSmithUEToolParam(TEXT("component_class"), TEXT("string"), TEXT("Optional component class filter by class/superclass name, e.g. StaticMeshComponent. Empty = all component classes.")), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional component variable/template name. Empty = all matching own SCS components.")), FSmithUEToolParam(TEXT("edits"), TEXT("array"), TEXT("Required array of objects {property_path,value}. property_path supports dotted/indexed paths and semantic keys Collision.ObjectType, Collision.Response.<Channel>, Collision.Profile, StaticMesh, Material[i]/Materials[i], PostProcessMaterial, ChildActorClass."), true, FString(), TEXT("object")), FSmithUEToolParam(TEXT("include_inherited"), TEXT("boolean"), TEXT("Also target parent-Blueprint SCS inherited components by creating/reusing child InheritableComponentHandler override templates. Default false.")), FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview changes without modifying or compiling. Default false.")), FSmithUEToolParam(TEXT("defer_compile"), TEXT("boolean"), TEXT("Queue changed Blueprints and flush compilation once at end. Default false.")) }), &HandleBpBulkSetComponentProperty);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_component_collision"), TEXT("Blueprint"), TEXT("Bulk-set collision (object type + per-channel responses) on StaticMeshComponent templates inside one Blueprint (bp_path) or every Blueprint directly under a folder (folder_path, non-recursive). Switches the component to a Custom profile, then applies object type and responses via proper engine setters. Skips components whose StaticMesh has no collision geometry unless disabled."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Single Blueprint asset path. Provide this OR folder_path.")), FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder (e.g. /Game/MyVehicles); applies to all Blueprints directly under it (non-recursive). Provide this OR bp_path.")), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional: only this StaticMeshComponent name. Empty = all StaticMeshComponents.")), FSmithUEToolParam(TEXT("object_type"), TEXT("string"), TEXT("Collision object type display name. Default 'Vehicle'.")), FSmithUEToolParam(TEXT("responses"), TEXT("object"), TEXT("Map of channel display name -> response, e.g. {\"Pawn\":\"Ignore\"}. Response is Ignore/Overlap/Block.")), FSmithUEToolParam(TEXT("skip_if_no_mesh_collision"), TEXT("boolean"), TEXT("Skip a component if its StaticMesh asset has no collision geometry. Default true.")), FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview changes without modifying. Default false.")) }), &HandleBpSetComponentCollision);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_override_function"), TEXT("Blueprint"), TEXT("Override a parent class function in a Blueprint (creates proper override graph with correct signature)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Parent function name to override"), true) }), &HandleBpOverrideFunction);
@@ -1663,10 +1663,12 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveVariable(const TShare
 
 TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddComponent(const TSharedPtr<FJsonObject>& Params)
 {
-	FString Error;
-	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component_class"), TEXT("component_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
-	FString BpPath; FString ComponentClassName; FString ComponentName;
-	Params->TryGetStringField(TEXT("bp_path"), BpPath); Params->TryGetStringField(TEXT("component_class"), ComponentClassName); Params->TryGetStringField(TEXT("component_name"), ComponentName);
+  FString Error;
+  if (!Params->HasField(TEXT("component")) && Params->HasField(TEXT("component_name")))
+      Params->SetStringField(TEXT("component"), Params->GetStringField(TEXT("component_name")));
+  if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component_class"), TEXT("component") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+  FString BpPath; FString ComponentClassName; FString ComponentName;
+  Params->TryGetStringField(TEXT("bp_path"), BpPath); Params->TryGetStringField(TEXT("component_class"), ComponentClassName); if (!Params->TryGetStringField(TEXT("component"), ComponentName)) Params->TryGetStringField(TEXT("component_name"), ComponentName);
 	UBlueprint* Blueprint = LoadBlueprint(BpPath);
 	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
 	if (!Blueprint->SimpleConstructionScript) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Blueprint has no SimpleConstructionScript")); }
@@ -1739,7 +1741,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddComponent(const TSharedP
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("component_name"), ComponentName);
+  Data->SetStringField(TEXT("component"), ComponentName);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -1749,10 +1751,12 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddComponent(const TSharedP
 
 TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveComponent(const TSharedPtr<FJsonObject>& Params)
 {
-	FString Error;
-	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
-	FString BpPath; FString ComponentName;
-	Params->TryGetStringField(TEXT("bp_path"), BpPath); Params->TryGetStringField(TEXT("component_name"), ComponentName);
+  FString Error;
+  if (!Params->HasField(TEXT("component")) && Params->HasField(TEXT("component_name")))
+      Params->SetStringField(TEXT("component"), Params->GetStringField(TEXT("component_name")));
+  if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+  FString BpPath; FString ComponentName;
+  Params->TryGetStringField(TEXT("bp_path"), BpPath); if (!Params->TryGetStringField(TEXT("component"), ComponentName)) Params->TryGetStringField(TEXT("component_name"), ComponentName);
 	UBlueprint* Blueprint = LoadBlueprint(BpPath);
 	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
 	if (!Blueprint->SimpleConstructionScript) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Blueprint has no SimpleConstructionScript")); }
@@ -1795,7 +1799,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveComponent(const TShar
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetBoolField(TEXT("removed"), true);
-	Data->SetStringField(TEXT("component_name"), ComponentName);
+  Data->SetStringField(TEXT("component"), ComponentName);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -1805,16 +1809,19 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveComponent(const TShar
 
 TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const TSharedPtr<FJsonObject>& Params)
 {
-	FString Error;
-	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component_name"), TEXT("property_name"), TEXT("value") }, Error))
-	{
-		return FSmithUECommonUtils::CreateErrorResponse(Error);
-	}
+  FString Error;
+  if (!Params->HasField(TEXT("component")) && Params->HasField(TEXT("component_name")))
+      Params->SetStringField(TEXT("component"), Params->GetStringField(TEXT("component_name")));
+  if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("component"), TEXT("property_name"), TEXT("value") }, Error))
+  {
+    return FSmithUECommonUtils::CreateErrorResponse(Error);
+  }
 
-	FString BpPath, ComponentName, PropertyName;
-	Params->TryGetStringField(TEXT("bp_path"), BpPath);
-	Params->TryGetStringField(TEXT("component_name"), ComponentName);
-	Params->TryGetStringField(TEXT("property_name"), PropertyName);
+  FString BpPath, ComponentName, PropertyName;
+  Params->TryGetStringField(TEXT("bp_path"), BpPath);
+  if (!Params->TryGetStringField(TEXT("component"), ComponentName))
+      Params->TryGetStringField(TEXT("component_name"), ComponentName);
+  Params->TryGetStringField(TEXT("property_name"), PropertyName);
 
 	UBlueprint* Blueprint = LoadBlueprint(BpPath);
 	if (!Blueprint || !Blueprint->GeneratedClass)
@@ -1919,7 +1926,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 		Blueprint->MarkPackageDirty();
 
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-		Data->SetStringField(TEXT("component_name"), ComponentName);
+  	Data->SetStringField(TEXT("component"), ComponentName);
 		Data->SetStringField(TEXT("property_name"), TEXT("PostProcessMaterial"));
 		Data->SetStringField(TEXT("material_path"), MaterialPath);
 		Data->SetNumberField(TEXT("blendable_count"), PPSettings->WeightedBlendables.Array.Num());
@@ -1981,7 +1988,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 		Blueprint->MarkPackageDirty();
 
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-		Data->SetStringField(TEXT("component_name"), ComponentName);
+		Data->SetStringField(TEXT("component"), ComponentName);
 		Data->SetStringField(TEXT("property_name"), TEXT("ChildActorClass"));
 		Data->SetStringField(TEXT("before"), BeforeClass);
 		Data->SetStringField(TEXT("after"), AfterClass);
@@ -2039,7 +2046,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentProperty(const 
 	Prop->ExportTextItem_Direct(AfterValue, PropAddr, nullptr, TargetComp, PPF_None);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("component_name"), ComponentName);
+	Data->SetStringField(TEXT("component"), ComponentName);
 	Data->SetStringField(TEXT("property_name"), PropertyName);
 	Data->SetStringField(TEXT("before"), BeforeValue);
 	Data->SetStringField(TEXT("after"), AfterValue);
