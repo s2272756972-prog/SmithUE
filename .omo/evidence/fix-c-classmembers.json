@@ -1,0 +1,125 @@
+{
+  "timestamp": "2026-06-23T14:12:58.103Z",
+  "port": 13721,
+  "ready": true,
+  "assertions": {
+    "eub_success": true,
+    "euw_success": true,
+    "ordinary_bp_success": true,
+    "native_query_still_success": true
+  },
+  "results": [
+    {
+      "name": "eub",
+      "request": {
+        "name": "eub",
+        "command": "bp_get_class_members",
+        "params": {
+          "bp_path": "/ExportMeshExtra/Tools/EUB_ChangeMatParant",
+          "scope": "self"
+        }
+      },
+      "httpStatus": 200,
+      "status": "success",
+      "error": null,
+      "class": "EUB_ChangeMatParant_C",
+      "resolved_from": "blueprint",
+      "inheritance_chain": [
+        "EUB_ChangeMatParant_C",
+        "AssetActionUtility",
+        "EditorUtilityObject",
+        "Object"
+      ],
+      "count_totals": {
+        "EUB_ChangeMatParant_C": 0
+      },
+      "member_owners": [
+        "EUB_ChangeMatParant_C"
+      ]
+    },
+    {
+      "name": "euw",
+      "request": {
+        "name": "euw",
+        "command": "bp_get_class_members",
+        "params": {
+          "bp_path": "/ExportMeshExtra/Tools/ExportAllAssets",
+          "scope": "self"
+        }
+      },
+      "httpStatus": 200,
+      "status": "success",
+      "error": null,
+      "class": "ExportAllAssets_C",
+      "resolved_from": "blueprint",
+      "inheritance_chain": [
+        "ExportAllAssets_C",
+        "EditorUtilityWidget",
+        "UserWidget",
+        "Widget",
+        "Visual",
+        "Object"
+      ],
+      "count_totals": {
+        "ExportAllAssets_C": 18
+      },
+      "member_owners": [
+        "ExportAllAssets_C"
+      ]
+    },
+    {
+      "name": "ordinary_bp",
+      "request": {
+        "name": "ordinary_bp",
+        "command": "bp_get_class_members",
+        "params": {
+          "bp_path": "/Game/SmithUETest/BP_SM_ComplianceProbe_Cube",
+          "scope": "self"
+        }
+      },
+      "httpStatus": 200,
+      "status": "success",
+      "error": null,
+      "class": "BP_SM_ComplianceProbe_Cube_C",
+      "resolved_from": "blueprint",
+      "inheritance_chain": [
+        "BP_SM_ComplianceProbe_Cube_C",
+        "Actor",
+        "Object"
+      ],
+      "count_totals": {
+        "BP_SM_ComplianceProbe_Cube_C": 1
+      },
+      "member_owners": [
+        "BP_SM_ComplianceProbe_Cube_C"
+      ]
+    },
+    {
+      "name": "native_regression",
+      "request": {
+        "name": "native_regression",
+        "command": "bp_get_class_members",
+        "params": {
+          "bp_path": "Actor",
+          "scope": "self",
+          "limit": 10
+        }
+      },
+      "httpStatus": 200,
+      "status": "success",
+      "error": null,
+      "class": "Actor",
+      "resolved_from": "native",
+      "inheritance_chain": [
+        "Actor",
+        "Object"
+      ],
+      "count_totals": {
+        "Actor": 254
+      },
+      "member_owners": [
+        "Actor"
+      ]
+    }
+  ]
+}

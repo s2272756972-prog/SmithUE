@@ -70,3 +70,20 @@
 - collision set property_path: `BodyInstance.CollisionProfileName`（有效；默认值已是 BlockAll，Mobility 由 Movable→Static 需显式设置）
 - bp_add_component static_mesh 参数可在添加组件时直接赋网格，使 materials 槽填充（WorldGridMaterial），满足 materialSlotsFilled:true
 - bp_create 参数: name + parent_class + save_path（不是 bp_path）
+
+## [2026-06-22] Task: T17 spec infer
+- inferSpecFromBp: parent_class→parentClass.allowlist, components[]→rules.components, collision→collisionProfile
+- naming.required=false (needs-confirm，单例无法确定正则)
+- folderGlobs: bp_path 父目录 + /**
+- CLI litmus: 纯结构归纳，无 studio 硬编码
+
+## [2026-06-23] Fix: CLI ajv dep + prune by PID
+- ajv 错放 devDeps → 全局安装崩 ERR_MODULE_NOT_FOUND;移到 dependencies,bump 0.12.1 重发
+- schemas/ 目录未加入 package.json files → 全局安装同样崩 Cannot find module schemas/config.schema.json;同步修复
+- prune 改为按 pid 存活性清理(不只看端口响应):PID 死 → 删文件，即使该端口被另一进程占着
+- 发布前强校验:npm pack → 干净目录装 tarball → 跑 cli --help 确认无缺依赖
+
+## [2026-06-23] Fix: bp_get_class_members resolves Blutility/EUB
+- 病因:HandleBpGetClassMembers only treated /Game, /Engine, or dotted strings as asset paths; plugin mount paths like /ExportMeshExtra/... were misrouted to ResolveNativeClass.
+- 修复:资产→UBlueprint 解析改为与 HandleBpGetSummary 一致的宽容方式, slash-rooted paths (including project plugins), dotted object paths, and level: inputs use FSmithUEBpAtomicAPI::LoadBlueprint before native fallback.
+- 验证:EUB_ChangeMatParant bp_get_class_members 现 success;普通 BP 回归 OK
