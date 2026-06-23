@@ -584,6 +584,13 @@ namespace
         return nullptr;
     }
 
+    bool TryResolveBlueprintClass(const FString& BpPath, UBlueprint*& OutBlueprint, UClass*& OutClass)
+    {
+        OutBlueprint = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
+        OutClass = OutBlueprint ? OutBlueprint->GeneratedClass : nullptr;
+        return OutClass != nullptr;
+    }
+
     bool ClassNameMatchesScope(UClass* OwnerClass, const FString& OwnerFilter)
     {
         return OwnerFilter.IsEmpty() || (OwnerClass && OwnerClass->GetName() == OwnerFilter);
@@ -1547,16 +1554,19 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpGetClassMembers(const
     UBlueprint* BP = nullptr;
     UClass* Cls = nullptr;
     FString ResolvedFrom = TEXT("native");
-    const bool bLooksLikeAssetPath = BpPath.StartsWith(TEXT("/Game")) || BpPath.StartsWith(TEXT("/Engine")) || BpPath.Contains(TEXT("."));
+    const bool bLooksLikeAssetPath = BpPath.StartsWith(TEXT("/")) || BpPath.Contains(TEXT(".")) || BpPath.StartsWith(TEXT("level:"), ESearchCase::IgnoreCase);
     if (bLooksLikeAssetPath)
     {
-        BP = FSmithUEBpAtomicAPI::LoadBlueprint(BpPath);
-        Cls = BP ? BP->GeneratedClass : nullptr;
+        TryResolveBlueprintClass(BpPath, BP, Cls);
         ResolvedFrom = TEXT("blueprint");
     }
     else
     {
         Cls = ResolveNativeClass(BpPath);
+        if (!Cls && TryResolveBlueprintClass(BpPath, BP, Cls))
+        {
+            ResolvedFrom = TEXT("blueprint");
+        }
     }
 
     if (!Cls)

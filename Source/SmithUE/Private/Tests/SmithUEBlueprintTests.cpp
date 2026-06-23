@@ -222,6 +222,39 @@ bool FSmithUEBP_CommandsGetSummarySucceeds::RunTest(const FString& Parameters)
 }
 
 // ---------------------------------------------------------------------------
+// Blueprint.Commands.GetClassMembers_Succeeds
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSmithUEBP_CommandsGetClassMembersSucceeds,
+    "SmithUE.Blueprint.Commands.GetClassMembers_Succeeds",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSmithUEBP_CommandsGetClassMembersSucceeds::RunTest(const FString& Parameters)
+{
+    using namespace SmithUETestUtils;
+
+    const FString Name = TEXT("BPTest_ClassMembers");
+    TSharedPtr<FJsonObject> CreateResp = CreateBP(Name);
+    if (!IsSuccess(CreateResp))
+    {
+        AddWarning(TEXT("bp_create failed — skipping GetClassMembers test"));
+        return true;
+    }
+
+    TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+    Params->SetStringField(TEXT("bp_path"), BPPath(Name));
+    Params->SetStringField(TEXT("scope"), TEXT("self"));
+
+    TSharedPtr<FJsonObject> Response = Dispatch(TEXT("bp_get_class_members"), Params);
+    TestTrue(TEXT("Response should be valid"), Response.IsValid());
+    TestTrue(TEXT("bp_get_class_members should succeed"), IsSuccess(Response));
+
+    TSharedPtr<FJsonObject> Data = GetData(Response);
+    TestTrue(TEXT("Class members data should be valid"), Data.IsValid());
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Blueprint.Commands.DescribeGraph_Succeeds
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSmithUEBP_CommandsDescribeGraphSucceeds,
