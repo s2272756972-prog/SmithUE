@@ -13,3 +13,6 @@ Thumbs.db
 
 # Saved state
 Saved/
+
+# OMO agent state (planning / boulder / evidence)
+.omo/
