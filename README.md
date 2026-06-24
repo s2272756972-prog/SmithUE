@@ -102,21 +102,21 @@ SmithUE UE5 插件 (HTTP :动态端口)
 
 ## 命令参考
 
-SmithUE 提供了分布在 **23 个功能域** 中的 **217 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **24 个功能域** 中的 **221 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 
 | 功能域 | 工具数 | 描述 |
 |---|---|---|
-| Blueprint | 33 | 蓝图创建、节点、函数、变量、组件、DSL 编译器、健康检查、diff |
+| Blueprint | 35 | 蓝图创建、节点、函数、变量、组件、DSL 编译器、健康检查、diff |
 | Material | 20 | 材质、材质实例、MPC、材质函数 |
 | Niagara | 17 | 粒子系统创建、发射器、模块、渲染器 |
 | Analysis | 13 | 源码分析、依赖图、蓝图诊断、资产校验 |
-| Asset | 14 | 资产增删改查、浏览器操作、内容浏览器选择/导航、AI 纹理生成 |
-| Level | 11 | 关卡管理、地形、植被 |
+| Asset | 18 | 资产增删改查、浏览器操作、内容浏览器选择/导航、AI 纹理生成 |
+| Level | 12 | 关卡管理、地形、植被 |
 | PIE | 11 | 运行模式：启动/停止、Actor、属性、控制台 |
 | Environment | 11 | 后处理、雾、天空、光照、物理、样条 |
-| Editor | 9 | Actor 生成、属性、后处理、项目设置 |
+| Editor | 10 | Actor 生成、属性、后处理、项目设置 |
 | Observation | 8 | 面板、编辑器状态、Actor 属性、世界大纲 |
 | Animation | 7 | 动画蒙太奇、动画蓝图、段落、通知 |
 | Interaction | 7 | 控制台/编辑器命令、撤销/重做、按键模拟 |
@@ -131,6 +131,7 @@ SmithUE 提供了分布在 **23 个功能域** 中的 **217 个工具**。命令
 | Curve | 4 | 曲线资产(Float/LinearColor/Vector) + 颜色图集 |
 | RenderTarget | 2 | 纹理渲染目标 |
 | Physics | 2 | 物理材质(摩擦/弹性/密度) |
+| LiveCoding | 2 | Live Coding 热编译：支持状态查询与同步触发编译 |
 
 ---
 

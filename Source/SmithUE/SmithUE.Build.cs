@@ -72,7 +72,13 @@ public class SmithUE : ModuleRules
 					"UMG",
 					"UMGEditor"
 			}
-		);
+			);
+		}
+
+		if (Target.bWithLiveCoding)
+		{
+			PrivateIncludePathModuleNames.Add("LiveCoding");
+			DynamicallyLoadedModuleNames.Add("LiveCoding");
 		}
 	}
 }

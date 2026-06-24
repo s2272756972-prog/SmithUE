@@ -60,6 +60,7 @@ TSharedPtr<FJsonObject> FSmithUEToolRegistry::DispatchCommand(const FString& Nam
 		TEXT("ping"),
 		TEXT("bp_describe_graph"),
 		TEXT("bp_get_summary"),
+		TEXT("livecoding_status"),
 	};
 	const bool bIsReadonly = ReadonlyCommands.Contains(Name) || Name.StartsWith(TEXT("observation_")) || Name.StartsWith(TEXT("pie_"));
 
@@ -72,9 +73,8 @@ TSharedPtr<FJsonObject> FSmithUEToolRegistry::DispatchCommand(const FString& Nam
 				TEXT("PIE_LOCKED"));
 		}
 
-		// Note: Live Coding compilation is not checked here because ILiveCodingModule
-		// would add a module dependency. During Live Coding, commands fail with their
-		// own descriptive errors which is acceptable.
+		// livecoding_status is a registered read-only tool (safe during PIE).
+		// livecoding_compile is intentionally PIE-blocked (hot-compiling C++ during PIE is unsafe).
 	}
 	// --- End editor state pre-check ---
 

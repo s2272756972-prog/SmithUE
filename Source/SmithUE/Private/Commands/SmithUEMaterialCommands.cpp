@@ -172,6 +172,7 @@ namespace
         case 4: return &Material->GetEditorOnlyData()->EmissiveColor;
         case 5: return &Material->GetEditorOnlyData()->Opacity;
         case 6: return &Material->GetEditorOnlyData()->OpacityMask;
+        case 7: return &Material->GetEditorOnlyData()->WorldPositionOffset;
         default: return nullptr;
         }
     }

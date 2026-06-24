@@ -8,6 +8,8 @@
 #include "Dom/JsonValue.h"
 #include "Editor.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "FileHelpers.h"
@@ -18,12 +20,52 @@
 #include "LandscapeInfo.h"
 #include "LandscapeProxy.h"
 #include "Materials/MaterialInterface.h"
+#include "HAL/IConsoleManager.h"
+#include "Engine/Engine.h"
 
 namespace SmithUELevel
 {
     UWorld* GetEditorWorld()
     {
         return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    }
+
+    static AActor* SpawnSimpleActor(UWorld* World, const TCHAR* ClassName, const FTransform& Xform, const FString& Label)
+    {
+        if (!World) { return nullptr; }
+        UClass* Cls = StaticLoadClass(AActor::StaticClass(), nullptr, *FString::Printf(TEXT("/Script/Engine.%s"), ClassName));
+        if (!Cls) { return nullptr; }
+        FActorSpawnParameters SP;
+        SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        AActor* A = World->SpawnActor<AActor>(Cls, Xform, SP);
+        if (A && !Label.IsEmpty()) { A->SetActorLabel(Label); }
+        return A;
+    }
+
+    static AStaticMeshActor* SpawnMeshActor(UWorld* World, const TCHAR* MeshPath, const FString& MaterialPath, const FTransform& Xform, const FString& Label)
+    {
+        if (!World) { return nullptr; }
+        FActorSpawnParameters SP;
+        SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        AStaticMeshActor* A = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Xform, SP);
+        if (!A) { return nullptr; }
+        if (!Label.IsEmpty()) { A->SetActorLabel(Label); }
+        UStaticMeshComponent* Comp = A->GetStaticMeshComponent();
+        if (Comp)
+        {
+            if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, MeshPath))
+            {
+                Comp->SetStaticMesh(Mesh);
+            }
+            if (!MaterialPath.IsEmpty())
+            {
+                if (UMaterialInterface* Mat = LoadObject<UMaterialInterface>(nullptr, *MaterialPath))
+                {
+                    Comp->SetMaterial(0, Mat);
+                }
+            }
+        }
+        return A;
     }
 
     TSharedPtr<FJsonObject> MakeVectorJson(const FVector& Vector)
@@ -133,17 +175,49 @@ namespace SmithUELevel
     }
 }
 
+namespace
+{
+    struct FSmithUEPendingNewMap { bool bValid = false; FString Name; FString Path; };
+    static FSmithUEPendingNewMap GSmithUEPendingNewMap;
+
+    static void SmithUE_ExecInternalNewBlankMap()
+    {
+        if (!GSmithUEPendingNewMap.bValid) { return; }
+        GSmithUEPendingNewMap.bValid = false;
+        UWorld* W = UEditorLoadingAndSavingUtils::NewBlankMap(true);
+        if (W && !GSmithUEPendingNewMap.Path.IsEmpty())
+        {
+            const FString& P = GSmithUEPendingNewMap.Path;
+            const FString Save = P.EndsWith(TEXT("/")) ? P + GSmithUEPendingNewMap.Name : P / GSmithUEPendingNewMap.Name;
+            UEditorLoadingAndSavingUtils::SaveMap(W, Save);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // RegisterTools
 // ---------------------------------------------------------------------------
 
 void FSmithUELevelCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 {
+    {
+        static bool bConsoleCmdRegistered = false;
+        if (!bConsoleCmdRegistered)
+        {
+            bConsoleCmdRegistered = true;
+            IConsoleManager::Get().RegisterConsoleCommand(
+                TEXT("SmithUE.InternalNewBlankMap"),
+                TEXT("Internal: deferred blank-map creation for level_new (crash-safe)."),
+                FConsoleCommandDelegate::CreateStatic(&SmithUE_ExecInternalNewBlankMap),
+                ECVF_Default);
+        }
+    }
+
     Registry.Register(
         FSmithUEToolSchema(
             TEXT("level_new"),
             TEXT("Level"),
-            TEXT("Create a new level/map in the editor"),
+            TEXT("Create a new blank level/map (deferred next-frame creation, crash-safe). Query level state after ~1s."),
             {
                 FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("New level name"), true),
                 FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Optional package path or filename for saving the new map"))
@@ -248,6 +322,16 @@ void FSmithUELevelCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             TEXT("Count foliage types and instances in the current level"),
             {}),
         &HandleLevelGetFoliageStats);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("level_add_basic_env"),
+            TEXT("Level"),
+            TEXT("Add basic environment to the CURRENT level: directional light, sky atmosphere, sky light, height fog, player start, and a floor. Safe (no world switch)."),
+            {
+                FSmithUEToolParam(TEXT("floor_scale"), TEXT("number"), TEXT("Uniform floor plane scale (default 20)"))
+            }),
+        &HandleLevelAddBasicEnv);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,37 +351,58 @@ TSharedPtr<FJsonObject> FSmithUELevelCommands::HandleLevelNew(const TSharedPtr<F
     Params->TryGetStringField(TEXT("name"), Name);
     Params->TryGetStringField(TEXT("path"), Path);
 
-    UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(true);
-    if (!NewWorld)
-    {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create new map"));
-    }
+    // Defer the blank-map creation to next frame via DeferredCommands (crash-safe).
+    // Calling NewBlankMap synchronously here destroys the world during tick processing
+    // while TickTaskManager still holds references (assertion in FreeTickTaskLevel).
+    // Our registered console command runs in UEngine::TickDeferredCommands at frame start,
+    // safely outside any tick group (same pattern as level_open's MAP LOAD).
+    GSmithUEPendingNewMap = FSmithUEPendingNewMap{ true, Name, Path };
+    GEngine->DeferredCommands.Add(TEXT("SmithUE.InternalNewBlankMap"));
 
-    bool bSavedToPath = false;
-    FString SavePath;
-    if (!Path.IsEmpty())
-    {
-        SavePath = Path.EndsWith(TEXT("/")) ? Path + Name : Path / Name;
-        bSavedToPath = UEditorLoadingAndSavingUtils::SaveMap(NewWorld, SavePath);
-        if (!bSavedToPath)
-        {
-            return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Created new map but failed to save it to '%s'"), *SavePath));
-        }
-    }
-
-    UWorld* World = SmithUELevel::GetEditorWorld();
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("requested_name"), Name);
     Data->SetStringField(TEXT("requested_path"), Path);
-    Data->SetStringField(TEXT("saved_path"), SavePath);
-    Data->SetBoolField(TEXT("saved_to_path"), bSavedToPath);
-    Data->SetStringField(TEXT("level_name"), World ? World->GetMapName() : TEXT(""));
-    Data->SetStringField(TEXT("level_path"), World && World->GetOutermost() ? World->GetOutermost()->GetName() : TEXT(""));
-    Data->SetBoolField(TEXT("created"), true);
-    if (!bSavedToPath)
+    Data->SetBoolField(TEXT("scheduled"), true);
+    Data->SetStringField(TEXT("note"), TEXT("New map creation deferred to next frame (crash-safe). Query level state after ~1s."));
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUELevelCommands::HandleLevelAddBasicEnv(const TSharedPtr<FJsonObject>& Params)
+{
+    UWorld* World = SmithUELevel::GetEditorWorld();
+    if (!World)
     {
-        Data->SetStringField(TEXT("note"), TEXT("Created an unsaved editor map because no path was supplied."));
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
     }
+
+    double FloorScaleD = 20.0;
+    if (Params.IsValid()) { Params->TryGetNumberField(TEXT("floor_scale"), FloorScaleD); }
+    const float FloorScale = static_cast<float>(FloorScaleD);
+
+    TArray<TSharedPtr<FJsonValue>> Spawned;
+    auto Record = [&Spawned](AActor* A)
+    {
+        if (A) { Spawned.Add(MakeShared<FJsonValueString>(A->GetActorLabel())); }
+    };
+
+    FTransform SunXform;
+    SunXform.SetRotation(FQuat(FRotator(-46.0f, 30.0f, 0.0f)));
+    Record(SmithUELevel::SpawnSimpleActor(World, TEXT("DirectionalLight"), SunXform, TEXT("Sun")));
+
+    Record(SmithUELevel::SpawnSimpleActor(World, TEXT("SkyAtmosphere"), FTransform::Identity, TEXT("SkyAtmosphere")));
+    Record(SmithUELevel::SpawnSimpleActor(World, TEXT("SkyLight"), FTransform::Identity, TEXT("SkyLight")));
+    Record(SmithUELevel::SpawnSimpleActor(World, TEXT("ExponentialHeightFog"), FTransform::Identity, TEXT("Fog")));
+
+    FTransform StartXform;
+    StartXform.SetLocation(FVector(0.0f, 0.0f, 120.0f));
+    Record(SmithUELevel::SpawnSimpleActor(World, TEXT("PlayerStart"), StartXform, TEXT("PlayerStart")));
+
+    FTransform FloorXform;
+    FloorXform.SetScale3D(FVector(FloorScale, FloorScale, 1.0f));
+    Record(SmithUELevel::SpawnMeshActor(World, TEXT("/Engine/BasicShapes/Plane.Plane"), FString(), FloorXform, TEXT("Floor")));
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetArrayField(TEXT("spawned"), Spawned);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

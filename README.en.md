@@ -79,21 +79,21 @@ Unreal Engine 5.2 Editor
 
 ## Command Reference
 
-SmithUE provides **217 tools** organized across **23 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **221 tools** organized across **24 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
 ### Domain Overview
 
 | Domain | Tools | Description |
 |---|---|---|
-| Blueprint | 33 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace, bulk component edit |
+| Blueprint | 35 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace, bulk component edit |
 | Material | 20 | Materials, material instances, MPC, material functions |
 | Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
-| Asset | 14 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
+| Asset | 18 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
 | Analysis | 13 | Source analysis, dependency graphs, BP diagnostics, asset validation |
-| Level | 11 | Level management, landscape, foliage |
+| Level | 12 | Level management, landscape, foliage |
 | Environment | 11 | Post-process, fog, sky, lights, physics, collision, splines |
 | PIE | 11 | Play-In-Editor: start/stop, actors, properties, console |
-| Editor | 9 | Actor spawning, properties, post-process, project settings |
+| Editor | 10 | Actor spawning, properties, post-process, project settings |
 | Data | 8 | DataTables, structs, enums, data assets |
 | Observation | 8 | Panels, editor state, actor properties, world outline |
 | Interaction | 7 | Console/editor commands, undo/redo, key simulation |
@@ -108,6 +108,7 @@ SmithUE provides **217 tools** organized across **23 functional domains**. The c
 | Debug | 3 | Blueprint breakpoints: set, clear, list |
 | RenderTarget | 2 | Texture render targets |
 | Physics | 2 | Physical materials (friction/restitution/density) |
+| LiveCoding | 2 | Live Coding hot-reload: status query + synchronous compile trigger |
 
 ---
 

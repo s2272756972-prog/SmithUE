@@ -1,0 +1,139 @@
+[
+  {
+    "description": "ping returns a simple health payload",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/execute",
+      "body": {
+        "command": "ping",
+        "params": {}
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "result": "pong"
+        }
+      }
+    }
+  },
+  {
+    "description": "list_tools without a domain returns all known domains",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/execute",
+      "body": {
+        "command": "list_tools",
+        "params": {}
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "domains": [
+            "System",
+            "Project",
+            "Material",
+            "Asset",
+            "Editor",
+            "Interaction",
+            "Blueprint",
+            "Viewport",
+            "Observation",
+            "Analysis",
+            "Niagara",
+            "Level",
+            "Data",
+            "Sequencer",
+            "Environment",
+            "PIE",
+            "Animation",
+            "Input",
+            "UMG"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "description": "list_tools scoped to System returns a schema sample for commands in that domain",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/execute",
+      "body": {
+        "command": "list_tools",
+        "params": {
+          "domain": "System"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "domain": "System",
+          "tools": [
+            {
+              "name": "system_get_metrics",
+              "description": "Get request and response metrics",
+              "params": {}
+            },
+            {
+              "name": "system_reset_metrics",
+              "description": "Reset request and response metrics",
+              "params": {
+                "confirm": true
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "description": "unknown command returns a request error with INVALID_REQUEST",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/execute",
+      "body": {
+        "command": "does_not_exist",
+        "params": {}
+      }
+    },
+    "response": {
+      "status": 400,
+      "body": {
+        "status": "error",
+        "error": "Unknown command: does_not_exist",
+        "error_code": "INVALID_REQUEST"
+      }
+    }
+  },
+  {
+    "description": "stale N-id errors surface STALE_NID for outdated blueprint references",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/execute",
+      "body": {
+        "command": "bp_get_node",
+        "params": {
+          "blueprint": "/Game/Blueprints/BP_Test",
+          "nid": "N999"
+        }
+      }
+    },
+    "response": {
+      "status": 409,
+      "body": {
+        "status": "error",
+        "error": "N-id map is stale; refresh blueprint node references and retry",
+        "error_code": "STALE_NID"
+      }
+    }
+  }
+]

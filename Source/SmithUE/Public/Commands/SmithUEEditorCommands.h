@@ -10,6 +10,7 @@ public:
 
 private:
 	static TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleSpawnMeshActor(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleGetAllActors(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleSetActorProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleDeleteActor(const TSharedPtr<FJsonObject>& Params);

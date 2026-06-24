@@ -34,6 +34,9 @@
 #include "Misc/PackageName.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Engine/Blueprint.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -136,6 +139,22 @@ void FSmithUEEditorCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("scale"),    TEXT("object"), TEXT("Scale {x,y,z}"))
             }),
         &HandleSpawnActor);
+
+    // spawn_mesh_actor
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("spawn_mesh_actor"),
+            TEXT("Editor"),
+            TEXT("Spawn a StaticMeshActor into the current level with a mesh and optional material. Safe (no world switch)."),
+            {
+                FSmithUEToolParam(TEXT("mesh"),     TEXT("string"), TEXT("Static mesh asset path, e.g. /Engine/BasicShapes/Cube.Cube"), true),
+                FSmithUEToolParam(TEXT("material"), TEXT("string"), TEXT("Optional material asset path applied to slot 0")),
+                FSmithUEToolParam(TEXT("location"), TEXT("object"), TEXT("Spawn location {x,y,z}")),
+                FSmithUEToolParam(TEXT("rotation"), TEXT("object"), TEXT("Spawn rotation {pitch,yaw,roll}")),
+                FSmithUEToolParam(TEXT("scale"),    TEXT("object"), TEXT("Scale {x,y,z}")),
+                FSmithUEToolParam(TEXT("label"),    TEXT("string"), TEXT("Actor label in World Outliner"))
+            }),
+        &HandleSpawnMeshActor);
 
     // get_all_actors
     Registry.Register(
@@ -322,6 +341,82 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleSpawnActor(const TSharedPt
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("actor_label"), NewActor->GetActorLabel());
     Data->SetStringField(TEXT("class"), ClassName);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command 1b: spawn_mesh_actor
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleSpawnMeshActor(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MeshPath;
+    if (!Params->TryGetStringField(TEXT("mesh"), MeshPath) || MeshPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required param: 'mesh'"));
+    }
+
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!World)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
+    }
+
+    UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+    if (!Mesh)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Static mesh not found: '%s'"), *MeshPath));
+    }
+
+    const FVector  Location = VectorFromJsonField(Params, TEXT("location"), FVector::ZeroVector);
+    const FRotator Rotation = RotatorFromJsonField(Params, TEXT("rotation"), FRotator::ZeroRotator);
+    const FVector  Scale    = VectorFromJsonField(Params, TEXT("scale"),    FVector::OneVector);
+
+    FTransform SpawnTransform;
+    SpawnTransform.SetLocation(Location);
+    SpawnTransform.SetRotation(FQuat(Rotation));
+    SpawnTransform.SetScale3D(Scale);
+
+    const FScopedTransaction Transaction(FText::FromString(TEXT("SmithUE: Spawn Mesh Actor")));
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    AStaticMeshActor* NewActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), SpawnTransform, SpawnParams);
+    if (!NewActor)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("SpawnActor failed for AStaticMeshActor"));
+    }
+
+    FString Label;
+    if ((Params->TryGetStringField(TEXT("label"), Label) || Params->TryGetStringField(TEXT("name"), Label)) && !Label.IsEmpty())
+    {
+        NewActor->SetActorLabel(Label);
+    }
+
+    FString MaterialPath;
+    bool bMaterialApplied = false;
+    if (UStaticMeshComponent* Comp = NewActor->GetStaticMeshComponent())
+    {
+        Comp->SetStaticMesh(Mesh);
+        if (Params->TryGetStringField(TEXT("material"), MaterialPath) && !MaterialPath.IsEmpty())
+        {
+            if (UMaterialInterface* Mat = LoadObject<UMaterialInterface>(nullptr, *MaterialPath))
+            {
+                Comp->SetMaterial(0, Mat);
+                bMaterialApplied = true;
+            }
+        }
+    }
+
+    UE_LOG(LogSmithUE, Log, TEXT("spawn_mesh_actor: spawned '%s' mesh='%s' material_applied=%d"),
+        *NewActor->GetActorLabel(), *MeshPath, bMaterialApplied);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("actor_label"), NewActor->GetActorLabel());
+    Data->SetStringField(TEXT("mesh"), MeshPath);
+    Data->SetStringField(TEXT("material"), MaterialPath);
+    Data->SetBoolField(TEXT("material_applied"), bMaterialApplied);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

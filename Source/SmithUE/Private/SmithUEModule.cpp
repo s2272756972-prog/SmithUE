@@ -31,6 +31,7 @@
 #include "Commands/SmithUEInputCommands.h"
 #include "Commands/SmithUEUMGCommands.h"
 #include "Commands/SmithUEAssetAuditCommands.h"
+#include "Commands/SmithUELiveCodingCommands.h"
 #include "UI/SSmithUEStatusIndicator.h"
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
@@ -79,6 +80,7 @@ void FSmithUEModule::StartupModule()
 	FSmithUEInputCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEUMGCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEAssetAuditCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUELiveCodingCommands::RegisterTools(FSmithUEToolRegistry::Get());
 
 	// Register project settings detail customization (clickable URLs)
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));

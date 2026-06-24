@@ -3,7 +3,7 @@
 	"Version": 8,
 	"VersionName": "1.10.0",
 	"FriendlyName": "SmithUE",
-	"Description": "Full-stack AI tool service plugin for Unreal Engine 5.2 - exposes 214 editor automation tools via HTTP JSON, with AI texture/audio generation (Pollinations.ai)",
+	"Description": "Full-stack AI tool service plugin for Unreal Engine 5.2 - exposes 221 editor automation tools via HTTP JSON, with AI texture/audio generation (Pollinations.ai)",
 	"Category": "Editor",
 	"CreatedBy": "123dx-svg",
 	"CreatedByURL": "https://github.com/123dx-svg/SmithUE",

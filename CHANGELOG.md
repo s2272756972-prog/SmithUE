@@ -2,10 +2,17 @@
 
 ## v1.10.0
 
-### 新增工具（+3，合计 217 工具 / 23 个领域）
+### 新增工具（合计 221 工具 / 24 个领域）
 - **`get_asset_property`**：通用 UObject 属性读取器（set_asset_property 的读对偶）
 - **`scan_assets`**：文件夹作用域资产扫描，返回 v1 linter 元数据（命名/路径/父类/材质槽/LOD/碰撞）
 - **`bp_describe_components`**：Blueprint 组件树读回，供合规 linter 比对（继承盲区显式标注）
+- **`spawn_mesh_actor`**：向当前世界生成带网格 + 材质的 StaticMeshActor（补 spawn_actor 无法赋网格/材质的缺口）
+- **`level_add_basic_env`**：向当前世界一键添加基础环境（定向光 / 天空 / 天光 / 雾 / 地板 / PlayerStart）
+- **`livecoding_status` / `livecoding_compile`**：Live Coding 热编译状态查询与同步触发（新增 LiveCoding 领域）
+
+### 修复
+- **`level_new` 崩溃修复**：将同步 `NewBlankMap` 改为经 `GEngine->DeferredCommands` 延迟到下一帧安全点执行，避免在 HTTP handler 内 tick 期间销毁世界导致崩溃（复刻 level_open 的延迟模式）。
+- **材质 WorldPositionOffset 输出引脚**：`connect_material_pins` 的 `dest_input_index=7` 正确映射到 WPO 引脚。
 
 ### 架构演进
 - 企业级资产装配与合规标准化引擎定位正式确立

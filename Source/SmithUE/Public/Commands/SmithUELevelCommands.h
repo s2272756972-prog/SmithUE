@@ -21,4 +21,5 @@ private:
     static TSharedPtr<FJsonObject> HandleLevelPaintFoliage(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleLevelEraseFoliage(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleLevelGetFoliageStats(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleLevelAddBasicEnv(const TSharedPtr<FJsonObject>& Params);
 };
