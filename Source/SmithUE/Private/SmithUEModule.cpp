@@ -4,6 +4,7 @@
 #include "Transport/SmithUEHttpServer.h"
 #include "SmithUESettings.h"
 #include "SmithUESettingsCustomization.h"
+#include "Utils/SmithUECliChecker.h"
 #include "Utils/SmithUEUpdateChecker.h"
 
 #include "Commands/SmithUEAssetCommands.h"
@@ -116,28 +117,27 @@ void FSmithUEModule::StartupModule()
 		})
 	);
 
-	// Schedule update check 7 seconds after startup (non-blocking), if enabled in Project Settings
-	if (const USmithUESettings* SmithSettings = GetDefault<USmithUESettings>())
-	{
-		if (SmithSettings->bCheckForUpdatesOnStartup)
+	// Schedule non-blocking environment checks ~7s after startup.
+	// Process PATH is fixed at launch; the delay avoids blocking initial frame rendering.
+	FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([](float DeltaTime) -> bool
 		{
-			FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateLambda([](float DeltaTime) -> bool
+			const USmithUESettings* Settings = GetDefault<USmithUESettings>();
+			if (Settings)
+			{
+				if (Settings->bCheckForUpdatesOnStartup)
 				{
-					FSmithUEUpdateChecker::OnUpdateCheckComplete.AddLambda([]()
-					{
-						if (FSmithUEUpdateChecker::IsUpdateAvailable())
-						{
-							FSmithUEUpdateChecker::ShowUpdateNotification();
-						}
-					});
 					FSmithUEUpdateChecker::CheckForUpdate();
-					return false; // one-shot
-				}),
-				7.0f
-			);
-		}
-	}
+				}
+				if (Settings->bCheckCliOnStartup)
+				{
+					FSmithUECliChecker::CheckCliEnvironment();
+				}
+			}
+			return false; // one-shot
+		}),
+		7.0f
+	);
 
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module started successfully."));
 }

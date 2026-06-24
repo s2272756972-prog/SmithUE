@@ -39,9 +39,14 @@ public:
 	float PortfileHeartbeatInterval = 4.0f;
 
 	/** If false, SmithUE will not check for plugin updates on Editor startup. */
-	UPROPERTY(config, EditAnywhere, Category="General",
+	UPROPERTY(config, EditAnywhere, Category="Status & Updates",
 		meta=(ToolTip="Check for SmithUE plugin updates automatically on Editor startup."))
 	bool bCheckForUpdatesOnStartup = true;
+
+	/** If true, SmithUE will check for Node/npm/smithue-cli on Editor startup (non-blocking, ~7s delay). */
+	UPROPERTY(config, EditAnywhere, Category="Status & Updates",
+		meta=(ToolTip="Detect Node.js / npm / smithue-cli environment on Editor startup. Non-blocking. Result visible in Project Settings → SmithUE."))
+	bool bCheckCliOnStartup = true;
 
 	/** Guide: visit Pollinations.ai to register and get your free API key for audio generation.
 	 *  Image generation (generate_texture) is free and requires no key.
