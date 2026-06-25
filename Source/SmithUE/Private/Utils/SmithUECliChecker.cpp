@@ -25,6 +25,15 @@ static FCliInfo GCachedCliInfo;
 /** Set to true while an async check is in-flight; cleared on game thread when done. */
 static FThreadSafeBool bCliCheckInFlight;
 
+/** Set to true while an install/upgrade is in-flight; independent of the check flag. */
+static FThreadSafeBool bInstallInFlight;
+
+/** Set by CancelCliInstall(); polled by the install worker loop to terminate the subprocess. */
+static FThreadSafeBool bInstallCancelRequested;
+
+/** Hard timeout for the install/upgrade subprocess (seconds). */
+static constexpr double kInstallTimeoutSeconds = 120.0;
+
 // Static member definition
 FOnCliCheckComplete FSmithUECliChecker::OnCliCheckComplete;
 
@@ -231,6 +240,79 @@ int32 RunDirect(const FString& Exe, const FString& Args, FString& OutStdOut, FSt
     return rc;
 }
 
+/** Outcome of a bounded subprocess run. */
+struct FBoundedRun
+{
+    int32 Rc          = -1;
+    bool  bTimedOut   = false;
+    bool  bCancelled  = false;
+};
+
+/**
+ * Run an executable with a hard timeout and cooperative cancellation, capturing
+ * combined stdout+stderr. Uses CreateProc (hidden) + a pipe + a poll loop so a
+ * stuck network call (npm) can never block forever — unlike ExecProcess which
+ * has no timeout. On timeout or cancel the whole process tree is terminated.
+ *
+ *   CancelFlag  : polled each tick; when true -> terminate + bCancelled.
+ *   TimeoutSecs : wall-clock budget; when exceeded -> terminate + bTimedOut.
+ */
+FBoundedRun RunBounded(const FString& Exe, const FString& Args,
+                       double TimeoutSecs, const FThreadSafeBool& CancelFlag,
+                       FString& OutCombined)
+{
+    FBoundedRun Result;
+
+    void* ReadPipe  = nullptr;
+    void* WritePipe = nullptr;
+    if (!FPlatformProcess::CreatePipe(ReadPipe, WritePipe))
+    {
+        OutCombined = TEXT("failed to create stdout pipe");
+        return Result;
+    }
+
+    // bLaunchDetached=false, bLaunchHidden=true, bLaunchReallyHidden=true (no console flash).
+    // WritePipe is inherited by the child for BOTH stdout and stderr on Windows.
+    FProcHandle Proc = FPlatformProcess::CreateProc(
+        *Exe, *Args, /*bLaunchDetached*/false, /*bLaunchHidden*/true, /*bLaunchReallyHidden*/true,
+        /*OutProcessID*/nullptr, /*PriorityModifier*/0, /*WorkingDir*/nullptr, /*PipeWriteChild*/WritePipe);
+
+    if (!Proc.IsValid())
+    {
+        FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
+        OutCombined = TEXT("failed to launch subprocess");
+        return Result;
+    }
+
+    const double Start = FPlatformTime::Seconds();
+    while (FPlatformProcess::IsProcRunning(Proc))
+    {
+        OutCombined += FPlatformProcess::ReadPipe(ReadPipe);
+
+        if (CancelFlag)
+        {
+            FPlatformProcess::TerminateProc(Proc, /*KillTree*/true);
+            Result.bCancelled = true;
+            break;
+        }
+        if (FPlatformTime::Seconds() - Start > TimeoutSecs)
+        {
+            FPlatformProcess::TerminateProc(Proc, /*KillTree*/true);
+            Result.bTimedOut = true;
+            break;
+        }
+        FPlatformProcess::Sleep(0.1f);
+    }
+
+    // Drain whatever is left in the pipe (process may have just exited).
+    OutCombined += FPlatformProcess::ReadPipe(ReadPipe);
+
+    FPlatformProcess::GetProcReturnCode(Proc, &Result.Rc);
+    FPlatformProcess::CloseProc(Proc);
+    FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
+    return Result;
+}
+
 /**
  * Locate npm-cli.js relative to a node.exe path.
  * npm ships as node_modules/npm/bin/npm-cli.js inside the nodejs install dir.
@@ -410,68 +492,100 @@ void FSmithUECliChecker::CheckCliEnvironment()
 
 void FSmithUECliChecker::ExecuteCliInstall()
 {
-    if (bCliCheckInFlight.AtomicSet(true))
+    // Use a DEDICATED in-flight flag so a stuck install never freezes Re-check.
+    if (bInstallInFlight.AtomicSet(true))
     {
         return;
     }
+    bInstallCancelRequested = false;
 
     AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, []()
     {
-        // Install via node.exe + npm-cli.js (avoids cmd.exe DETACHED_PROCESS pipe issue)
+        // Install via node.exe + npm-cli.js (avoids cmd.exe DETACHED_PROCESS pipe issue).
+        // Fast-fail flags so a bad network gives up in ~1 min instead of npm's ~15 min
+        // retry budget; the 120s hard timeout below is the absolute backstop.
         const FString NpmCli = FindNpmCliJs();
-        FString InstallOut, InstallErr;
-        int32 rc = -1;
+        FString Combined;
+        FBoundedRun Run;
         if (NpmCli.IsEmpty())
         {
-            InstallErr = TEXT("npm-cli.js not found — is Node.js installed?");
+            Combined = TEXT("npm-cli.js not found — is Node.js installed?");
         }
         else
         {
-            rc = RunDirect(TEXT("node.exe"),
-                FString::Printf(TEXT("\"%s\" i -g smithue-cli@latest"), *NpmCli),
-                InstallOut, InstallErr);
+            const FString Args = FString::Printf(
+                TEXT("\"%s\" i -g smithue-cli@latest --fetch-timeout=60000 --fetch-retries=1 --no-audit --no-fund"),
+                *NpmCli);
+            Run = RunBounded(TEXT("node.exe"), Args, kInstallTimeoutSeconds, bInstallCancelRequested, Combined);
         }
-        UE_LOG(LogSmithUE, Log, TEXT("[SmithUE CLI] install: rc=%d out='%s' err='%s'"),
-               rc, *InstallOut.TrimStartAndEnd(), *InstallErr.TrimStartAndEnd());
 
-        if (rc == 0)
+        UE_LOG(LogSmithUE, Log,
+               TEXT("[SmithUE CLI] install: rc=%d timedOut=%d cancelled=%d out='%s'"),
+               Run.Rc, Run.bTimedOut ? 1 : 0, Run.bCancelled ? 1 : 0, *Combined.TrimStartAndEnd());
+
+        const bool bSuccess = (!Run.bTimedOut && !Run.bCancelled && Run.Rc == 0 && !NpmCli.IsEmpty());
+
+        // Build a user-facing message off the failure mode.
+        FString ToastMsg;
+        if (Run.bCancelled)
         {
-            // Clear the flag before re-triggering a fresh environment check
-            bCliCheckInFlight = false;
-            FSmithUECliChecker::CheckCliEnvironment();
+            ToastMsg = TEXT("smithue-cli install cancelled.");
         }
-        else
+        else if (Run.bTimedOut)
         {
-            // Classify the failure from combined stdout + stderr
-            const FString Combined = InstallOut + InstallErr;
-
-            FString ToastMsg;
-            if (Combined.Contains(TEXT("EACCES"))
-                || Combined.Contains(TEXT("permission"), ESearchCase::IgnoreCase))
+            ToastMsg = TEXT("smithue-cli install timed out (120s) and was aborted. "
+                            "Check your network / npm registry, or run 'npm i -g smithue-cli@latest' manually. "
+                            "The SmithUE plugin works fine without the CLI.");
+        }
+        else if (!bSuccess)
+        {
+            if (NpmCli.IsEmpty())
+            {
+                ToastMsg = TEXT("smithue-cli install failed: Node.js not found. Install Node.js first (nodejs.org).");
+            }
+            else if (Combined.Contains(TEXT("EACCES"))
+                     || Combined.Contains(TEXT("permission"), ESearchCase::IgnoreCase))
             {
                 ToastMsg = TEXT("smithue-cli install failed: permission denied. "
-                                "Try running your terminal as administrator or use a Node version manager (nvm, fnm).");
+                                "Run your terminal as administrator or use a Node version manager (nvm, fnm).");
             }
-            else if (Combined.Contains(TEXT("ECONNREFUSED"))
+            else if (Combined.Contains(TEXT("ETIMEDOUT"))
+                     || Combined.Contains(TEXT("ECONNREFUSED"))
+                     || Combined.Contains(TEXT("ENOTFOUND"))
                      || Combined.Contains(TEXT("fetch failed"), ESearchCase::IgnoreCase)
                      || Combined.Contains(TEXT("network"), ESearchCase::IgnoreCase))
             {
                 ToastMsg = TEXT("smithue-cli install failed: network error. "
-                                "Check your internet connection and npm registry configuration.");
+                                "Check your connection / npm registry, or try 'npx smithue-cli' (no install). "
+                                "The SmithUE plugin works fine without the CLI.");
             }
             else
             {
-                ToastMsg = TEXT("smithue-cli install failed: npm registry error. "
+                ToastMsg = TEXT("smithue-cli install failed. "
                                 "Run 'npm i -g smithue-cli@latest' manually for details.");
             }
-
-            AsyncTask(ENamedThreads::GameThread, [ToastMsg]()
-            {
-                ShowToast(ToastMsg);
-                bCliCheckInFlight = false;
-            });
         }
+
+        AsyncTask(ENamedThreads::GameThread, [bSuccess, ToastMsg]()
+        {
+            bInstallInFlight = false;
+            if (bSuccess)
+            {
+                // Refresh state so the button flips to "up to date" automatically.
+                FSmithUECliChecker::CheckCliEnvironment();
+            }
+            else
+            {
+                ShowToast(ToastMsg, 9.0f);
+            }
+        });
     });
+}
+
+void FSmithUECliChecker::CancelCliInstall()
+{
+    // The install worker loop polls this flag and terminates the subprocess tree.
+    bInstallCancelRequested = true;
 }
 
 ECliState FSmithUECliChecker::GetState()
@@ -502,4 +616,9 @@ FDateTime FSmithUECliChecker::GetLastCheckTime()
 bool FSmithUECliChecker::IsCheckInFlight()
 {
     return bCliCheckInFlight;
+}
+
+bool FSmithUECliChecker::IsInstallInFlight()
+{
+    return bInstallInFlight;
 }

@@ -88,8 +88,12 @@ public:
     /**
      * Install or upgrade smithue-cli globally via npm.
      * ONLY call this on an explicit user action (button press).
+     * Bounded by a hard timeout; cancellable via CancelCliInstall().
      */
     static void ExecuteCliInstall();
+
+    /** Request cancellation of an in-flight install (terminates the npm subprocess). */
+    static void CancelCliInstall();
 
     static ECliState GetState();
     static FString   GetNodeVersion();
@@ -97,6 +101,7 @@ public:
     static FString   GetCliVersion();
     static FDateTime GetLastCheckTime();
     static bool      IsCheckInFlight();
+    static bool      IsInstallInFlight();
 
     static FOnCliCheckComplete OnCliCheckComplete;
 };

@@ -186,6 +186,10 @@ void FSmithUESettingsCustomization::CustomizeDetails(IDetailLayoutBuilder& Detai
 			[
 				SNew(SButton)
 				.Text(FText::FromString(TEXT("\u91cd\u65b0\u68c0\u6d4b / Re-check")))
+				.IsEnabled_Lambda([]() -> bool {
+					return !FSmithUECliChecker::IsCheckInFlight()
+						&& !FSmithUECliChecker::IsInstallInFlight();
+				})
 				.OnClicked_Lambda([]() -> FReply {
 					FSmithUECliChecker::CheckCliEnvironment();
 					return FReply::Handled();
@@ -195,7 +199,12 @@ void FSmithUESettingsCustomization::CustomizeDetails(IDetailLayoutBuilder& Detai
 			[
 				SNew(SButton)
 				.Text_Lambda([]() -> FText {
-					// While a check/install is running, show a non-actionable progress label.
+					// During an install the button becomes a Cancel control.
+					if (FSmithUECliChecker::IsInstallInFlight())
+					{
+						return FText::FromString(TEXT("\u53d6\u6d88")); // 取消
+					}
+					// While a check is running, show a non-actionable progress label.
 					if (FSmithUECliChecker::IsCheckInFlight())
 					{
 						return FText::FromString(TEXT("\u5904\u7406\u4e2d\u2026")); // 处理中…
@@ -218,14 +227,22 @@ void FSmithUESettingsCustomization::CustomizeDetails(IDetailLayoutBuilder& Detai
 					}
 				})
 				.IsEnabled_Lambda([]() -> bool {
-					// Actionable ONLY when something actually needs installing or upgrading,
-					// and no check/install is already running. Ready/NoNode => disabled (state confirmation only).
+					// While installing, the button is the Cancel control and is always clickable.
+					if (FSmithUECliChecker::IsInstallInFlight()) { return true; }
+					// Otherwise actionable ONLY when something actually needs installing or upgrading.
 					const ECliState S = FSmithUECliChecker::GetState();
 					return (S == ECliState::NotInstalled || S == ECliState::Outdated)
 						&& !FSmithUECliChecker::IsCheckInFlight();
 				})
 				.OnClicked_Lambda([]() -> FReply {
-					FSmithUECliChecker::ExecuteCliInstall();
+					if (FSmithUECliChecker::IsInstallInFlight())
+					{
+						FSmithUECliChecker::CancelCliInstall();
+					}
+					else
+					{
+						FSmithUECliChecker::ExecuteCliInstall();
+					}
 					return FReply::Handled();
 				})
 			]
