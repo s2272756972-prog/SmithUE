@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Resources/Icon.png" alt="SmithUE" width="180">
+</p>
+
 # SmithUE
 
 <p align="center">
