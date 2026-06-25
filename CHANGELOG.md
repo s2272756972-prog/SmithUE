@@ -1,6 +1,6 @@
 # SmithUE Changelog
 
-## 未发布（当前 `UE5.2` 分支）
+## v1.12.0（UE5.2，2026-06-26）
 
 ### 修复：材质工具自描述（对齐 TOOL_SPEC §3.1）
 - **`connect_material_pins`** 的 `dest_input_index` 描述补全 `7=WorldPositionOffset`（此前只列 0–6；WPO/顶点偏移连不上只能翻源码 `case 7`）。8+ 标注不支持。

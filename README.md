@@ -183,6 +183,9 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
+### v1.12.0（UE5.2，2026-06-26）
+- **材质工具自描述**：`connect_material_pins` 的 `dest_input_index` 补全 `7=WorldPositionOffset`（此前只列 0–6）；`set_expression_property` 描述列出按节点类型的合法键，失败错误改为**回显该节点合法键**。沉淀 PITFALLS #15。
+
 ### v1.11.0（UE5.2，2026-06-25）
 - **启动环境自检**：编辑器启动后后台检测 Node / npm / smithue-cli 环境，不阻塞主线程，每步写入 `LogSmithUE` 日志。
 - **「Status & Updates」设置面板**：查看环境状态、插件更新提醒（GitHub Releases 链接），一键安装 / 升级 CLI；按钮随状态自适应（未安装 / 升级 / 已最新 / 取消）。

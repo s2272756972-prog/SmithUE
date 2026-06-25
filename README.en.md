@@ -163,6 +163,9 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > Full history in [CHANGELOG.md](CHANGELOG.md).
 
+### v1.12.0 (UE5.2, 2026-06-26)
+- **Self-describing material tools**: `connect_material_pins` `dest_input_index` now documents `7=WorldPositionOffset` (was 0–6 only); `set_expression_property` lists node-type-specific valid keys and its error echoes the node's valid keys. PITFALLS #15.
+
 ### v1.11.0 (UE5.2, 2026-06-25)
 - **Startup environment self-check**: detects Node / npm / smithue-cli in the background on editor launch, off the game thread, logging each probe to `LogSmithUE`.
 - **"Status & Updates" settings panel**: view environment status, plugin-update reminder (GitHub Releases link), one-click install / upgrade of the CLI; the button adapts to state (Install / Upgrade / Ready / Cancel).
