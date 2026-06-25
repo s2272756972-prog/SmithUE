@@ -10,6 +10,11 @@
 ### 变更
 - 启动时不再弹更新 toast；插件更新提醒移入设置面板。`level_new` 等不变。
 
+### 修复：Content Browser 选区/路径返回虚拟路径
+- **`get_content_browser_selection`** 的 `selected_folders` 此前直接返回引擎虚拟路径（`/All/Game/BP`、`/All/Plugins/Foo/BP`），下游无法直接当作包路径使用。现统一规范化为真实包路径（`/Game/BP`、`/Foo/BP`），并新增 `selected_folders_virtual` 字段保留原始虚拟路径用于调试。
+- 新增 `FSmithUECommonUtils::NormalizeContentBrowserPath()`：基于官方 `UContentBrowserDataSubsystem::TryConvertVirtualPath` 转换（同时正确处理工程 `/Game` 与插件挂载路径），失败时回退（`/All`→`/Game`、`/All/Game..` 截断），绝不静默丢弃。
+- 合并此前散落在 4 处的 `/All` 字符串截断逻辑（`SmithUEBpAtomicAPI.cpp` ×3、`SmithUEAssetAuditCommands.cpp`）统一改调用该 helper；`SmithUE.Build.cs` 新增 `ContentBrowserData` 模块依赖。
+
 ## v1.10.0
 
 ### 新增工具（合计 221 工具 / 24 个领域）

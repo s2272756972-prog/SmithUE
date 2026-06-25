@@ -1161,11 +1161,16 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleGetContentBrowserSelection(
     for (const FString& F : PathViewFolders) { Folders.AddUnique(F); }
     for (const FString& F : AssetViewFolders) { Folders.AddUnique(F); }
 
-    TArray<TSharedPtr<FJsonValue>> FoldersArray;
+    TArray<TSharedPtr<FJsonValue>> FoldersArray;          // normalized real package paths
+    TArray<TSharedPtr<FJsonValue>> FoldersVirtualArray;   // original /All/... virtual paths (debug)
     FoldersArray.Reserve(Folders.Num());
+    FoldersVirtualArray.Reserve(Folders.Num());
     for (const FString& F : Folders)
     {
-        FoldersArray.Add(MakeShared<FJsonValueString>(F));
+        FString Real;
+        FSmithUECommonUtils::NormalizeContentBrowserPath(F, Real);
+        FoldersArray.Add(MakeShared<FJsonValueString>(Real));
+        FoldersVirtualArray.Add(MakeShared<FJsonValueString>(F));
     }
 
     // Selected assets in the asset view.
@@ -1181,6 +1186,7 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleGetContentBrowserSelection(
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetArrayField(TEXT("selected_folders"), FoldersArray);
+    Data->SetArrayField(TEXT("selected_folders_virtual"), FoldersVirtualArray);
     Data->SetArrayField(TEXT("selected_assets"), AssetsArray);
     Data->SetNumberField(TEXT("folder_count"), Folders.Num());
     Data->SetNumberField(TEXT("asset_count"), SelectedAssets.Num());

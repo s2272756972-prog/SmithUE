@@ -1203,15 +1203,10 @@ namespace
 
 	void AppendBlueprintAssetsFromFolder(const FString& FolderPath, bool bRecursive, TArray<FString>& OutBpPaths)
 	{
-		FString Folder = FolderPath;
-		if (Folder.StartsWith(TEXT("/All/")))
-		{
-			Folder = Folder.RightChop(4);
-		}
-		else if (Folder.Equals(TEXT("/All")))
-		{
-			Folder = TEXT("/Game");
-		}
+		// Normalize content-browser virtual path -> real package path (handles project + plugins).
+		FString Folder;
+		FSmithUECommonUtils::NormalizeContentBrowserPath(FolderPath, Folder);
+
 
 		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		FARFilter Filter;
@@ -2397,16 +2392,9 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentCollision(const
 	}
 	if (!FolderPath.IsEmpty())
 	{
-		FString Folder = FolderPath;
-		// Content Browser selection often comes as a virtual "/All/Game/..." path.
-		if (Folder.StartsWith(TEXT("/All/")))
-		{
-			Folder = Folder.RightChop(4); // strip "/All"
-		}
-		else if (Folder.Equals(TEXT("/All")))
-		{
-			Folder = TEXT("/Game");
-		}
+		// Normalize content-browser virtual path -> real package path (handles project + plugins).
+		FString Folder;
+		FSmithUECommonUtils::NormalizeContentBrowserPath(FolderPath, Folder);
 
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 		FARFilter Filter;
@@ -2681,15 +2669,10 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBulkSetComponentProperty(co
 	}
 	if (!FolderPath.IsEmpty())
 	{
-		FString Folder = FolderPath;
-		if (Folder.StartsWith(TEXT("/All/")))
-		{
-			Folder = Folder.RightChop(4);
-		}
-		else if (Folder.Equals(TEXT("/All")))
-		{
-			Folder = TEXT("/Game");
-		}
+		// Normalize content-browser virtual path -> real package path (handles project + plugins).
+		FString Folder;
+		FSmithUECommonUtils::NormalizeContentBrowserPath(FolderPath, Folder);
+
 
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 		FARFilter Filter;

@@ -152,9 +152,8 @@ TSharedPtr<FJsonObject> FSmithUEAssetAuditCommands::HandleScanAssets(
     Params->TryGetStringField(TEXT("folder_path"), FolderPath);
     Params->TryGetBoolField(TEXT("recursive"), bRecursive);
 
-    // Strip /All prefix if present (content browser virtual path)
-    if (FolderPath.StartsWith(TEXT("/All/")))
-        FolderPath = FolderPath.Mid(4);
+    // Normalize content-browser virtual path -> real package path (handles project + plugins)
+    { FString RealFolder; FSmithUECommonUtils::NormalizeContentBrowserPath(FolderPath, RealFolder); FolderPath = RealFolder; }
 
     IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 

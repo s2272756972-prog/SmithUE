@@ -61,6 +61,7 @@ public class SmithUE : ModuleRules
 					"AssetTools",
 					"AudioEditor",
 					"ContentBrowser",
+					"ContentBrowserData",
 					"Niagara",
 					"NiagaraEditor",
 					"Sequencer",

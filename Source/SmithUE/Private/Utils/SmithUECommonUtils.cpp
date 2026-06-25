@@ -5,6 +5,8 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Editor.h"
+#include "ContentBrowserDataSubsystem.h"
 
 TSharedPtr<FJsonObject> FSmithUECommonUtils::CreateSuccessResponse(TSharedPtr<FJsonObject> Data)
 {
@@ -158,4 +160,48 @@ bool FSmithUECommonUtils::ValidateRequiredParams(const TSharedPtr<FJsonObject>& 
 
 	OutError.Reset();
 	return true;
+}
+
+bool FSmithUECommonUtils::NormalizeContentBrowserPath(const FString& InPath, FString& OutReal)
+{
+	OutReal = InPath;
+	if (InPath.IsEmpty())
+	{
+		return false;
+	}
+
+	// Authoritative conversion. Handles BOTH project content ("/All/Game/.." -> "/Game/..")
+	// and plugin content ("/All/Plugins/Foo/.." -> "/Foo/..") correctly, and passes through
+	// already-internal paths unchanged. This is the only correct mapping — plugin virtual
+	// paths CANNOT be reduced by stripping a fixed "/All" prefix.
+	if (GEditor)
+	{
+		if (UContentBrowserDataSubsystem* CBData = GEditor->GetEditorSubsystem<UContentBrowserDataSubsystem>())
+		{
+			FString Internal;
+			const EContentBrowserPathType Type = CBData->TryConvertVirtualPath(InPath, Internal);
+			if (Type == EContentBrowserPathType::Internal && !Internal.IsEmpty())
+			{
+				OutReal = Internal;
+				return true;
+			}
+		}
+	}
+
+	// Fallbacks when the subsystem is unavailable or the path can't be resolved.
+	// Only the project-content case is safe to derive via string ops; plugin virtual
+	// paths are kept as-is rather than emit a wrong path (caller can detect via the
+	// false return and the unchanged /All-prefixed OutReal).
+	if (InPath.Equals(TEXT("/All")))
+	{
+		OutReal = TEXT("/Game");
+		return false;
+	}
+	if (InPath.StartsWith(TEXT("/All/Game/")) || InPath.Equals(TEXT("/All/Game")))
+	{
+		OutReal = InPath.RightChop(4); // "/All/Game.." -> "/Game.."
+		return false;
+	}
+
+	return false;
 }
