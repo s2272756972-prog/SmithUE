@@ -490,7 +490,7 @@ void FSmithUEBpCompiler::ProcessForLoop(const TArray<FString>& Lines, int32& Lin
 	ConnectExec(InOutNodeId, InOutPinName, LoopNodeId, TEXT("execute"));
 	FString BodyNode = LoopNodeId, BodyPin = TEXT("LoopBody");
 	for (int32 Index = BodyOpenLine + 1; Index < BodyCloseLine; ++Index)
-		{ const FString T = TrimSemicolon(Lines[Index]); if (T.IsEmpty() || T == TEXT("{") || T == TEXT("}")) { continue; } if (T.StartsWith(TEXT("if"))) { AddError(TEXT("Nested if statements inside loops are not supported in v1.0")); break; } if (T.StartsWith(TEXT("local "))) { ProcessLocalVariable(T, BodyNode, BodyPin); continue; } if (T.StartsWith(TEXT("return"))) { ProcessReturn(T, BodyNode, BodyPin); continue; } if (T.Contains(TEXT(" = ")) && !T.Contains(TEXT("("))) { ProcessAssignment(T, BodyNode, BodyPin); continue; } ProcessFunctionCall(T, BodyNode, BodyPin); }
+		{ const FString T = TrimSemicolon(Lines[Index]); if (T.IsEmpty() || T == TEXT("{") || T == TEXT("}")) { continue; } if (T.StartsWith(TEXT("if"))) { AddError(TEXT("Nested if statements inside loops are not supported in v1.0 Build nested branches with bp_batch_op + bp_create_node instead.")); break; } if (T.StartsWith(TEXT("local "))) { ProcessLocalVariable(T, BodyNode, BodyPin); continue; } if (T.StartsWith(TEXT("return"))) { ProcessReturn(T, BodyNode, BodyPin); continue; } if (T.Contains(TEXT(" = ")) && !T.Contains(TEXT("("))) { ProcessAssignment(T, BodyNode, BodyPin); continue; } ProcessFunctionCall(T, BodyNode, BodyPin); }
 	InOutNodeId = LoopNodeId;
 	InOutPinName = TEXT("Completed");
 	LineIndex = BodyCloseLine;

@@ -2002,7 +2002,7 @@ Read the widget tree of an existing Widget Blueprint
 
 ### `add_widget`
 
-Add a widget to an existing Widget Blueprint tree. The parent must be a panel that accepts children, and the widget tree must already exist.
+Add a widget to an existing Widget Blueprint tree. If a named parent panel is given, adds there; if the parent is not a valid panel, falls back to the root. The widget tree must already exist.
 
 **Parameters:**
 
