@@ -162,7 +162,7 @@ void FSmithUEAssetFactoryCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 
     Registry.Register(
         FSmithUEToolSchema(TEXT("create_data_asset"), TEXT("Data"),
-            TEXT("Create a Data Asset instance of a UDataAsset subclass"),
+            TEXT("Create a Data Asset from a CONCRETE, non-abstract UDataAsset subclass (abstract bases like UDataAsset/UPrimaryDataAsset are rejected)."),
             {
                 FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Data asset name"), true),
                 FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Content folder path"), true),

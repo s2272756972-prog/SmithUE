@@ -269,7 +269,6 @@ FSmithUECompileResult FSmithUEBpCompiler::CompileFunction(UBlueprint* Blueprint,
 		NewResult->NodePosX = 800;
 		NewResult->NodePosY = 0;
 		ResultCreator.Finalize();
-		NewResult->AllocateDefaultPins();
 		Compiler.ReturnNodeId = NewResult->NodeGuid.ToString();
 	}
 	if (Compiler.EntryNodeId.IsEmpty()) { Result.Errors.Add(TEXT("Function graph is missing entry node")); return Result; }
@@ -337,7 +336,36 @@ bool FSmithUEBpCompiler::ValidateSyntax(const FString& Code, FString& OutError)
 	const int32 SignatureLine = FindFirstNonEmptyLine(Lines);
 	if (SignatureLine == INDEX_NONE) { OutError = TEXT("Code is empty"); return false; }
 	FCompilerSignature Signature;
-	if (!ParseSignatureText(Lines[SignatureLine], Signature)) { OutError = TEXT("Invalid function signature"); return false; }
+	{
+		const FString TrimmedSig = Lines[SignatureLine].TrimStartAndEnd();
+		const bool bEventKeyword = TrimmedSig.StartsWith(TEXT("event "), ESearchCase::IgnoreCase)
+			|| TrimmedSig.StartsWith(TEXT("event("), ESearchCase::IgnoreCase)
+			|| TrimmedSig.StartsWith(TEXT("event\t"), ESearchCase::IgnoreCase);
+		if (bEventKeyword)
+		{
+			OutError = TEXT("bp_compile_code builds FUNCTION graphs only (no events/Tick/BeginPlay/Overlap/input). For event logic use the atomic-node workflow: bp_override_function -> bp_create_node -> bp_describe_graph -> bp_batch_op -> bp_compile.");
+			return false;
+		}
+	}
+	if (!ParseSignatureText(Lines[SignatureLine], Signature))
+	{
+		const FString TrimmedSig2 = Lines[SignatureLine].TrimStartAndEnd();
+		static const TArray<FString> UEEventNames = {
+			TEXT("Tick"), TEXT("ReceiveTick"), TEXT("BeginPlay"), TEXT("ReceiveBeginPlay"),
+			TEXT("EndPlay"), TEXT("ReceiveEndPlay"), TEXT("ActorBeginOverlap"),
+			TEXT("ReceiveActorBeginOverlap"), TEXT("ActorEndOverlap"),
+			TEXT("Hit"), TEXT("ReceiveHit"), TEXT("AnyDamage")
+		};
+		bool bEventName = false;
+		for (const FString& Name : UEEventNames)
+		{
+			if (TrimmedSig2.Contains(Name, ESearchCase::CaseSensitive)) { bEventName = true; break; }
+		}
+		OutError = bEventName
+			? TEXT("bp_compile_code builds FUNCTION graphs only (no events/Tick/BeginPlay/Overlap/input). For event logic use the atomic-node workflow: bp_override_function -> bp_create_node -> bp_describe_graph -> bp_batch_op -> bp_compile.")
+			: TEXT("Invalid function signature");
+		return false;
+	}
 	const int32 OpenBraceLine = FindBlockOpenLine(Lines, SignatureLine);
 	if (OpenBraceLine == INDEX_NONE) { OutError = TEXT("Missing function body opening brace"); return false; }
 	const int32 CloseBraceLine = FindMatchingBrace(Lines, OpenBraceLine);
@@ -399,7 +427,7 @@ void FSmithUEBpCompiler::ProcessLines(const TArray<FString>& Lines, int32& LineI
 void FSmithUEBpCompiler::ProcessFunctionCall(const FString& Line, FString& InOutNodeId, FString& InOutPinName)
 {
 	int32 OpenIndex = INDEX_NONE, CloseIndex = INDEX_NONE;
-	if (!Line.FindChar('(', OpenIndex) || !Line.FindLastChar(')', CloseIndex) || CloseIndex <= OpenIndex) { AddError(FString::Printf(TEXT("Invalid function call: %s"), *Line)); return; }
+	if (!Line.FindChar('(', OpenIndex) || !Line.FindLastChar(')', CloseIndex) || CloseIndex <= OpenIndex) { AddError(FString::Printf(TEXT("Invalid function call: %s Use call_name(arg1, arg2) syntax, or bp_batch_op for explicit node graphs."), *Line)); return; }
 	const FString FunctionNameText = Line.Left(OpenIndex).TrimStartAndEnd();
 	TArray<TPair<FString, FString>> Args;
 	for (const FString& Arg : SplitArgs(Line.Mid(OpenIndex + 1, CloseIndex - OpenIndex - 1))) { if (!Arg.IsEmpty()) { Args.Add({ FString(), Arg }); } }
@@ -417,7 +445,7 @@ void FSmithUEBpCompiler::ProcessFunctionCall(const FString& Line, FString& InOut
 
 void FSmithUEBpCompiler::ProcessIfStatement(const TArray<FString>& Lines, int32& LineIndex, FString& InOutNodeId, FString& InOutPinName)
 {
-	if (Lines[LineIndex].TrimStartAndEnd().Contains(TEXT("else"))) { AddError(TEXT("Standalone else is not supported")); return; }
+	if (Lines[LineIndex].TrimStartAndEnd().Contains(TEXT("else"))) { AddError(TEXT("Standalone else is not supported Use an if/else pair, or build the branch with bp_batch_op + bp_create_node.")); return; }
 	const FString Header = Lines[LineIndex].TrimStartAndEnd();
 	int32 OpenIndex = INDEX_NONE, CloseIndex = INDEX_NONE;
 	if (!Header.FindChar('(', OpenIndex) || !Header.FindLastChar(')', CloseIndex)) { AddError(TEXT("Invalid if statement syntax")); return; }
@@ -431,7 +459,7 @@ void FSmithUEBpCompiler::ProcessIfStatement(const TArray<FString>& Lines, int32&
 	const bool bHasElse = ElseLine != INDEX_NONE && Lines[ElseLine].TrimStartAndEnd().StartsWith(TEXT("else"));
 	FString ThenEndNode = BranchNodeId, ThenEndPin = TEXT("Then");
 	for (int32 Index = ThenOpenLine + 1; Index < ThenCloseLine; ++Index)
-		{ const FString T = TrimSemicolon(Lines[Index]); if (T.StartsWith(TEXT("if"))) { AddError(TEXT("Nested if statements are not supported in v1.0")); break; } if (T.IsEmpty() || T == TEXT("{") || T == TEXT("}")) { continue; } if (T.StartsWith(TEXT("for"))) { ProcessForLoop(Lines, Index, ThenEndNode, ThenEndPin); continue; } if (T.StartsWith(TEXT("local "))) { ProcessLocalVariable(T, ThenEndNode, ThenEndPin); continue; } if (T.StartsWith(TEXT("return"))) { ProcessReturn(T, ThenEndNode, ThenEndPin); continue; } if (T.Contains(TEXT(" = ")) && !T.Contains(TEXT("("))) { ProcessAssignment(T, ThenEndNode, ThenEndPin); continue; } ProcessFunctionCall(T, ThenEndNode, ThenEndPin); }
+		{ const FString T = TrimSemicolon(Lines[Index]); if (T.StartsWith(TEXT("if"))) { AddError(TEXT("Nested if statements are not supported in v1.0 Build nested branches with bp_batch_op + bp_create_node instead.")); break; } if (T.IsEmpty() || T == TEXT("{") || T == TEXT("}")) { continue; } if (T.StartsWith(TEXT("for"))) { ProcessForLoop(Lines, Index, ThenEndNode, ThenEndPin); continue; } if (T.StartsWith(TEXT("local "))) { ProcessLocalVariable(T, ThenEndNode, ThenEndPin); continue; } if (T.StartsWith(TEXT("return"))) { ProcessReturn(T, ThenEndNode, ThenEndPin); continue; } if (T.Contains(TEXT(" = ")) && !T.Contains(TEXT("("))) { ProcessAssignment(T, ThenEndNode, ThenEndPin); continue; } ProcessFunctionCall(T, ThenEndNode, ThenEndPin); }
 	FString ElseEndNode = BranchNodeId, ElseEndPin = TEXT("Else");
 	if (bHasElse)
 	{
@@ -439,7 +467,7 @@ void FSmithUEBpCompiler::ProcessIfStatement(const TArray<FString>& Lines, int32&
 		const int32 ElseCloseLine = FindMatchingBrace(Lines, ElseOpenLine);
 		if (ElseOpenLine == INDEX_NONE || ElseCloseLine == INDEX_NONE) { AddError(TEXT("Else block braces are invalid")); return; }
 		for (int32 Index = ElseOpenLine + 1; Index < ElseCloseLine; ++Index)
-			{ const FString T = TrimSemicolon(Lines[Index]); if (T.StartsWith(TEXT("if"))) { AddError(TEXT("Nested if statements are not supported in v1.0")); break; } if (T.IsEmpty() || T == TEXT("{") || T == TEXT("}")) { continue; } if (T.StartsWith(TEXT("for"))) { ProcessForLoop(Lines, Index, ElseEndNode, ElseEndPin); continue; } if (T.StartsWith(TEXT("local "))) { ProcessLocalVariable(T, ElseEndNode, ElseEndPin); continue; } if (T.StartsWith(TEXT("return"))) { ProcessReturn(T, ElseEndNode, ElseEndPin); continue; } if (T.Contains(TEXT(" = ")) && !T.Contains(TEXT("("))) { ProcessAssignment(T, ElseEndNode, ElseEndPin); continue; } ProcessFunctionCall(T, ElseEndNode, ElseEndPin); }
+		{ const FString T = TrimSemicolon(Lines[Index]); if (T.StartsWith(TEXT("if"))) { AddError(TEXT("Nested if statements are not supported in v1.0 Build nested branches with bp_batch_op + bp_create_node instead.")); break; } if (T.IsEmpty() || T == TEXT("{") || T == TEXT("}")) { continue; } if (T.StartsWith(TEXT("for"))) { ProcessForLoop(Lines, Index, ElseEndNode, ElseEndPin); continue; } if (T.StartsWith(TEXT("local "))) { ProcessLocalVariable(T, ElseEndNode, ElseEndPin); continue; } if (T.StartsWith(TEXT("return"))) { ProcessReturn(T, ElseEndNode, ElseEndPin); continue; } if (T.Contains(TEXT(" = ")) && !T.Contains(TEXT("("))) { ProcessAssignment(T, ElseEndNode, ElseEndPin); continue; } ProcessFunctionCall(T, ElseEndNode, ElseEndPin); }
 		LineIndex = ElseCloseLine;
 	}
 	else { LineIndex = ThenCloseLine; }
@@ -451,7 +479,7 @@ void FSmithUEBpCompiler::ProcessForLoop(const TArray<FString>& Lines, int32& Lin
 {
 	int32 OpenIndex = INDEX_NONE, CloseIndex = INDEX_NONE;
 	const FString Header = Lines[LineIndex].TrimStartAndEnd();
-	if (!Header.FindChar('(', OpenIndex) || !Header.FindLastChar(')', CloseIndex)) { AddError(TEXT("Invalid for loop syntax")); return; }
+	if (!Header.FindChar('(', OpenIndex) || !Header.FindLastChar(')', CloseIndex)) { AddError(TEXT("Invalid for loop syntax Expected: for(start, end) { ... }.")); return; }
 	const TArray<FString> Parts = SplitArgs(Header.Mid(OpenIndex + 1, CloseIndex - OpenIndex - 1));
 	if (Parts.Num() != 2) { AddError(TEXT("For loop expects (start, end)")); return; }
 	const FString LoopNodeId = CreateForLoopNode(Parts[0], Parts[1]);
@@ -581,7 +609,7 @@ FString FSmithUEBpCompiler::ParseExpression(const FString& Expression)
 		if (!GetterNodeId.IsEmpty()) { CreatedNodeIds.Add(GetterNodeId); NextNodeX += 300; return MakePinRef(GetterNodeId, Trimmed); }
 	}
 	if (Trimmed.Contains(TEXT("("))) { const TPair<FString, FString> Ref = ParseFunctionCallExpression(Trimmed); if (!Ref.Key.IsEmpty() && !Ref.Value.IsEmpty()) { return MakePinRef(Ref.Key, Ref.Value); } }
-	AddError(FString::Printf(TEXT("Unsupported expression: %s"), *Trimmed));
+	AddError(FString::Printf(TEXT("Unsupported expression: %s Use literals, local variables, or function calls; for node graphs use bp_batch_op."), *Trimmed));
 	return FString();
 }
 

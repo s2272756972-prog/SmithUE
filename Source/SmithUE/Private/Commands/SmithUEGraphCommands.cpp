@@ -376,7 +376,7 @@ void FSmithUEGraphCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_focus_node"),
             TEXT("Editor"),
-            TEXT("Open a Blueprint editor and focus a node (node_id+graph_name), function graph (function_name), or variable (variable_name)."),
+            TEXT("Open a Blueprint editor and focus a node (node_id+graph_name), function graph (function_name), or variable (variable_name). Provide exactly ONE target: node_id (+graph_name) | function_name | variable_name."),
             {
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
                 FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Graph name (required with node_id)")),

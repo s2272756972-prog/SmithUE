@@ -1006,7 +1006,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_get_component_details"),
             TEXT("Blueprint"),
-            TEXT("Read component template properties (mobility, transform, absolute flags, physics, collision, visibility, mesh, materials) for a Blueprint. Covers own SCS + inherited components. Closes the gap where bp_get_summary only shows hierarchy."),
+            TEXT("Read component template properties (mobility, transform, absolute flags, physics, collision, visibility, mesh, materials) for a Blueprint. Covers own SCS + inherited components. Closes the gap where bp_get_summary only shows hierarchy. props filter accepts only the fixed supported groups."),
             {
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true),
                 FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Optional: only this component name. Empty = all.")),
@@ -1019,7 +1019,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_get_class_members"),
             TEXT("Blueprint"),
-            TEXT("Get a Blueprint or native class's members grouped by owning class, with inheritance-chain attribution and token-conscious output controls."),
+            TEXT("Get a Blueprint or native class's members grouped by owning class, with inheritance-chain attribution and token-conscious output controls. kinds, scope (self|chain|owner:<ClassName>) and detail (compact|full) are whitelisted enums."),
             {
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path OR native C++ class name (e.g. ACarPawn)"), true),
                 FSmithUEToolParam(TEXT("kinds"), TEXT("string"), TEXT("Comma list: functions,variables,macros,delegates,interfaces. Default all.")),
@@ -1084,7 +1084,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_compile_code"),
             TEXT("Blueprint"),
-            TEXT("Compile Blueprint DSL into a Blueprint"),
+            TEXT("Compile the limited Blueprint FUNCTION-graph DSL into an existing function graph. Builds function graphs ONLY -- no events (Tick/BeginPlay/Overlap/input), no nested if, no bare math. For event logic use atomic nodes (bp_override_function -> bp_create_node -> bp_batch_op -> bp_compile). Returns data.success (false on compile errors even when the request itself succeeds)."),
             {
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true),
                 FSmithUEToolParam(TEXT("code"), TEXT("string"), TEXT("Blueprint DSL text"), true)
@@ -1095,7 +1095,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_batch_op"),
             TEXT("Blueprint"),
-            TEXT("Execute multiple Blueprint atomic operations in a single transaction. Supports op aliases (connect/link/disconnect/unlink/set_default/set_value/create/add_node/delete/remove_node). Max 50 ops. Partial commit: failures do not stop subsequent ops."),
+            TEXT("Execute multiple Blueprint atomic operations in a single transaction. Supports op aliases (connect/link/disconnect/unlink/set_default/set_value/create/add_node/delete/remove_node). Max 50 ops. Partial commit: failures do not stop subsequent ops. Node/pin ops require bp_path + graph_name and each operation must be a {op, params} object. Some ops return node ids that go stale after graph mutations -- re-run bp_describe_graph to refresh."),
             {
                 FSmithUEToolParam(TEXT("operations"), TEXT("array"), TEXT("Array of operation objects {op, params}. Max 50."), true),
                 FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Shared Blueprint asset path injected into each op (op-level overrides)")),
@@ -1107,7 +1107,7 @@ void FSmithUEBlueprintCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("bp_validate_code"),
             TEXT("Blueprint"),
-            TEXT("Validate Blueprint DSL syntax without compiling"),
+            TEXT("Validate the limited Blueprint FUNCTION-graph DSL syntax (read-only, no mutation, no compile). Same narrow grammar as bp_compile_code; not for events/graph editing."),
             {
                 FSmithUEToolParam(TEXT("code"), TEXT("string"), TEXT("Blueprint DSL text"), true)
             }),

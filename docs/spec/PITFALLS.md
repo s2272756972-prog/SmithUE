@@ -79,4 +79,13 @@
 ## 13. 内容浏览器选中文件夹路径带 /All 前缀
 
 - **现象**:`get_content_browser_selection` 返回 `/All/Game/Foo`,但 `list_assets` 要 `/Game/Foo`。
-- **正解**:消费时剥掉 `/All` 前缀。
+- **正解**:调用 `FSmithUECommonUtils::NormalizeContentBrowserPath()`（内部使用引擎官方 `UContentBrowserDataSubsystem::TryConvertVirtualPath`）。字符串截断 (`RightChop(4)` / `Mid(4)`) 对插件路径错误（`/All/Plugins/Foo/BP` → 应为 `/Foo/BP`，截断只能得到 `/Plugins/Foo/BP`）。已在 commit 6c2fa73 修复。`SmithUE.Build.cs` 需含 `"ContentBrowserData"` 模块依赖。
+
+## 14. 工具 description 未暴露硬边界 → AI 误选工具、错误无指向
+
+- **现象**：Agent 看到 `bp_compile_code`，凭工具名直觉判断它能处理事件逻辑（Tick/BeginPlay 等），调用失败后收到裸 `"Invalid function signature"` 错误，无任何提示；只能翻 `SmithUEBpCompiler.cpp` 源码才发现"只支持函数图"的边界。
+- **根因**：工具注册的 `description` 是 `"Compile Blueprint DSL into a Blueprint"`，未说明"只编译函数图"、不支持事件、不支持嵌套 if。错误字符串也无指向，不告知正确的替代工作流。同类问题在 14 个工具上同时存在（bp_validate_code、bp_batch_op、bp_focus_node、create_data_asset、add_widget、level_new/level_open 等）。
+- **正解**：见 **[TOOL_SPEC §3.1](TOOL_SPEC.md)**。description 必须在"被挑选的那一刻"暴露硬边界；面向 AI 的常见误用错误必须可操作（指向正确工具或替代工作流）。对于 `bp_compile_code`：
+  - 在 `ValidateSyntax` 中加窄事件守卫：签名行首 token 为 `event`，或 `ParseSignatureText` 失败且签名行含规范 UE 事件名 → 返回重定向错误（指向 `bp_override_function → bp_create_node → bp_batch_op → bp_compile`）。
+  - 守卫**不能**扫描函数体 token、**不能**拒绝 `ParseSignatureText` 成功的签名（`void Tick()` 是合法函数名，应能编译）。
+- **教训**：description 是 AI 的"说明书"，`/api/v1/tools` 输出和 TOOLS.md 是 AI 唯一可见的文档；藏在 .cpp 里的边界等于不存在。新增工具必须过 TOOL_SPEC §3.1 检查清单。

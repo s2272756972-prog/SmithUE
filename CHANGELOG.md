@@ -2,6 +2,14 @@
 
 ## 未发布（当前 `UE5.2` 分支）
 
+### 修复：工具描述隐藏边界 → AI 误判防护（Anti-Misjudgment）
+- **`bp_compile_code`**：描述写明"只编译函数图、不支持事件/嵌套 if/裸 math"；`ValidateSyntax` 加窄事件守卫（仅检测签名行首 token `event`，或解析失败且含规范 UE 事件名），失败时返回重定向到原子节点工作流（`bp_override_function → bp_create_node → bp_describe_graph → bp_batch_op → bp_compile`），**不拦截**合法函数名（如 `void Tick()` 可正常编译）。
+- **13 个工具描述补充边界信息**（全文字改动，无行为变更）：`bp_validate_code`（只读/不编译）、`bp_batch_op`（节点操作需 bp_path+graph_name）、`bp_get_class_members`/`bp_get_component_details`（枚举白名单）、`bp_focus_node`（互斥目标）、`create_data_asset`（需具体子类）、`add_widget`（需面板父级）、`bp_create`/`bp_create_node`/`bp_connect_pins`/`bp_disconnect_pins`（易混对消歧）、`bp_create_node`/`bp_delete_node`（nid_stale 警告）、`level_new`/`level_open`（延迟执行）。
+- **附带修复**：`CompileFunction` 中 `NewResult->AllocateDefaultPins()` 被重复调用（`Finalize()` 后再次显式调用），导致 FunctionResult 节点有两个 `execute` 引脚，`FindPin("execute")` 歧义返回 nullptr，所有函数体 exec 连接静默失败。已移除多余的显式调用。
+- **`docs/spec/TOOL_SPEC.md §3.1`** 新增强制规范：description 必须在被挑选时暴露硬边界，常见误用错误必须可操作，沉淀为长期开发门控。
+- **`docs/spec/PITFALLS.md #14`**：记录本次踩坑；**#13** 更新为正确的 `NormalizeContentBrowserPath` 指引（旧版 `/All` 字符串截断对插件路径错误）。
+- **`TOOLS.md`** 已从 `/api/v1/tools` 重新生成（14 个工具描述变更，工具总数不变 221）。
+
 ### 新增：启动环境自检 + Status & Updates 设置面板
 - **`FSmithUECliChecker`**：编辑器启动后后台检测 Node / npm / smithue-cli 环境（off game thread，写回 game thread，每步写入 `LogSmithUE`）。语义化版本比较 + 兼容地板 `kRecommendedCliVersion=0.13.0`。
 - **「Status & Updates」设置面板**（项目设置 → 插件 → SmithUE）：查看环境状态、插件更新提醒（GitHub Releases 链接 + Restart-to-Update 按钮）、一键安装/升级 CLI；按钮随状态自适应（未安装/升级/已最新/取消），Node 缺失时给 nodejs.org 链接。拉取式（TAttribute）刷新，无订阅。

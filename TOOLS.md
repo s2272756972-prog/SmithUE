@@ -350,7 +350,7 @@ Folder-scoped asset scan. Returns v1 linter metadata: naming, path, parent class
 
 ### `bp_create`
 
-Create a new Blueprint asset
+Create a new Blueprint asset (asset-level: creates a new Blueprint ASSET at a package path; for adding a node inside a graph use bp_create_node).
 
 **Parameters:**
 
@@ -371,7 +371,7 @@ Add a function graph to a Blueprint
 
 ### `bp_create_node`
 
-Create a node inside a Blueprint graph
+Create a node inside a Blueprint graph (in-graph: adds a node inside a Blueprint graph; for a new Blueprint ASSET use bp_create). Returns node ids that become stale after any graph mutation — re-run bp_describe_graph before reusing them.
 
 **Parameters:**
 
@@ -388,7 +388,7 @@ Create a node inside a Blueprint graph
 
 ### `bp_connect_pins`
 
-Connect two Blueprint node pins
+Connect two Blueprint node pins (adds a wire between two pins; to remove an existing wire use bp_disconnect_pins).
 
 **Parameters:**
 
@@ -401,7 +401,7 @@ Connect two Blueprint node pins
 
 ### `bp_disconnect_pins`
 
-Disconnect two Blueprint node pins
+Disconnect two Blueprint node pins (removes an existing wire between two pins; to add a new wire use bp_connect_pins).
 
 **Parameters:**
 
@@ -426,7 +426,7 @@ Set a Blueprint node pin default value
 
 ### `bp_delete_node`
 
-Delete a node from a Blueprint graph
+Delete a node from a Blueprint graph Returns node ids that become stale after any graph mutation — re-run bp_describe_graph before reusing them.
 
 **Parameters:**
 
@@ -619,7 +619,7 @@ Get Blueprint metadata summary
 
 ### `bp_get_component_details`
 
-Read component template properties (mobility, transform, absolute flags, physics, collision, visibility, mesh, materials) for a Blueprint. Covers own SCS + inherited components. Closes the gap where bp_get_summary only shows hierarchy.
+Read component template properties (mobility, transform, absolute flags, physics, collision, visibility, mesh, materials) for a Blueprint. Covers own SCS + inherited components. Closes the gap where bp_get_summary only shows hierarchy. props filter accepts only the fixed supported groups.
 
 **Parameters:**
 
@@ -630,7 +630,7 @@ Read component template properties (mobility, transform, absolute flags, physics
 
 ### `bp_get_class_members`
 
-Get a Blueprint or native class's members grouped by owning class, with inheritance-chain attribution and token-conscious output controls.
+Get a Blueprint or native class's members grouped by owning class, with inheritance-chain attribution and token-conscious output controls. kinds, scope (self|chain|owner:<ClassName>) and detail (compact|full) are whitelisted enums.
 
 **Parameters:**
 
@@ -685,7 +685,7 @@ Describe nodes in a Blueprint graph. mode: full(default)/compact/summary/node_pi
 
 ### `bp_compile_code`
 
-Compile Blueprint DSL into a Blueprint
+Compile the limited Blueprint FUNCTION-graph DSL into an existing function graph. Builds function graphs ONLY -- no events (Tick/BeginPlay/Overlap/input), no nested if, no bare math. For event logic use atomic nodes (bp_override_function -> bp_create_node -> bp_batch_op -> bp_compile). Returns data.success (false on compile errors even when the request itself succeeds).
 
 **Parameters:**
 
@@ -694,7 +694,7 @@ Compile Blueprint DSL into a Blueprint
 
 ### `bp_batch_op`
 
-Execute multiple Blueprint atomic operations in a single transaction. Supports op aliases (connect/link/disconnect/unlink/set_default/set_value/create/add_node/delete/remove_node). Max 50 ops. Partial commit: failures do not stop subsequent ops.
+Execute multiple Blueprint atomic operations in a single transaction. Supports op aliases (connect/link/disconnect/unlink/set_default/set_value/create/add_node/delete/remove_node). Max 50 ops. Partial commit: failures do not stop subsequent ops. Node/pin ops require bp_path + graph_name and each operation must be a {op, params} object. Some ops return node ids that go stale after graph mutations -- re-run bp_describe_graph to refresh.
 
 **Parameters:**
 
@@ -704,7 +704,7 @@ Execute multiple Blueprint atomic operations in a single transaction. Supports o
 
 ### `bp_validate_code`
 
-Validate Blueprint DSL syntax without compiling
+Validate the limited Blueprint FUNCTION-graph DSL syntax (read-only, no mutation, no compile). Same narrow grammar as bp_compile_code; not for events/graph editing.
 
 **Parameters:**
 
@@ -767,7 +767,7 @@ Read a CurveLinearColorAtlas: texture size and gradient curve paths
 
 ### `create_data_asset`
 
-Create a Data Asset instance of a UDataAsset subclass
+Create a Data Asset from a CONCRETE, non-abstract UDataAsset subclass (abstract bases like UDataAsset/UPrimaryDataAsset are rejected).
 
 **Parameters:**
 
@@ -1193,7 +1193,7 @@ List all registered key bindings (commands with active key chords)
 
 ### `level_new`
 
-Create a new blank level/map (deferred next-frame creation, crash-safe). Query level state after ~1s.
+Create a new blank level/map (deferred next-frame creation, crash-safe). Query level state after ~1s. Executes on the next frame — success means the operation was QUEUED, not finished; query level state after ~1s.
 
 **Parameters:**
 
@@ -1202,7 +1202,7 @@ Create a new blank level/map (deferred next-frame creation, crash-safe). Query l
 
 ### `level_open`
 
-Open an existing level/map
+Open an existing level/map. Executes on the next frame — success means the operation was QUEUED, not finished; query level state after ~1s.
 
 **Parameters:**
 
@@ -2002,7 +2002,7 @@ Read the widget tree of an existing Widget Blueprint
 
 ### `add_widget`
 
-Add a widget to an existing Widget Blueprint's widget tree
+Add a widget to an existing Widget Blueprint tree. The parent must be a panel that accepts children, and the widget tree must already exist.
 
 **Parameters:**
 

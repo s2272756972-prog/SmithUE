@@ -217,7 +217,7 @@ void FSmithUELevelCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("level_new"),
             TEXT("Level"),
-            TEXT("Create a new blank level/map (deferred next-frame creation, crash-safe). Query level state after ~1s."),
+            TEXT("Create a new blank level/map (deferred next-frame creation, crash-safe). Query level state after ~1s. Executes on the next frame — success means the operation was QUEUED, not finished; query level state after ~1s."),
             {
                 FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("New level name"), true),
                 FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Optional package path or filename for saving the new map"))
@@ -228,7 +228,7 @@ void FSmithUELevelCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("level_open"),
             TEXT("Level"),
-            TEXT("Open an existing level/map"),
+            TEXT("Open an existing level/map. Executes on the next frame — success means the operation was QUEUED, not finished; query level state after ~1s."),
             {
                 FSmithUEToolParam(TEXT("level_path"), TEXT("string"), TEXT("Map package path or filename to open"), true)
             }),

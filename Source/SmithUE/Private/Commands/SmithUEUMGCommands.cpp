@@ -80,7 +80,7 @@ void FSmithUEUMGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("add_widget"),
             TEXT("UMG"),
-            TEXT("Add a widget to an existing Widget Blueprint's widget tree"),
+            TEXT("Add a widget to an existing Widget Blueprint tree. The parent must be a panel that accepts children, and the widget tree must already exist."),
             {
                 FSmithUEToolParam(TEXT("blueprint"), TEXT("string"), TEXT("Full asset path to the Widget Blueprint"), true),
                 FSmithUEToolParam(TEXT("widgetClass"), TEXT("string"), TEXT("Widget class: Button, TextBlock, Image, CanvasPanel, VerticalBox, HorizontalBox, Overlay, ScrollBox, Border, SizeBox"), true),
