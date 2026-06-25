@@ -71,6 +71,16 @@ npx smithue-cli list
 
 > 如果圆点为灰色或 CLI 报错 `No SmithUE portfiles found`，请等待编辑器完全加载后重试。
 
+### 环境自检与 CLI 自助安装（推荐）
+
+插件启动后会在后台自检 **Node / npm / smithue-cli** 环境（不阻塞编辑器，每步写入 `LogSmithUE` 日志）。打开 **编辑器 → 项目设置 → 插件 → SmithUE → "Status & Updates"** 面板即可：
+
+- 查看 Node / npm / smithue-cli 的版本与状态；
+- 一键**安装 / 升级 smithue-cli**：按钮随状态自适应（未安装 → 安装 / 旧版 → 升级 / 已最新 → 灰显确认）。网络不佳时**自动 120s 超时、可随时取消**，失败给出分类提示与手动兜底命令；
+- 查看插件更新提醒并跳转 GitHub Releases。
+
+> 即使没装 / 装不上 CLI，**插件本体的 HTTP 工具能力不受影响**——CLI 只是更顺手的消费端客户端。这对在受限网络的企业内网、旧机器上部署尤为友好。
+
 ### 多项目共享（可选）
 
 如果需要在多个项目中使用同一份插件代码，使用符号链接：
@@ -167,72 +177,52 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 ## 更新日志
 
+> 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+
+### 未发布（当前 `UE5.2` 分支）
+- **启动环境自检**：编辑器启动后后台检测 Node / npm / smithue-cli 环境，不阻塞主线程，每步写入 `LogSmithUE` 日志。
+- **「Status & Updates」设置面板**：查看环境状态、插件更新提醒（GitHub Releases 链接），一键安装 / 升级 CLI；按钮随状态自适应（未安装 / 升级 / 已最新 / 取消）。
+- **有界安装**：CLI 安装走 **120s 硬超时 + 可取消 + npm 快速失败参数**，网络不佳时不假死；失败给出分类提示（权限 / 网络 / 超时）与手动兜底。
+
+### v1.10.0
+- **修复 `level_new` 崩溃**：建图延迟到下一帧安全点，避免在 HTTP handler 内销毁世界导致崩溃。
+- **新增** `spawn_mesh_actor`（带网格 + 材质）、`level_add_basic_env`（一键基础光照 / 天空 / 雾 / 地板）。
+- **新增 LiveCoding 域**（`livecoding_status` / `livecoding_compile`）。
+- 工具总数达 **221 / 24 域**。
+
 ### v0.8.0，CLI 迁移
-- 移除 TCP Server / ConnectionManager / SessionManager
-- HTTP Server 改为动态端口 + 端口文件发现
-- `/ready` 端点 + 启动期 503 守卫
-- StatusIndicator 重写为 CLI-aware 小圆点 + 复制 CLI 命令按钮
-- 新 smithue-cli npm 包替代 MCP：`npm install -g smithue-cli`
-- 参见：https://github.com/123dx-svg/smithue-cli
+- 移除 TCP Server / ConnectionManager / SessionManager；HTTP 改动态端口 + 端口文件发现。
+- `/ready` 端点 + 启动期 503 守卫；StatusIndicator 重写为 CLI-aware 小圆点。
+- 新 `smithue-cli` npm 包取代 MCP。
 
-### v0.6.0，N-id 会话、度量、蓝图预览与编辑器保护
-
-**新增功能：**
-- N-id 会话系统：每个蓝图图表的短 ID (N0, N1, ...) 到 GUID 映射，包含过期检测。
-- 命令度量：调用计数、请求/响应字节数、执行耗时、重试检测及单个命令统计。
-- `system_get_metrics` / `system_reset_metrics`：查询并重置会话度量数据。
-- `take_blueprint_preview_screenshot`：将任意蓝图的 SCS (组件) 视口捕获为 PNG。
-- 编辑器状态保护：在 PIE 运行时拒绝非只读命令。
-- 蓝图原子 API 扩展：新增约 1600 行蓝图操作原语。
-- MCP 服务：增强的工具调度逻辑。
-
-**修复：**
-- 修正 `FTSTicker::FDelegateHandle` 类型以兼容 UE 5.2+。
-- 在 Build.cs 中添加 `RHI` 模块依赖。
-
-### v1.3.0，蓝图组件系统增强
-
-**新增功能：**
-- `bp_add_component` 支持 `parent` 参数，实现层级组件挂载。
-- `bp_remove_component` 命令，用于从 SCS 中移除组件。子组件将自动重新挂载。
-- `bp_get_summary` 返回包含 `parent` 和 `children` 字段的组件层级结构。
-- `bp_create` 支持三种父类格式：C++ 类名、带有 `_C` 后缀的蓝图类名或蓝图资产路径。
-- `bp_create_node` 支持 `Class::Function` 简写以自动创建 CallFunction 节点。
-- `bp_create_node` 支持 `K2Node_EnhancedInputAction`（通过 `input_action` 参数）。
-- `bp_create_node` 支持 `K2Node_DynamicCast`（通过 `target_class` 参数）。
-- 为增强输入蓝图节点添加了 `InputBlueprintNodes` 模块依赖。
-
-**Bug 修复：**
-- 通过使用 `SkipGarbageCollection` 修复了蓝图组件重编译崩溃。
-- 修复了向 SCS 添加蓝图派生组件时的纯虚函数崩溃。
+> 更早的版本（v1.x 蓝图深度、N-id 会话、度量、合规 linter 等）详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
 ## 路线图
 
-- **v0.7**，蓝图深度
-  - 完成用于生成 EventGraph 和 FunctionGraph 的 DSL 编译器。
-  - 通过命令实现蓝图调试工具，包括断点、步进和变量观测。
-  - 覆盖所有常用节点类型的完整 K2Node 支持。
+> **定位：与市面上其他 UE AI 插件不同。** 多数 UE AI 插件停留在"让 AI 操作编辑器"的演示场景；SmithUE 面向企业真实痛点——**旧项目协同**与**资产合规标准化**，并为**未来的转码 / 迁移规范化**做基础设施铺垫。它交付的不是一次性自动化脚本，而是一套 **git 可追踪、可审计、可团队复用的"原子工具层 + 规范层"**。
 
-- **v0.8**，功能域扩展
-  - AI、导航及行为树相关命令。
-  - 世界分区 (World Partition) 与关卡流送 (Level Streaming) 命令。
-  - PCG (程序化内容生成) 相关命令。
-  - 游戏技能系统 (Gameplay Ability System) 命令。
-  - 物理与碰撞配置命令。
+### 第一阶段（已落地）— 原子能力底座
+- 24 个功能域、221 个原子 HTTP 工具，覆盖蓝图 / 材质 / Niagara / 关卡 / 资产 / 分析等。
+- spec 驱动的蓝图工厂 + 合规 linter：规范以 git 文本存于宿主工程，AI 说人话即可批量生成合规蓝图并审计。
+- 插件环境自检与自助部署（启动检测 Node/npm/CLI、设置面板一键安装升级），降低旧机器 / 旧项目 / 内网环境的接入门槛。
 
-- **v0.9**，性能与稳定性
-  - 异步命令执行流水线，用于非阻塞长耗时操作。
-  - 支持批量操作，可在单个请求中执行多个命令。
-  - 事务系统，支持多命令原子回滚。
-  - 增强的错误恢复与诊断功能。
+### 第二阶段 — 旧项目协同与合规标准化
+- **旧资产批量扫描与审计**：命名 / 目录 / 父类 / 材质槽 / LOD / 碰撞等规则化体检，输出可追踪的合规报告。
+- **批量标准化修复**：按团队 spec 一键规整存量资产，差异可审阅、可回滚。
+- **团队规范协同**：spec 文件随工程入库，多人共享同一套合规基线；在 CI 中运行合规 linter 作为门禁。
 
-- **v1.0**，多客户端与 SDK
-  - 支持并发会话的多客户端协作模式。
-  - 可通过 `pip install smithue` 安装的 Python SDK。
-  - 包含 OpenAPI 规范的 REST API 文档。
-  - 用于实时编辑器事件的 WebSocket 流。
+### 第三阶段 — 转码 / 迁移规范化铺垫
+- **迁移规则引擎**：把"旧形态 → 标准形态"的转换沉淀为可声明、可复用的规则集。
+- **跨版本 / 跨格式资产转码流水线**：为引擎升级、资产格式迁移、规范化重构提供可重复执行的管道。
+- **全链路审计**：每一步转码 / 标准化操作留痕，满足企业合规与回溯要求。
+
+### 第四阶段 — 规模化协同
+- 多客户端并发协作模式。
+- 批量 / 事务化执行（单请求多命令、原子回滚）。
+- 仪表盘与报表：资产健康度、合规覆盖率、迁移进度可视化。
+- Python SDK / REST OpenAPI / WebSocket 实时事件流。
 
 ---
 
@@ -243,6 +233,8 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 - **属性类型**：`set_actor_property` 不支持 `TMap` 或委托等高级类型。嵌套结构体属性需使用专用命令。
 - **场景纹理**：`SceneTextureId` 通过 FProperty 反射设置，以避免未导出引擎符号的链接错误。
 - **操作系统**：仅限 Windows Win64。
+- **CLI 为可选消费端**：`smithue-cli` 是便利客户端，其安装 / 升级依赖网络（已内置 120s 超时、可取消与手动兜底）；**插件本体不依赖它即可工作**。
+- **引擎版本**：当前主线针对 UE 5.2；其他版本需自行适配。
 
 ---
 

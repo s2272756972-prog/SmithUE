@@ -1,5 +1,15 @@
 # SmithUE Changelog
 
+## 未发布（当前 `UE5.2` 分支）
+
+### 新增：启动环境自检 + Status & Updates 设置面板
+- **`FSmithUECliChecker`**：编辑器启动后后台检测 Node / npm / smithue-cli 环境（off game thread，写回 game thread，每步写入 `LogSmithUE`）。语义化版本比较 + 兼容地板 `kRecommendedCliVersion=0.13.0`。
+- **「Status & Updates」设置面板**（项目设置 → 插件 → SmithUE）：查看环境状态、插件更新提醒（GitHub Releases 链接 + Restart-to-Update 按钮）、一键安装/升级 CLI；按钮随状态自适应（未安装/升级/已最新/取消），Node 缺失时给 nodejs.org 链接。拉取式（TAttribute）刷新，无订阅。
+- **有界安装**：CLI 安装走 `CreateProc` + 管道 + 轮询，**120s 硬超时 + 可取消 + npm 快速失败参数**（`--fetch-timeout=60000 --fetch-retries=1`），网络不佳不假死；失败分类提示（权限/网络/超时）+ 手动兜底；安装与检测使用独立 in-flight 标志。
+
+### 变更
+- 启动时不再弹更新 toast；插件更新提醒移入设置面板。`level_new` 等不变。
+
 ## v1.10.0
 
 ### 新增工具（合计 221 工具 / 24 个领域）

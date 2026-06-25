@@ -61,6 +61,16 @@ npx smithue-cli list
    npx smithue-cli status
    ```
 
+### Self-check & one-click CLI install (recommended)
+
+On startup the plugin detects your **Node / npm / smithue-cli** environment in the background (non-blocking; each probe is logged to `LogSmithUE`). Open **Editor → Project Settings → Plugins → SmithUE → "Status & Updates"** to:
+
+- See Node / npm / smithue-cli versions and status;
+- **Install / upgrade smithue-cli** with one click. The button adapts to state (Not installed → Install / Outdated → Upgrade / Ready → disabled confirmation). On a poor network it **auto-times-out after 120s and is cancellable**, with classified failure hints and a manual fallback;
+- See plugin-update reminders with a link to GitHub Releases.
+
+> Even without the CLI installed, **the plugin's HTTP tool capabilities are unaffected** — the CLI is just a convenience consumer client. This is especially friendly for restricted enterprise intranets and legacy machines.
+
 **Note**: SmithUE now uses `smithue-cli` for interaction. Details at: https://github.com/123dx-svg/smithue-cli
 
 ---
@@ -147,72 +157,52 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 ## Changelog
 
+> Full history in [CHANGELOG.md](CHANGELOG.md).
+
+### Unreleased (current `UE5.2` branch)
+- **Startup environment self-check**: detects Node / npm / smithue-cli in the background on editor launch, off the game thread, logging each probe to `LogSmithUE`.
+- **"Status & Updates" settings panel**: view environment status, plugin-update reminder (GitHub Releases link), one-click install / upgrade of the CLI; the button adapts to state (Install / Upgrade / Ready / Cancel).
+- **Bounded install**: CLI install uses a **120s hard timeout + cancel + npm fast-fail flags** so a bad network never freezes the UI; failures are classified (permission / network / timeout) with a manual fallback.
+
+### v1.10.0
+- **Fixed `level_new` crash**: map creation deferred to the next-frame safe point, avoiding world destruction inside the HTTP handler.
+- **Added** `spawn_mesh_actor` (mesh + material) and `level_add_basic_env` (one-shot lights / sky / fog / floor).
+- **New LiveCoding domain** (`livecoding_status` / `livecoding_compile`).
+- Tool count reaches **221 / 24 domains**.
+
 ### v0.8.0, CLI Migration
-- Removed TCP Server / ConnectionManager / SessionManager
-- HTTP Server changed to dynamic port + portfile discovery
-- `/ready` endpoint + 503 guard during startup
-- StatusIndicator rewritten as CLI-aware dot + copy-CLI-command button
-- New smithue-cli npm package replaces MCP: `npm install -g smithue-cli`
-- See: https://github.com/123dx-svg/smithue-cli
+- Removed TCP Server / ConnectionManager / SessionManager; HTTP changed to dynamic port + portfile discovery.
+- `/ready` endpoint + 503 startup guard; StatusIndicator rewritten as a CLI-aware dot.
+- New `smithue-cli` npm package replaces MCP.
 
-### v0.6.0, N-id Sessions, Metrics, Blueprint Preview & Editor Guards
-
-**New Features:**
-- N-id session system: short-ID (N0, N1, ...) to GUID mapping per blueprint graph, with stale detection.
-- Command metrics: call count, request/response bytes, execution timing, retry detection, per-command stats.
-- `system_get_metrics` / `system_reset_metrics`: query and reset session metrics.
-- `take_blueprint_preview_screenshot`: capture SCS (Components) viewport of any Blueprint as PNG.
-- Editor state guard: non-readonly commands rejected while PIE is running.
-- Blueprint atomic API expansion: approximately 1600 lines of new BP manipulation primitives.
-- MCP Server: enhanced tool dispatching logic.
-
-**Fixes:**
-- `FTSTicker::FDelegateHandle` type correction for UE 5.2+ compatibility.
-- Added `RHI` module dependency to Build.cs.
-
-### v1.3.0, Blueprint Component System Enhancement
-
-**New Features:**
-- `bp_add_component` supports `parent` param for hierarchical component attachment.
-- `bp_remove_component` command to remove components from SCS. Children are reparented automatically.
-- `bp_get_summary` returns component hierarchy with `parent` and `children` fields.
-- `bp_create` supports three parent class formats: C++ class name, BP class name with `_C` suffix, or BP asset path.
-- `bp_create_node` supports `Class::Function` shorthand to auto-create CallFunction nodes.
-- `bp_create_node` supports `K2Node_EnhancedInputAction` via `input_action` extra param.
-- `bp_create_node` supports `K2Node_DynamicCast` via `target_class` extra param.
-- Added `InputBlueprintNodes` module dependency for Enhanced Input Blueprint nodes.
-
-**Bug Fixes:**
-- Fixed Blueprint component recompilation crash by using `SkipGarbageCollection`.
-- Fixed pure virtual crash when adding BP-derived components to SCS.
+> Earlier versions (v1.x blueprint depth, N-id sessions, metrics, compliance linter, etc.) are in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
 ## Roadmap
 
-- **v0.7**, Blueprint Depth
-  - Complete DSL compiler for EventGraph and FunctionGraph generation.
-  - Blueprint debugging tools including breakpoints, stepping, and variable watching via commands.
-  - Full K2Node coverage for all common node types.
+> **Positioning: different from other UE AI plugins.** Most UE AI plugins stop at the "let AI drive the editor" demo; SmithUE targets real enterprise pain points — **legacy-project collaboration** and **asset compliance standardization** — and lays infrastructure groundwork for **future transcoding / migration standardization**. It delivers not one-off automation scripts, but a **git-trackable, auditable, team-reusable "atomic tool layer + spec layer."**
 
-- **v0.8**, Domain Expansion
-  - AI, Navigation, and BehaviorTree commands.
-  - World Partition and Level Streaming commands.
-  - PCG (Procedural Content Generation) commands.
-  - Gameplay Ability System commands.
-  - Physics and Collision configuration commands.
+### Phase 1 (shipped) — Atomic capability foundation
+- 24 domains, 221 atomic HTTP tools across Blueprint / Material / Niagara / Level / Asset / Analysis, etc.
+- Spec-driven blueprint factory + compliance linter: specs live as git text in the host project; AI generates compliant blueprints in bulk and audits them in plain language.
+- Plugin environment self-check & self-service deployment (startup Node/npm/CLI detection, one-click install/upgrade panel), lowering the barrier for legacy machines / projects / intranet environments.
 
-- **v0.9**, Performance & Stability
-  - Async command execution pipeline for non-blocking operations.
-  - Batch operation support to execute multiple commands in one request.
-  - Transaction system for atomic multi-command rollback.
-  - Enhanced error recovery and diagnostics.
+### Phase 2 — Legacy-project collaboration & compliance standardization
+- **Bulk scan & audit of legacy assets**: rule-based health checks on naming / folders / parent class / material slots / LOD / collision, producing trackable compliance reports.
+- **Bulk standardization fixes**: regularize existing assets against team specs in one shot; diffs are reviewable and reversible.
+- **Team spec collaboration**: spec files committed with the project; everyone shares one compliance baseline; run the linter in CI as a gate.
 
-- **v1.0**, Multi-Client & SDK
-  - Multi-client collaboration mode for concurrent sessions.
-  - Python SDK accessible via `pip install smithue`.
-  - REST API documentation with OpenAPI specification.
-  - WebSocket streaming for real-time editor events.
+### Phase 3 — Transcoding / migration standardization groundwork
+- **Migration rule engine**: capture "legacy form → standard form" conversions as declarative, reusable rule sets.
+- **Cross-version / cross-format asset transcoding pipelines**: repeatable pipelines for engine upgrades, asset-format migration, and standardization refactors.
+- **End-to-end audit**: every transcoding / standardization step is logged for enterprise compliance and traceability.
+
+### Phase 4 — Collaboration at scale
+- Multi-client concurrent collaboration mode.
+- Batch / transactional execution (multiple commands per request, atomic rollback).
+- Dashboards & reports: asset health, compliance coverage, migration progress.
+- Python SDK / REST OpenAPI / WebSocket real-time event stream.
 
 ---
 
@@ -223,6 +213,8 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 - **Property Types**: Advanced types like `TMap` or delegates are not supported by `set_actor_property`. Nested struct properties require dedicated commands.
 - **SceneTexture**: `SceneTextureId` is set via FProperty reflection to avoid link errors with unexported engine symbols.
 - **OS**: Windows Win64 only.
+- **CLI is an optional consumer**: `smithue-cli` is a convenience client; its install / upgrade depends on the network (with a built-in 120s timeout, cancel, and manual fallback). **The plugin itself works without it.**
+- **Engine version**: mainline targets UE 5.2; other versions require adaptation.
 
 ---
 
