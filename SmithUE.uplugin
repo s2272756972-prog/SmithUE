@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 8,
-	"VersionName": "1.10.0",
+	"Version": 9,
+	"VersionName": "1.11.0",
 	"FriendlyName": "SmithUE",
 	"Description": "Full-stack AI tool service plugin for Unreal Engine 5.2 - exposes 221 editor automation tools via HTTP JSON, with AI texture/audio generation (Pollinations.ai)",
 	"Category": "Editor",

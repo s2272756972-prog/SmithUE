@@ -183,7 +183,7 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
-### 未发布（当前 `UE5.2` 分支）
+### v1.11.0（UE5.2，2026-06-25）
 - **启动环境自检**：编辑器启动后后台检测 Node / npm / smithue-cli 环境，不阻塞主线程，每步写入 `LogSmithUE` 日志。
 - **「Status & Updates」设置面板**：查看环境状态、插件更新提醒（GitHub Releases 链接），一键安装 / 升级 CLI；按钮随状态自适应（未安装 / 升级 / 已最新 / 取消）。
 - **有界安装**：CLI 安装走 **120s 硬超时 + 可取消 + npm 快速失败参数**，网络不佳时不假死；失败给出分类提示（权限 / 网络 / 超时）与手动兜底。

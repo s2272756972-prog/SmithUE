@@ -1,6 +1,6 @@
 # SmithUE Changelog
 
-## 未发布（当前 `UE5.2` 分支）
+## v1.11.0（UE5.2，2026-06-25）
 
 ### 修复：工具描述隐藏边界 → AI 误判防护（Anti-Misjudgment）
 - **`bp_compile_code`**：描述写明"只编译函数图、不支持事件/嵌套 if/裸 math"；`ValidateSyntax` 加窄事件守卫（仅检测签名行首 token `event`，或解析失败且含规范 UE 事件名），失败时返回重定向到原子节点工作流（`bp_override_function → bp_create_node → bp_describe_graph → bp_batch_op → bp_compile`），**不拦截**合法函数名（如 `void Tick()` 可正常编译）。

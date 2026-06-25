@@ -163,7 +163,7 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > Full history in [CHANGELOG.md](CHANGELOG.md).
 
-### Unreleased (current `UE5.2` branch)
+### v1.11.0 (UE5.2, 2026-06-25)
 - **Startup environment self-check**: detects Node / npm / smithue-cli in the background on editor launch, off the game thread, logging each probe to `LogSmithUE`.
 - **"Status & Updates" settings panel**: view environment status, plugin-update reminder (GitHub Releases link), one-click install / upgrade of the CLI; the button adapts to state (Install / Upgrade / Ready / Cancel).
 - **Bounded install**: CLI install uses a **120s hard timeout + cancel + npm fast-fail flags** so a bad network never freezes the UI; failures are classified (permission / network / timeout) with a manual fallback.
