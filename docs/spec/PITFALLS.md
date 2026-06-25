@@ -89,3 +89,12 @@
   - 在 `ValidateSyntax` 中加窄事件守卫：签名行首 token 为 `event`，或 `ParseSignatureText` 失败且签名行含规范 UE 事件名 → 返回重定向错误（指向 `bp_override_function → bp_create_node → bp_batch_op → bp_compile`）。
   - 守卫**不能**扫描函数体 token、**不能**拒绝 `ParseSignatureText` 成功的签名（`void Tick()` 是合法函数名，应能编译）。
 - **教训**：description 是 AI 的"说明书"，`/api/v1/tools` 输出和 TOOLS.md 是 AI 唯一可见的文档；藏在 .cpp 里的边界等于不存在。新增工具必须过 TOOL_SPEC §3.1 检查清单。
+
+## 15. 材质输入索引 & set_expression_property 节点属性键盲区
+
+- **现象**：连 WorldPositionOffset 时 `connect_material_pins` 的 `dest_input_index` 该填几无文档（TOOLS.md 只写到 6=OpacityMask）；`set_expression_property` 传错键（如给 Constant 传 `R` 而非 `value`）只回 "No recognized properties were set"，不告知合法键——只能翻 `SmithUEMaterialCommands.cpp` 的 `GetMaterialBaseInput()` / `HandleSetExpressionProperty()` 才知道。
+- **根因**：工具 schema 把"按节点类型才合法的键"和"材质主输出索引表"藏在 .cpp 里，对 AI 不可见；错误信息无指向。
+- **正解**（已落地，对齐 [TOOL_SPEC §3.1](TOOL_SPEC.md)）：
+  - `dest_input_index` 描述补全 `7=WorldPositionOffset`（8+ 不支持）。
+  - `set_expression_property` 描述列出按节点类型的合法键；失败错误改为**回显该节点的合法键**（`GetSettablePropertyKeys()` 助手按节点类型推出），如 `"Valid keys for this node: value (plus 'description')"`。
+- **通用规则**：任何"按子类型 / 索引才合法"的参数，合法集必须进 description；不匹配时错误回显合法集。**描述里写工具契约（索引、键名），不写 UE 版本特有的引擎 API**（如 HLSL intrinsic 名）——后者随引擎版本漂移会误导。

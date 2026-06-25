@@ -1333,7 +1333,7 @@ Connect material expression pins. Use dest_expression_index=-1 to connect to mat
 - `source_expression_index` (number, required): Index of source expression in Expressions array
 - `source_output_index` (number): Output pin index on source expression
 - `dest_expression_index` (number, required): Index of dest expression, or -1 for material output
-- `dest_input_index` (number): Input pin index. For material output: 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=Emissive,5=Opacity,6=OpacityMask
+- `dest_input_index` (number): Input pin index. For material output (dest_expression_index=-1): 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=EmissiveColor,5=Opacity,6=OpacityMask,7=WorldPositionOffset (WPO, for vertex offset/spin). 8+ unsupported.
 
 ### `compile_material`
 
@@ -1364,7 +1364,7 @@ Set properties on a material expression node (e.g. Custom HLSL code, constant va
 
 - `material_path` (string, required): Full asset path
 - `expression_index` (number, required): Index of expression in Expressions array
-- `properties` (object, required): Key-value pairs to set. For Custom: code, output_type(float/float2/float3/float4), description, inputs(array of {name,type}). For MaterialFunctionCall: material_function(asset path)
+- `properties` (object, required): Key-value pairs; valid keys are NODE-TYPE-SPECIFIC. Constant: value (NOT 'R'). Constant3Vector: r,g,b. ScalarParameter: parameter_name,default_value. VectorParameter: parameter_name,r,g,b,a. CollectionParameter: collection,parameter_name. TextureSample: sampler_type,texture. Custom(HLSL): code,output_type(float/float2/float3/float4),inputs([{name}]). MaterialFunctionCall: material_function. SceneTexture nodes: scene_texture_id. ALL nodes: description. On a key/type mismatch the error lists this node's valid keys. (Transform-node space is NOT settable.)
 
 ### `create_mpc`
 

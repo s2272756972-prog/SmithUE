@@ -1,5 +1,13 @@
 # SmithUE Changelog
 
+## 未发布（当前 `UE5.2` 分支）
+
+### 修复：材质工具自描述（对齐 TOOL_SPEC §3.1）
+- **`connect_material_pins`** 的 `dest_input_index` 描述补全 `7=WorldPositionOffset`（此前只列 0–6；WPO/顶点偏移连不上只能翻源码 `case 7`）。8+ 标注不支持。
+- **`set_expression_property`** 描述按节点类型列出合法 `properties` 键（Constant=`value` 而非 `R`、Constant3Vector=`r/g/b`、ScalarParameter、VectorParameter、TextureSample、Custom 等）；失败错误从无指向的 "No recognized properties were set" 改为**回显该节点的合法键**（新增 `GetSettablePropertyKeys()` 助手）。
+- **`PITFALLS.md #15`** 沉淀该盲区；新增原则：description 写工具契约（索引、键名），不写 UE 版本特有的引擎 API（HLSL intrinsic 等），避免随版本漂移误导。
+- `TOOLS.md` 已重生成（仅这两条描述变化，工具数不变 221）。
+
 ## v1.11.0（UE5.2，2026-06-25）
 
 ### 修复：工具描述隐藏边界 → AI 误判防护（Anti-Misjudgment）

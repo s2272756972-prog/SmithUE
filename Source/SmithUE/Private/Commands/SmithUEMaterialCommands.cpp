@@ -176,6 +176,23 @@ namespace
         default: return nullptr;
         }
     }
+
+    // Returns the comma-separated settable property keys for an expression's type
+    // (mirrors HandleSetExpressionProperty's type handling) so errors stay actionable.
+    FString GetSettablePropertyKeys(UMaterialExpression* Expr)
+    {
+        if (!Expr) { return TEXT("description"); }
+        if (Cast<UMaterialExpressionConstant>(Expr))             { return TEXT("value"); }
+        if (Cast<UMaterialExpressionConstant3Vector>(Expr))      { return TEXT("r, g, b"); }
+        if (Cast<UMaterialExpressionScalarParameter>(Expr))      { return TEXT("parameter_name, default_value"); }
+        if (Cast<UMaterialExpressionVectorParameter>(Expr))      { return TEXT("parameter_name, r, g, b, a"); }
+        if (Cast<UMaterialExpressionCollectionParameter>(Expr))  { return TEXT("collection, parameter_name"); }
+        if (Cast<UMaterialExpressionMaterialFunctionCall>(Expr)) { return TEXT("material_function"); }
+        if (Cast<UMaterialExpressionTextureSample>(Expr))        { return TEXT("sampler_type, texture"); }
+        if (Cast<UMaterialExpressionCustom>(Expr))               { return TEXT("code, output_type, inputs"); }
+        if (Expr->GetClass()->FindPropertyByName(TEXT("SceneTextureId"))) { return TEXT("scene_texture_id"); }
+        return TEXT("(no type-specific keys)");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +258,7 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("source_expression_index"), TEXT("number"), TEXT("Index of source expression in Expressions array"), true),
                 FSmithUEToolParam(TEXT("source_output_index"), TEXT("number"), TEXT("Output pin index on source expression"), false, TEXT("0")),
                 FSmithUEToolParam(TEXT("dest_expression_index"), TEXT("number"), TEXT("Index of dest expression, or -1 for material output"), true),
-                FSmithUEToolParam(TEXT("dest_input_index"), TEXT("number"), TEXT("Input pin index. For material output: 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=Emissive,5=Opacity,6=OpacityMask"), false, TEXT("0"))
+                FSmithUEToolParam(TEXT("dest_input_index"), TEXT("number"), TEXT("Input pin index. For material output (dest_expression_index=-1): 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=EmissiveColor,5=Opacity,6=OpacityMask,7=WorldPositionOffset (WPO, for vertex offset/spin). 8+ unsupported."), false, TEXT("0"))
             }),
         [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
         {
@@ -290,7 +307,7 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             {
                 FSmithUEToolParam(TEXT("material_path"), TEXT("string"), TEXT("Full asset path"), true),
                 FSmithUEToolParam(TEXT("expression_index"), TEXT("number"), TEXT("Index of expression in Expressions array"), true),
-                FSmithUEToolParam(TEXT("properties"), TEXT("object"), TEXT("Key-value pairs to set. For Custom: code, output_type(float/float2/float3/float4), description, inputs(array of {name,type}). For MaterialFunctionCall: material_function(asset path)"), true)
+                FSmithUEToolParam(TEXT("properties"), TEXT("object"), TEXT("Key-value pairs; valid keys are NODE-TYPE-SPECIFIC. Constant: value (NOT 'R'). Constant3Vector: r,g,b. ScalarParameter: parameter_name,default_value. VectorParameter: parameter_name,r,g,b,a. CollectionParameter: collection,parameter_name. TextureSample: sampler_type,texture. Custom(HLSL): code,output_type(float/float2/float3/float4),inputs([{name}]). MaterialFunctionCall: material_function. SceneTexture nodes: scene_texture_id. ALL nodes: description. On a key/type mismatch the error lists this node's valid keys. (Transform-node space is NOT settable.)"), true)
             }),
         [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
         {
@@ -1330,7 +1347,9 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetExpressionProperty(co
 
     if (Changed.Num() == 0)
     {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("No recognized properties were set. Check expression type and property names."));
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("No recognized properties were set on %s. Valid keys for this node: %s (plus 'description'). You likely used a wrong key name (e.g. Constant uses 'value', not 'R')."),
+                *Expr->GetClass()->GetName(), *GetSettablePropertyKeys(Expr)));
     }
 
     NotifyMaterialModified(Material);
