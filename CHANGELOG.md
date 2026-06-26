@@ -1,5 +1,16 @@
 # SmithUE Changelog
 
+## v1.13.0（UE5.2，2026-06-26）
+
+### 新增：SKILL 漂移检测与一键重装（Status & Updates 面板）
+
+- **`ESkillState` 枚举**（`Unknown / NotDeployed / Stale / Synced`）新增到 `FSmithUECliChecker`，`FCliInfo` 同步增加 `SkillState` + `SkillSourcePath` 字段。
+- **`ComputeSkillState`**：CLI 环境探针完成后，对比本地已部署的 `~/.agents/skills/smithue-control/SKILL.md` 与全局已安装 `smithue-cli` 自带的 `skill/SKILL.md`（CRLF→LF 规范化后逐字节比较），判定是否漂移。结果写入 `LogSmithUE`。
+- **`GetSkillState()` / `ReinstallSkill()`**：前者从游戏线程缓存读取状态；后者将已安装 CLI 的 bundle 复制到全部 agent 技能目录（`~/.agents`，以及存在时的 `~/.claude` / `~/.codex`），并在完成后自动触发重新探针。**注意：** 重装的是*当前已安装 CLI*的 SKILL，想要最新版请先升级 CLI。
+- **`kRecommendedCliVersion` 升至 `0.13.4`**：旧 CLI 机器自动进入 *Outdated → 升级* 流程，升级触发 `postinstall` 重新部署最新 SKILL，构成漂移自愈闭环。
+- **「Status & Updates」面板新增两行**：SKILL 状态文字（未检测 / ⚠未部署 / ↑已过期 / ✓已同步）+ **「重装 SKILL」按钮**（仅在 `NotDeployed` / `Stale` 时可见；含 tooltip 提示"想要最新先升级 CLI"，防止降级踩坑）。
+- **`docs/spec/RELEASE.md §3.3`** 增加维护提示：每次 CLI 发版（尤其改 SKILL 时）须同步 bump `kRecommendedCliVersion`。
+
 ## v1.12.0（UE5.2，2026-06-26）
 
 ### 修复：材质工具自描述（对齐 TOOL_SPEC §3.1）

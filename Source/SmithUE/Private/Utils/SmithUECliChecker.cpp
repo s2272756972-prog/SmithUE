@@ -4,6 +4,8 @@
 
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -17,7 +19,10 @@
 // Module-level constants and state (game-thread-confined writes, no lock)
 // ---------------------------------------------------------------------------
 
-static constexpr TCHAR kRecommendedCliVersion[] = TEXT("0.13.0");
+// Minimum smithue-cli version the plugin recommends. BUMP THIS ON EVERY CLI
+// RELEASE: a higher floor makes machines with an older CLI show "Outdated → 升级",
+// and upgrading the CLI re-runs its postinstall which re-deploys the latest SKILL.
+static constexpr TCHAR kRecommendedCliVersion[] = TEXT("0.13.4");
 
 /** Last known CLI environment state. Written only on the game thread. */
 static FCliInfo GCachedCliInfo;
@@ -368,6 +373,116 @@ void ShowToast(const FString& Message, float Duration = 6.0f)
     FSlateNotificationManager::Get().AddNotification(Info);
 }
 
+// ---------------------------------------------------------------------------
+// SKILL deployment freshness
+// ---------------------------------------------------------------------------
+
+/** User home directory (~). Prefers %USERPROFILE%, falls back to UE's UserHomeDir(). */
+FString GetUserHome()
+{
+    FString Home = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+    if (Home.IsEmpty())
+    {
+        Home = FPlatformProcess::UserHomeDir();
+    }
+    return Home.TrimStartAndEnd();
+}
+
+/**
+ * Resolve the global node_modules dir via `node npm-cli.js root -g`.
+ * Returns empty string on any failure.
+ */
+FString FindGlobalNodeModules(const FString& NpmCliJs)
+{
+    if (NpmCliJs.IsEmpty())
+    {
+        return FString();
+    }
+    FString Out, Err;
+    const int32 Rc = RunDirect(TEXT("node.exe"),
+        FString::Printf(TEXT("\"%s\" root -g"), *NpmCliJs), Out, Err);
+    if (Rc != 0)
+    {
+        return FString();
+    }
+    FString Root = Out.TrimStartAndEnd();
+    int32 NL = INDEX_NONE;
+    if (Root.FindChar(TEXT('\n'), NL))
+    {
+        Root = Root.Left(NL).TrimStartAndEnd();
+    }
+    return Root;
+}
+
+/** Deployed SKILL.md under the primary agent-skills root (~/.agents). */
+FString GetDeployedSkillPath()
+{
+    const FString Home = GetUserHome();
+    if (Home.IsEmpty())
+    {
+        return FString();
+    }
+    return Home / TEXT(".agents") / TEXT("skills") / TEXT("smithue-control") / TEXT("SKILL.md");
+}
+
+/** Load a file and normalize CRLF -> LF + trim trailing whitespace, for stable content comparison. */
+bool LoadNormalized(const FString& Path, FString& Out)
+{
+    if (!FFileHelper::LoadFileToString(Out, *Path))
+    {
+        return false;
+    }
+    Out.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+    Out = Out.TrimEnd();
+    return true;
+}
+
+/**
+ * Determine whether the locally-deployed SKILL.md matches the SKILL bundled in the
+ * globally-installed smithue-cli. OutSourcePath receives the bundle path (copy source).
+ */
+ESkillState ComputeSkillState(const FString& NpmCliJs, FString& OutSourcePath)
+{
+    OutSourcePath.Reset();
+
+    const FString NodeModules = FindGlobalNodeModules(NpmCliJs);
+    if (NodeModules.IsEmpty())
+    {
+        return ESkillState::Unknown;
+    }
+
+    const FString Bundle = NodeModules / TEXT("smithue-cli") / TEXT("skill") / TEXT("SKILL.md");
+    if (!IFileManager::Get().FileExists(*Bundle))
+    {
+        return ESkillState::Unknown;
+    }
+    OutSourcePath = Bundle;
+
+    const FString Deployed = GetDeployedSkillPath();
+    if (Deployed.IsEmpty())
+    {
+        return ESkillState::Unknown;
+    }
+    if (!IFileManager::Get().FileExists(*Deployed))
+    {
+        return ESkillState::NotDeployed;
+    }
+
+    FString BundleText, DeployedText;
+    if (!LoadNormalized(Bundle, BundleText))
+    {
+        return ESkillState::Unknown;
+    }
+    if (!LoadNormalized(Deployed, DeployedText))
+    {
+        return ESkillState::NotDeployed;
+    }
+
+    return BundleText.Equals(DeployedText, ESearchCase::CaseSensitive)
+        ? ESkillState::Synced
+        : ESkillState::Stale;
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -477,6 +592,16 @@ void FSmithUECliChecker::CheckCliEnvironment()
             }
         }
         Info.bValid = true;
+
+        // ----------------------------------------------------------------
+        // 4.5. Compute SKILL deployment freshness (same probe, off game thread).
+        //      Compares deployed ~/.agents/.../SKILL.md against the installed
+        //      CLI's bundled skill/SKILL.md. Cheap file reads — safe here.
+        // ----------------------------------------------------------------
+        Info.SkillState = ComputeSkillState(NpmCliJs, Info.SkillSourcePath);
+        UE_LOG(LogSmithUE, Log,
+               TEXT("[SmithUE CLI] skill state: %d (source='%s')"),
+               static_cast<int32>(Info.SkillState), *Info.SkillSourcePath);
 
         // ----------------------------------------------------------------
         // 5. Marshal result back to the game thread
@@ -621,4 +746,71 @@ bool FSmithUECliChecker::IsCheckInFlight()
 bool FSmithUECliChecker::IsInstallInFlight()
 {
     return bInstallInFlight;
+}
+
+ESkillState FSmithUECliChecker::GetSkillState()
+{
+    return GCachedCliInfo.SkillState;
+}
+
+void FSmithUECliChecker::ReinstallSkill()
+{
+    // Copy the SKILL bundled in the *currently installed* CLI to the local agent-skill
+    // dirs. Pure local file copy — fast enough to run synchronously on the game thread.
+    const FString Source = GCachedCliInfo.SkillSourcePath;
+    if (Source.IsEmpty() || !IFileManager::Get().FileExists(*Source))
+    {
+        ShowToast(TEXT("无法重装 SKILL：未找到已安装 smithue-cli 自带的 SKILL.md。请先安装 / 升级 CLI。"), 8.0f);
+        return;
+    }
+
+    const FString Home = GetUserHome();
+    if (Home.IsEmpty())
+    {
+        ShowToast(TEXT("无法重装 SKILL：未能定位用户主目录。"), 8.0f);
+        return;
+    }
+
+    // Mirror the CLI postinstall deploy targets:
+    //   ~/.agents/skills   (always)
+    //   ~/.claude/skills   (only if ~/.claude exists)
+    //   ~/.codex/skills    (only if ~/.codex exists)
+    TArray<FString> SkillsRoots;
+    SkillsRoots.Add(Home / TEXT(".agents") / TEXT("skills"));
+    for (const TCHAR* AgentRoot : { TEXT(".claude"), TEXT(".codex") })
+    {
+        const FString Root = Home / AgentRoot;
+        if (IFileManager::Get().DirectoryExists(*Root))
+        {
+            SkillsRoots.Add(Root / TEXT("skills"));
+        }
+    }
+
+    int32 OkCount = 0;
+    for (const FString& SkillsRoot : SkillsRoots)
+    {
+        const FString DestDir  = SkillsRoot / TEXT("smithue-control");
+        const FString DestFile = DestDir / TEXT("SKILL.md");
+        IFileManager::Get().MakeDirectory(*DestDir, /*Tree*/true);
+        if (IFileManager::Get().Copy(*DestFile, *Source, /*bReplace*/true) == COPY_OK)
+        {
+            ++OkCount;
+        }
+        else
+        {
+            UE_LOG(LogSmithUE, Warning, TEXT("[SmithUE CLI] skill copy failed -> '%s'"), *DestFile);
+        }
+    }
+
+    if (OkCount > 0)
+    {
+        ShowToast(FString::Printf(
+            TEXT("已重装 smithue-control SKILL 到 %d 个目录。请重载 AI 工具以生效。"), OkCount), 8.0f);
+        // Refresh state so the row flips to "已同步" and the button hides.
+        FSmithUECliChecker::CheckCliEnvironment();
+    }
+    else
+    {
+        ShowToast(TEXT("重装 SKILL 失败（权限 / 路径问题）。可手动运行：npm i -g smithue-cli@latest。"), 9.0f);
+    }
 }

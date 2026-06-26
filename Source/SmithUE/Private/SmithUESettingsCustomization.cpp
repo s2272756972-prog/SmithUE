@@ -248,7 +248,53 @@ void FSmithUESettingsCustomization::CustomizeDetails(IDetailLayoutBuilder& Detai
 			]
 		]
 
-		// Row 5: nodejs.org link -- visible only when Node is missing
+		// Row 5: SKILL deployment freshness (live via pull)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 6)
+		[
+			SNew(STextBlock)
+			.Text_Lambda([]() -> FText {
+				if (!FSmithUECliChecker::GetLastCheckTime().GetTicks())
+				{
+					return FText::FromString(TEXT("SKILL: \u672a\u68c0\u6d4b")); // 未检测
+				}
+				switch (FSmithUECliChecker::GetSkillState())
+				{
+					case ESkillState::NotDeployed: return FText::FromString(TEXT("SKILL: \u26a0 \u672a\u90e8\u7f72")); // ⚠ 未部署
+					case ESkillState::Stale:       return FText::FromString(TEXT("SKILL: \u2191 \u5df2\u8fc7\u671f\uff08\u4e0e\u5df2\u88c5 CLI \u4e0d\u4e00\u81f4\uff09")); // ↑ 已过期（与已装 CLI 不一致）
+					case ESkillState::Synced:      return FText::FromString(TEXT("SKILL: \u2713 \u5df2\u540c\u6b65")); // ✓ 已同步
+					default:                       return FText::FromString(TEXT("SKILL: \u672a\u77e5\uff08CLI \u672a\u5b89\u88c5\uff09")); // 未知（CLI 未安装）
+				}
+			})
+		]
+
+		// Row 6: "重装 SKILL" button -- visible only when SKILL is NotDeployed or Stale
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+				.Text(FText::FromString(TEXT("\u91cd\u88c5 SKILL"))) // 重装 SKILL
+				.ToolTipText(FText::FromString(TEXT("\u5c06\u5df2\u5b89\u88c5 smithue-cli \u81ea\u5e26\u7684 SKILL.md \u590d\u5236\u5230\u672c\u5730 agent \u6280\u80fd\u76ee\u5f55\u3002\u60f3\u8981\u6700\u65b0\u7248 SKILL\uff0c\u8bf7\u5148\u5347\u7ea7 CLI\u3002"))) // 将已安装 smithue-cli 自带的 SKILL.md 复制到本地 agent 技能目录。想要最新版 SKILL，请先升级 CLI。
+				.Visibility_Lambda([]() -> EVisibility {
+					if (!FSmithUECliChecker::GetLastCheckTime().GetTicks()) { return EVisibility::Collapsed; }
+					const ESkillState S = FSmithUECliChecker::GetSkillState();
+					return (S == ESkillState::NotDeployed || S == ESkillState::Stale)
+						? EVisibility::Visible
+						: EVisibility::Collapsed;
+				})
+				.IsEnabled_Lambda([]() -> bool {
+					return !FSmithUECliChecker::IsCheckInFlight()
+						&& !FSmithUECliChecker::IsInstallInFlight();
+				})
+				.OnClicked_Lambda([]() -> FReply {
+					FSmithUECliChecker::ReinstallSkill();
+					return FReply::Handled();
+				})
+			]
+		]
+
+		// Row 7: nodejs.org link -- visible only when Node is missing
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 		[
 			SNew(SHorizontalBox)

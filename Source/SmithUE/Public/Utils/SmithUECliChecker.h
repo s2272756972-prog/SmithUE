@@ -64,15 +64,31 @@ enum class ECliState : uint8
     Ready         // smithue-cli installed and meets the minimum version
 };
 
+/**
+ * Freshness of the locally-deployed smithue-control SKILL.md, compared against
+ * the SKILL.md bundled inside the globally-installed smithue-cli package.
+ */
+enum class ESkillState : uint8
+{
+    Unknown,      // cannot determine (CLI not installed / bundle not found)
+    NotDeployed,  // CLI bundle exists, but no SKILL.md deployed under ~/.agents
+    Stale,        // deployed SKILL.md differs from the installed CLI's bundle
+    Synced        // deployed SKILL.md matches the installed CLI's bundle
+};
+
 /** Snapshot of the last successful environment probe. */
 struct FCliInfo
 {
-    FString   NodeVersion;
-    FString   NpmVersion;
-    FString   CliVersion;
-    ECliState State         = ECliState::NoNode;
-    FDateTime LastCheckTime;
-    bool      bValid        = false;
+    FString     NodeVersion;
+    FString     NpmVersion;
+    FString     CliVersion;
+    ECliState   State          = ECliState::NoNode;
+    FDateTime   LastCheckTime;
+    bool        bValid         = false;
+
+    // SKILL deployment freshness (computed during the same probe).
+    ESkillState SkillState      = ESkillState::Unknown;
+    FString     SkillSourcePath; // installed CLI's bundled skill/SKILL.md (copy source for reinstall)
 };
 
 // ---------------------------------------------------------------------------
@@ -102,6 +118,19 @@ public:
     static FDateTime GetLastCheckTime();
     static bool      IsCheckInFlight();
     static bool      IsInstallInFlight();
+
+    /** Freshness of the locally-deployed smithue-control SKILL.md (from last probe). */
+    static ESkillState GetSkillState();
+
+    /**
+     * Re-deploy the smithue-control SKILL.md by copying the installed CLI's bundled
+     * SKILL.md to the local agent-skill directories (~/.agents, plus ~/.claude /
+     * ~/.codex when those roots already exist). Pure file copy, no subprocess.
+     * ONLY call this on an explicit user action (button press). Re-checks on success.
+     * NOTE: deploys the SKILL that ships with the *currently installed* CLI — upgrade
+     * the CLI first if you want the newest SKILL.
+     */
+    static void ReinstallSkill();
 
     static FOnCliCheckComplete OnCliCheckComplete;
 };

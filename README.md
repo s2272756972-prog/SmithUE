@@ -183,6 +183,11 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
+### v1.13.0（UE5.2，2026-06-26）
+- **SKILL 漂移检测**：每次环境探针后对比本地已部署 `smithue-control/SKILL.md` 与已安装 CLI 自带 bundle，结果写入 `LogSmithUE`（Unknown / NotDeployed / Stale / Synced）。
+- **「Status & Updates」面板新增 SKILL 状态行 + 「重装 SKILL」按钮**：漂移时一键将 CLI bundle 复制到全部 agent 技能目录，重装后自动重探针。
+- **`kRecommendedCliVersion` 升至 `0.13.4`**：旧 CLI 机器自动进入 *Outdated → 升级* 流程，升级触发 postinstall 重新部署最新 SKILL，构成漂移自愈闭环。
+
 ### v1.12.0（UE5.2，2026-06-26）
 - **材质工具自描述**：`connect_material_pins` 的 `dest_input_index` 补全 `7=WorldPositionOffset`（此前只列 0–6）；`set_expression_property` 描述列出按节点类型的合法键，失败错误改为**回显该节点合法键**。沉淀 PITFALLS #15。
 
