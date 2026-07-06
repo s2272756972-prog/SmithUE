@@ -50,6 +50,8 @@ public class SmithUE : ModuleRules
 			PrivateDependencyModuleNames.AddRange(
 				new string[]
 				{
+					"AnimGraph",
+					"AnimGraphRuntime",
 					"Kismet",
 					"KismetCompiler",
 					"BlueprintGraph",

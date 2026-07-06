@@ -25,6 +25,11 @@ const REPO_ROOT = resolve(__dirname, '..');
  * and returns the port from the most recently started instance.
  */
 function discoverPort() {
+  const overridePort = Number(process.env.SMITHUE_PORT);
+  if (Number.isInteger(overridePort) && overridePort > 0) {
+    return overridePort;
+  }
+
   const smithueDir = join(process.env.LOCALAPPDATA, '.smithue');
   let best = null;
   for (const f of readdirSync(smithueDir).filter(x => x.endsWith('.port'))) {

@@ -28,6 +28,41 @@ namespace
 			return nullptr;
 		}
 
+		// Path-based resolution (handles Blueprint asset paths like /Game/Path/BP_Foo.BP_Foo_C).
+		// Must run BEFORE the short-name TObjectIterator scan: the short name of a Blueprint
+		// generated class (e.g. "ABP_Truck_Lift_C") will never match an asset path string.
+		if (Name.Contains(TEXT("/")) || Name.Contains(TEXT(".")))
+		{
+			// 1. Direct UClass load — covers native class paths and already-_C generated class paths.
+			if (UClass* C = LoadObject<UClass>(nullptr, *Name))
+			{
+				if (!RequiredBaseClass || C->IsChildOf(RequiredBaseClass))
+				{
+					return C;
+				}
+			}
+			// 2. Blueprint asset path (no _C suffix): load UBlueprint and return its GeneratedClass.
+			if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Name))
+			{
+				if (BP->GeneratedClass && (!RequiredBaseClass || BP->GeneratedClass->IsChildOf(RequiredBaseClass)))
+				{
+					return BP->GeneratedClass;
+				}
+			}
+			// 3. User passed the BP package path without _C — append it and retry.
+			if (!Name.EndsWith(TEXT("_C")))
+			{
+				if (UClass* C = LoadObject<UClass>(nullptr, *(Name + TEXT("_C"))))
+				{
+					if (!RequiredBaseClass || C->IsChildOf(RequiredBaseClass))
+					{
+						return C;
+					}
+				}
+			}
+		}
+
+		// Fallback: short-name scan over all loaded UClasses (with optional prefix guess).
 		const FString NamesToTry[] = { Name, ExpectedPrefix ? FString::Printf(TEXT("%c%s"), ExpectedPrefix, *Name) : FString() };
 		for (const FString& Candidate : NamesToTry)
 		{

@@ -1,5 +1,40 @@
 # SmithUE Changelog
 
+## v1.15.0（UE5.2，2026-07-03）
+
+### 新增：AnimGraph Phase 2 状态机编写工具
+
+- **`bp_add_state_machine`**：在 AnimBlueprint 的 AnimGraph 中创建 `UAnimGraphNode_StateMachine`，返回 state-machine 节点 GUID 与内部 `UAnimationStateMachineGraph` 名称。实现镜像 `UAnimGraphNode_StateMachineBase::PostPlacedNewNode()`：由节点自身创建内部状态机图、设置 `OwnerAnimGraphNode`、调用 `UAnimationStateMachineSchema::CreateDefaultNodesForGraph()` 生成 Entry，并将子图挂到父 AnimGraph `SubGraphs`。
+- **`bp_add_anim_state`**：在状态机图中创建 `UAnimStateNode`，返回 state 节点 GUID 与状态 `BoundGraph` 名称，供后续 `bp_create_node` / `bp_set_anim_node_property` 填充状态 Pose。实现镜像 `FEdGraphSchemaAction_NewStateNode::PerformAction()` + `UAnimStateNode::PostPlacedNewNode()`：节点自身创建 `UAnimationStateGraph`、用 `AnimationStateGraphSchema` 初始化默认 Result 节点并挂接子图；首个真实状态自动从 Entry 连入。
+- **`bp_add_anim_transition`**：在两个状态之间创建 `UAnimStateTransitionNode`，返回 transition 节点 GUID 与规则 `BoundGraph` 名称，供后续创建条件逻辑。实现镜像 `UAnimationStateMachineSchema::CreateAutomaticConversionNodeAndConnections()`：用 `FEdGraphSchemaAction_NewStateNode::SpawnNodeFromTemplate<UAnimStateTransitionNode>()` 创建节点 / `UAnimationTransitionGraph`，再调用 `UAnimStateTransitionNode::CreateConnections(FromState, ToState)` 连线。
+- **`bp_read_state_machine`**：只读配对工具，报告 states、transitions、Entry 指向、state/transition BoundGraph 名称；`state_machine` 参数支持 bp_add_state_machine 返回的 node_id 或 graph name。
+- **自描述边界**：4 个工具描述均标明仅支持 AnimBlueprint state machines、返回图名供后续填充、图变更后 node ids 会 stale；错误信息会指向 `anim_read_blueprint` / `bp_read_state_machine` / 正确参数形态。
+- **模块依赖**：Phase 1 已加入的 `AnimGraph` / `AnimGraphRuntime` 覆盖本阶段所用编辑器节点与 schema；本次未新增 Build.cs 依赖。
+
+### 修复：`delete_asset` force=true 仅跳过预检，未真正强删
+
+- **根因**：`HandleDeleteAsset` 的 `force` 参数只在 AssetRegistry 引用预检（~L785）处生效，最终删除始终调用 `ObjectTools::DeleteAssets(AssetsToDelete, false)`。该函数会在内部再次做内存引用检查，遇到有内存引用者（如 AnimBlueprint 被骨架/预览类/生成类持有）时返回 0，导致 `force=true` 实为"半强删"，实际并不删除。
+- **修复**：当 `bForce == true` 且 `Asset` 有效时，改调 `ObjectTools::ForceDeleteObjects(TArray<UObject*>{ Asset }, /*bShowConfirmation=*/false)`（该函数强制删除并将内存引用者置空）；`force=false` 路径保持原有 `DeleteAssets` 逻辑不变。
+- **签名确认**（`Engine/Source/Editor/UnrealEd/Public/ObjectTools.h:363`）：
+  `UNREALED_API int32 ForceDeleteObjects( const TArray<UObject*>& ObjectsToDelete, bool ShowConfirmation = true );`
+  返回值为已删数量，与原 `DeletedCount == 0 → error` 分支兼容。
+- **描述更新**（§3.1）：`force=true force-deletes even with in-memory referencers, nulling them`，准确反映实际行为。
+- **验收标准**：对含引用的 ABP_P1Test AnimBlueprint 执行 `delete_asset` + `force=true` 返回 `deleted: true`。
+
+### 新增：AnimGraph Phase 1 节点属性 / 引脚 / 变量绑定工具
+
+- **`bp_set_anim_node_property`**：通过反射写 `UAnimGraphNode` 内部 `FAnimNode` 结构体属性（如 SequencePlayer 的 `Sequence` / `PlayRate`），用于配置 AnimGraph 节点默认值。
+- **`bp_expose_anim_pin`**：切换 `ShowPinForProperties` 中指定属性的可见性，暴露/隐藏 anim 节点属性引脚。
+- **`bp_bind_anim_property`**：写入 `UAnimGraphNode_Base::PropertyBindings`，将 anim 节点属性绑定到 AnimBlueprint 成员变量（fast-path，无需连线；空变量名表示解绑）。
+- **`bp_read_anim_node`**：只读检查指定 AnimGraph 节点的可设置属性、可选引脚和已有绑定，满足 create/mutate ↔ read 配对要求。
+- **模块依赖**：`SmithUE.Build.cs` 新增 `AnimGraph`（`UAnimGraphNode_Base` / `FAnimGraphNodePropertyBinding` / `FOptionalPinFromProperty` 相关编辑器节点 API）与 `AnimGraphRuntime`（SequencePlayer/BlendSpace 等具体 runtime anim-node 结构所在运行时模块，供 AnimGraph 节点属性工具覆盖非 Engine 基础节点）。
+
+### 修复：bp_create_node owner_class 参数 Schema 注册 + 端口文件 PID 存活剪枝
+
+- **`bp_create_node`**：`target_class` 描述更新——明确支持原生类名或 `/Game/...` 蓝图资产路径（自动解析 `_C` 生成类），修复 Cast 节点目标类路径解析。VariableGet/VariableSet 新增可选参数 `owner_class`：当变量属于外部类（如 Cast 结果类）时指定宿主类；省略则默认解析当前蓝图（Self）。**注意：** 处理逻辑已在此前 C++ 提交中实现，本次为 Schema 注册补全（需重编译后 `list_tools` 才能广播该参数）。
+- **端口文件剪枝**：`prune` 命令改为按 PID 存活状态判定废弃端口文件，修复多个编辑器实例复用固定端口时幽灵文件残留的问题。
+- **`scripts/regen-tools.mjs`**：新增 `SMITHUE_PORT` 环境变量覆盖；需要从共享 / symlink 插件所在的其他宿主编辑器重生成 `TOOLS.md` 时，可直接指定端口，未指定时仍保持原有 AIScript 端口文件扫描行为。
+
 ## v1.13.0（UE5.2，2026-06-26）
 
 ### 新增：SKILL 漂移检测与一键重装（Status & Updates 面板）

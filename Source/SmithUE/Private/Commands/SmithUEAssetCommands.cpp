@@ -378,7 +378,7 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("delete_asset"),
             TEXT("Asset"),
-            TEXT("Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway."),
+            TEXT("Delete an asset. Checks references first; returns referencers if found. force=true force-deletes even with in-memory referencers, nulling them."),
             {
                 FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), TEXT("Full asset path to delete (e.g. /Game/Materials/M_Old)"), true),
                 FSmithUEToolParam(TEXT("force"), TEXT("boolean"), TEXT("Force delete even if references exist (default: false)"))
@@ -812,10 +812,21 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleDeleteAsset(const TSharedPt
         CloseEditorsForAsset(Asset, bWasDirty);
     }
 
-    // Delete
-    TArray<FAssetData> AssetsToDelete;
-    AssetsToDelete.Add(AssetData);
-    int32 DeletedCount = ObjectTools::DeleteAssets(AssetsToDelete, false);
+    // Delete — force path uses ForceDeleteObjects which nulls in-memory referencers;
+    // non-force path uses DeleteAssets which aborts if in-memory referencers exist.
+    int32 DeletedCount = 0;
+    if (bForce && Asset)
+    {
+        TArray<UObject*> ObjectsToForceDelete;
+        ObjectsToForceDelete.Add(Asset);
+        DeletedCount = ObjectTools::ForceDeleteObjects(ObjectsToForceDelete, /*bShowConfirmation=*/false);
+    }
+    else
+    {
+        TArray<FAssetData> AssetsToDelete;
+        AssetsToDelete.Add(AssetData);
+        DeletedCount = ObjectTools::DeleteAssets(AssetsToDelete, false);
+    }
 
     if (DeletedCount == 0)
     {

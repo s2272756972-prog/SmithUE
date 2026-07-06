@@ -78,7 +78,7 @@ static bool SmithUE_IsPortListening(ISocketSubsystem* SS, uint16 Port)
 	return bConnected;
 }
 
-/** Scan DirPath for *.port files; delete any whose recorded port is not responding. */
+/** Scan DirPath for *.port files; delete any whose owning process has exited or whose port is not responding. */
 static void SmithUE_PruneStalePortFiles(const FString& DirPath, ISocketSubsystem* SS)
 {
 	TArray<FString> FileNames;
@@ -87,6 +87,27 @@ static void SmithUE_PruneStalePortFiles(const FString& DirPath, ISocketSubsystem
 	for (const FString& FileName : FileNames)
 	{
 		const FString FullPath = DirPath + TEXT("\\") + FileName;
+
+		// Primary check: portfile name is <pid>.port (written via GetCurrentProcessId()).
+		// Deleting by PID liveness correctly handles the shared fixed-port case: when all
+		// editors bind the same port (e.g. 13721), a dead editor's stale portfile records
+		// that same port which the live editor still answers — a pure port-listening check
+		// would never prune it. PID check sidesteps this entirely.
+		const FString PidStr = FPaths::GetBaseFilename(FileName);
+		if (PidStr.IsNumeric())
+		{
+			const uint32 FilePid = static_cast<uint32>(FCString::Strtoui64(*PidStr, nullptr, 10));
+			if (FilePid != 0 && !FPlatformProcess::IsApplicationRunning(FilePid))
+			{
+				IFileManager::Get().Delete(*FullPath);
+				UE_LOG(LogSmithUE, Log, TEXT("SmithUE: pruned stale portfile %s (PID %u no longer running)"),
+					*FullPath, FilePid);
+				continue;
+			}
+		}
+
+		// Fallback: if PID could not be parsed (unexpected filename format), or the process
+		// is alive but somehow the port went away, fall back to the port-listening check.
 		FString Content;
 		if (!FFileHelper::LoadFileToString(Content, *FullPath))
 		{

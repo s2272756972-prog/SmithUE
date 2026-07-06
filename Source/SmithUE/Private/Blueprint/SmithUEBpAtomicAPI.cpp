@@ -16,6 +16,18 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
+#include "Animation/AnimBlueprint.h"
+#include "Animation/AnimNodeBase.h"
+#include "AnimGraphNode_Base.h"
+#include "AnimGraphNode_StateMachine.h"
+#include "AnimGraphNode_StateMachineBase.h"
+#include "AnimationGraph.h"
+#include "AnimationStateMachineGraph.h"
+#include "AnimationStateMachineSchema.h"
+#include "AnimStateEntryNode.h"
+#include "AnimStateNode.h"
+#include "AnimStateNodeBase.h"
+#include "AnimStateTransitionNode.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "GameFramework/MovementComponent.h"
 #include "Camera/CameraComponent.h"
@@ -249,6 +261,381 @@ namespace
 		Result->SetNumberField(TEXT("skipped"), LocalSkipped);
 		Result->SetArrayField(TEXT("components"), CompResults);
 		return Result;
+	}
+
+	FString JoinPropertyNames(const TArray<FString>& Names)
+	{
+		return Names.Num() > 0 ? FString::Join(Names, TEXT(", ")) : TEXT("<none>");
+	}
+
+	void AppendJsonNameArray(TSharedPtr<FJsonObject> Data, const TCHAR* FieldName, const TArray<FString>& Names)
+	{
+		TArray<TSharedPtr<FJsonValue>> Values;
+		for (const FString& Name : Names)
+		{
+			Values.Add(MakeShared<FJsonValueString>(Name));
+		}
+		Data->SetArrayField(FieldName, Values);
+	}
+
+	TSharedPtr<FJsonObject> CreateMissingAnimBlueprintError(const FString& BpPath)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Invalid bp_path '%s': expected an AnimBlueprint asset. State-machine authoring tools are for AnimBlueprint state machines only; use anim_create_blueprint first if needed."), *BpPath));
+	}
+
+	bool IsAnimationGraph(UEdGraph* Graph)
+	{
+		return Graph && Graph->IsA(UAnimationGraph::StaticClass());
+	}
+
+	FString GraphPathKey(const FString& BpPath, const FString& GraphName)
+	{
+		return BpPath + TEXT("::") + GraphName;
+	}
+
+	UAnimGraphNode_StateMachineBase* FindStateMachineNodeForGraph(UBlueprint* Blueprint, UAnimationStateMachineGraph* StateMachineGraph)
+	{
+		if (!Blueprint || !StateMachineGraph)
+		{
+			return nullptr;
+		}
+
+		TArray<UEdGraph*> AllGraphs;
+		Blueprint->GetAllGraphs(AllGraphs);
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			if (!Graph)
+			{
+				continue;
+			}
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				UAnimGraphNode_StateMachineBase* StateMachineNode = Cast<UAnimGraphNode_StateMachineBase>(Node);
+				if (StateMachineNode && StateMachineNode->EditorStateMachineGraph == StateMachineGraph)
+				{
+					return StateMachineNode;
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	UAnimationStateMachineGraph* ResolveStateMachineGraph(UBlueprint* Blueprint, const FString& BpPath, const FString& StateMachineRef, FString& OutError)
+	{
+		if (!Cast<UAnimBlueprint>(Blueprint))
+		{
+			OutError = FString::Printf(TEXT("Invalid bp_path '%s': expected an AnimBlueprint. State-machine tools support AnimBlueprint state machines only."), *BpPath);
+			return nullptr;
+		}
+
+		if (UEdGraph* Graph = FSmithUEBpAtomicAPI::FindGraph(Blueprint, StateMachineRef))
+		{
+			if (UAnimationStateMachineGraph* StateMachineGraph = Cast<UAnimationStateMachineGraph>(Graph))
+			{
+				return StateMachineGraph;
+			}
+			OutError = FString::Printf(TEXT("Graph '%s' is '%s', not a UAnimationStateMachineGraph. Pass the state_machine_graph returned by bp_add_state_machine or the state-machine node_id."), *StateMachineRef, *Graph->GetClass()->GetName());
+			return nullptr;
+		}
+
+		TArray<UEdGraph*> AllGraphs;
+		Blueprint->GetAllGraphs(AllGraphs);
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			if (!IsAnimationGraph(Graph))
+			{
+				continue;
+			}
+
+			FString ResolveError;
+			UEdGraphNode* Node = ResolveNodeId(Graph, GraphPathKey(BpPath, Graph->GetName()), StateMachineRef, ResolveError);
+			if (!Node)
+			{
+				continue;
+			}
+
+			UAnimGraphNode_StateMachineBase* StateMachineNode = Cast<UAnimGraphNode_StateMachineBase>(Node);
+			if (!StateMachineNode)
+			{
+				OutError = FString::Printf(TEXT("Node '%s' is '%s', not a UAnimGraphNode_StateMachine. Pass a state-machine node_id or state-machine graph name."), *StateMachineRef, *Node->GetClass()->GetName());
+				return nullptr;
+			}
+			if (!StateMachineNode->EditorStateMachineGraph)
+			{
+				OutError = FString::Printf(TEXT("State-machine node '%s' has no EditorStateMachineGraph; recreate it with bp_add_state_machine."), *StateMachineRef);
+				return nullptr;
+			}
+			return StateMachineNode->EditorStateMachineGraph;
+		}
+
+		OutError = FString::Printf(TEXT("State machine '%s' not found. Pass either the node_id returned by bp_add_state_machine or the state_machine_graph name; use bp_read_state_machine only after creating one."), *StateMachineRef);
+		return nullptr;
+	}
+
+	UAnimStateNode* FindAnimStateNode(UAnimationStateMachineGraph* StateMachineGraph, const FString& BpPath, const FString& StateRef, FString& OutError)
+	{
+		if (!StateMachineGraph)
+		{
+			OutError = TEXT("State machine graph is null");
+			return nullptr;
+		}
+
+		if (UEdGraphNode* Node = ResolveNodeId(StateMachineGraph, GraphPathKey(BpPath, StateMachineGraph->GetName()), StateRef, OutError))
+		{
+			UAnimStateNode* StateNode = Cast<UAnimStateNode>(Node);
+			if (!StateNode)
+			{
+				OutError = FString::Printf(TEXT("Node '%s' in state machine '%s' is '%s', not a UAnimStateNode. Use bp_read_state_machine to list state node ids/names."), *StateRef, *StateMachineGraph->GetName(), *Node->GetClass()->GetName());
+				return nullptr;
+			}
+			return StateNode;
+		}
+
+		for (UEdGraphNode* Node : StateMachineGraph->Nodes)
+		{
+			UAnimStateNode* StateNode = Cast<UAnimStateNode>(Node);
+			if (StateNode && StateNode->GetStateName().Equals(StateRef, ESearchCase::IgnoreCase))
+			{
+				OutError.Reset();
+				return StateNode;
+			}
+		}
+
+		OutError = FString::Printf(TEXT("State '%s' not found in state machine '%s'. Use bp_read_state_machine to list states."), *StateRef, *StateMachineGraph->GetName());
+		return nullptr;
+	}
+
+	UAnimStateEntryNode* EnsureStateMachineEntry(UAnimationStateMachineGraph* StateMachineGraph)
+	{
+		if (!StateMachineGraph)
+		{
+			return nullptr;
+		}
+
+		if (StateMachineGraph->EntryNode)
+		{
+			return StateMachineGraph->EntryNode;
+		}
+
+		for (UEdGraphNode* Node : StateMachineGraph->Nodes)
+		{
+			if (UAnimStateEntryNode* EntryNode = Cast<UAnimStateEntryNode>(Node))
+			{
+				StateMachineGraph->EntryNode = EntryNode;
+				return EntryNode;
+			}
+		}
+
+		const UEdGraphSchema* Schema = StateMachineGraph->GetSchema();
+		if (Schema)
+		{
+			Schema->CreateDefaultNodesForGraph(*StateMachineGraph);
+		}
+		return StateMachineGraph->EntryNode;
+	}
+
+	UEdGraphPin* FirstPinByDirection(UEdGraphNode* Node, EEdGraphPinDirection Direction)
+	{
+		if (!Node)
+		{
+			return nullptr;
+		}
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin && Pin->Direction == Direction)
+			{
+				return Pin;
+			}
+		}
+		return nullptr;
+	}
+
+	bool HasRealStates(UAnimationStateMachineGraph* StateMachineGraph)
+	{
+		if (!StateMachineGraph)
+		{
+			return false;
+		}
+		for (UEdGraphNode* Node : StateMachineGraph->Nodes)
+		{
+			if (Cast<UAnimStateNode>(Node))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void MarkStateMachineGraphStale(const FString& BpPath, UAnimationStateMachineGraph* StateMachineGraph)
+	{
+		if (StateMachineGraph)
+		{
+			FSmithUEToolRegistry::Get().NidSession.MarkStale(GraphPathKey(BpPath, StateMachineGraph->GetName()));
+		}
+	}
+
+	UAnimGraphNode_Base* ResolveAnimGraphNode(UBlueprint* Blueprint, UEdGraph* Graph, const FString& BpPath, const FString& GraphName, const FString& NodeId, FString& OutError)
+	{
+		if (!Blueprint)
+		{
+			OutError = TEXT("Invalid bp_path: expected an AnimBlueprint/Blueprint asset path that contains an AnimGraph");
+			return nullptr;
+		}
+		if (!Graph)
+		{
+			OutError = FString::Printf(TEXT("Graph '%s' not found. Use bp_describe_graph or anim_read_blueprint to list graphs; AnimGraph graphs are supported via GetAllGraphs."), *GraphName);
+			return nullptr;
+		}
+
+		FString ResolveError;
+		UEdGraphNode* Node = ResolveNodeId(Graph, BpPath + TEXT("::") + GraphName, NodeId, ResolveError);
+		if (!Node)
+		{
+			OutError = ResolveError.IsEmpty() ? FString::Printf(TEXT("Node '%s' not found in graph '%s'. Re-run bp_describe_graph; node ids can go stale after graph mutation."), *NodeId, *GraphName) : ResolveError;
+			return nullptr;
+		}
+
+		UAnimGraphNode_Base* AnimNode = Cast<UAnimGraphNode_Base>(Node);
+		if (!AnimNode)
+		{
+			OutError = FString::Printf(TEXT("Node '%s' is '%s', not a UAnimGraphNode_Base. These tools support AnimGraph anim nodes only; use bp_set_pin_default/bp_connect_pins for regular Blueprint/K2 nodes."), *NodeId, *Node->GetClass()->GetName());
+			return nullptr;
+		}
+		return AnimNode;
+	}
+
+	FStructProperty* FindAnimNodeStructProperty(UAnimGraphNode_Base* AnimNode)
+	{
+		if (!AnimNode)
+		{
+			return nullptr;
+		}
+
+		if (FStructProperty* NamedNodeProperty = FindFProperty<FStructProperty>(AnimNode->GetClass(), FName(TEXT("Node"))))
+		{
+			return NamedNodeProperty;
+		}
+
+		for (TFieldIterator<FStructProperty> It(AnimNode->GetClass(), EFieldIteratorFlags::IncludeSuper); It; ++It)
+		{
+			FStructProperty* StructProperty = *It;
+			if (StructProperty && StructProperty->Struct && StructProperty->Struct->IsChildOf(FAnimNode_Base::StaticStruct()))
+			{
+				return StructProperty;
+			}
+		}
+		return nullptr;
+	}
+
+	TArray<FString> GetAnimNodeInnerPropertyNames(FStructProperty* NodeStructProperty)
+	{
+		TArray<FString> Names;
+		if (!NodeStructProperty || !NodeStructProperty->Struct)
+		{
+			return Names;
+		}
+
+		for (TFieldIterator<FProperty> It(NodeStructProperty->Struct); It; ++It)
+		{
+			if (FProperty* Property = *It)
+			{
+				Names.Add(Property->GetName());
+			}
+		}
+		Names.Sort();
+		return Names;
+	}
+
+	FProperty* FindAnimNodeInnerProperty(FStructProperty* NodeStructProperty, const FString& PropertyName)
+	{
+		if (!NodeStructProperty || !NodeStructProperty->Struct)
+		{
+			return nullptr;
+		}
+
+		const FName DesiredName(*PropertyName);
+		if (FProperty* Exact = NodeStructProperty->Struct->FindPropertyByName(DesiredName))
+		{
+			return Exact;
+		}
+
+		for (TFieldIterator<FProperty> It(NodeStructProperty->Struct); It; ++It)
+		{
+			FProperty* Candidate = *It;
+			if (Candidate && Candidate->GetName().Equals(PropertyName, ESearchCase::IgnoreCase))
+			{
+				return Candidate;
+			}
+		}
+		return nullptr;
+	}
+
+	int32 FindOptionalAnimPinIndex(UAnimGraphNode_Base* AnimNode, const FString& PropertyName)
+	{
+		if (!AnimNode)
+		{
+			return INDEX_NONE;
+		}
+
+		for (int32 Index = 0; Index < AnimNode->ShowPinForProperties.Num(); ++Index)
+		{
+			if (AnimNode->ShowPinForProperties[Index].PropertyName.ToString().Equals(PropertyName, ESearchCase::IgnoreCase))
+			{
+				return Index;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	TArray<FString> GetOptionalAnimPinNames(UAnimGraphNode_Base* AnimNode)
+	{
+		TArray<FString> Names;
+		if (!AnimNode)
+		{
+			return Names;
+		}
+
+		for (const FOptionalPinFromProperty& OptionalPin : AnimNode->ShowPinForProperties)
+		{
+			Names.Add(OptionalPin.PropertyName.ToString());
+		}
+		Names.Sort();
+		return Names;
+	}
+
+	bool BlueprintHasMemberVariable(UBlueprint* Blueprint, const FString& VariableName)
+	{
+		if (!Blueprint || VariableName.IsEmpty())
+		{
+			return false;
+		}
+
+		const FName DesiredName(*VariableName);
+		for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
+		{
+			if (Variable.VarName == DesiredName)
+			{
+				return true;
+			}
+		}
+
+		return Blueprint->SkeletonGeneratedClass && FindFProperty<FProperty>(Blueprint->SkeletonGeneratedClass, DesiredName);
+	}
+
+	TArray<FString> GetBlueprintMemberVariableNames(UBlueprint* Blueprint)
+	{
+		TArray<FString> Names;
+		if (!Blueprint)
+		{
+			return Names;
+		}
+
+		for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
+		{
+			Names.Add(Variable.VarName.ToString());
+		}
+		Names.Sort();
+		return Names;
 	}
 
 	struct FBulkComponentEdit
@@ -1288,10 +1675,18 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_create"), TEXT("Blueprint"), TEXT("Create a new Blueprint asset (asset-level: creates a new Blueprint ASSET at a package path; for adding a node inside a graph use bp_create_node)."), { FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Blueprint asset name"), true), FSmithUEToolParam(TEXT("parent_class"), TEXT("string"), TEXT("Parent class name"), true), FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Destination content path"), true) }), &HandleBpCreate);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_function"), TEXT("Blueprint"), TEXT("Add a function graph to a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("New function name"), true), FSmithUEToolParam(TEXT("inputs"), TEXT("array"), TEXT("Optional input pin definitions"), false, FString(), TEXT("object")), FSmithUEToolParam(TEXT("outputs"), TEXT("array"), TEXT("Optional output pin definitions"), false, FString(), TEXT("object")) }), &HandleBpAddFunction);
-	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph (in-graph: adds a node inside a Blueprint graph; for a new Blueprint ASSET use bp_create). Returns node ids that become stale after any graph mutation — re-run bp_describe_graph before reusing them."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function name or 'ClassName::FunctionName' for K2Node_CallFunction nodes"), false), FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable name for K2Node_VariableGet or K2Node_VariableSet nodes"), false), FSmithUEToolParam(TEXT("macro_path"), TEXT("string"), TEXT("Macro graph asset path for K2Node_MacroInstance nodes"), false), FSmithUEToolParam(TEXT("key"), TEXT("string"), TEXT("Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes"), false), FSmithUEToolParam(TEXT("input_action"), TEXT("string"), TEXT("InputAction asset path for K2Node_EnhancedInputAction nodes"), false), FSmithUEToolParam(TEXT("target_class"), TEXT("string"), TEXT("Target class path for K2Node_DynamicCast nodes"), false) }), &HandleBpCreateNode);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph (in-graph: adds a node inside a Blueprint graph; for a new Blueprint ASSET use bp_create). Returns node ids that become stale after any graph mutation — re-run bp_describe_graph before reusing them."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function name or 'ClassName::FunctionName' for K2Node_CallFunction nodes"), false), FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable name for K2Node_VariableGet or K2Node_VariableSet nodes"), false), FSmithUEToolParam(TEXT("macro_path"), TEXT("string"), TEXT("Macro graph asset path for K2Node_MacroInstance nodes"), false), FSmithUEToolParam(TEXT("key"), TEXT("string"), TEXT("Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes"), false), FSmithUEToolParam(TEXT("input_action"), TEXT("string"), TEXT("InputAction asset path for K2Node_EnhancedInputAction nodes"), false), FSmithUEToolParam(TEXT("target_class"), TEXT("string"), TEXT("Target class for K2Node_DynamicCast nodes. Accepts a native class name or a /Game/... Blueprint asset path (resolves the generated _C class)."), false), FSmithUEToolParam(TEXT("owner_class"), TEXT("string"), TEXT("Optional owner class for K2Node_VariableGet/VariableSet when the variable belongs to a FOREIGN class (e.g. a variable on a Cast result). Accepts a native class name or a /Game/... Blueprint asset path. Omit to resolve against the current Blueprint (Self)."), false) }), &HandleBpCreateNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_connect_pins"), TEXT("Blueprint"), TEXT("Connect two Blueprint node pins (adds a wire between two pins; to remove an existing wire use bp_disconnect_pins)."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpConnectPins);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_disconnect_pins"), TEXT("Blueprint"), TEXT("Disconnect two Blueprint node pins (removes an existing wire between two pins; to add a new wire use bp_connect_pins)."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID or N-id"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID or N-id"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpDisconnectPins);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_pin_default"), TEXT("Blueprint"), TEXT("Set a Blueprint node pin default value"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true), FSmithUEToolParam(TEXT("pin_name"), TEXT("string"), TEXT("Pin name"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Default value string"), true) }), &HandleBpSetPinDefault);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_anim_node_property"), TEXT("Blueprint"), TEXT("MUTATES an AnimGraph UAnimGraphNode only: set an internal FAnimNode struct property by reflection (e.g. Sequence or PlayRate). Not for regular K2 nodes or state machines; use bp_read_anim_node first for valid property names."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("AnimGraph graph name as returned by bp_describe_graph/anim_read_blueprint"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("AnimGraph node GUID or fresh N-id"), true), FSmithUEToolParam(TEXT("property"), TEXT("string"), TEXT("Internal FAnimNode property name; run bp_read_anim_node to list valid names"), true), FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("ImportText value string, e.g. 1.0, True, or an asset reference"), true) }), &HandleBpSetAnimNodeProperty);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_expose_anim_pin"), TEXT("Blueprint"), TEXT("MUTATES an AnimGraph UAnimGraphNode only: show or hide one optional internal FAnimNode property pin. Not for regular Blueprint pins; ids can go stale after mutation — re-run bp_describe_graph/bp_read_anim_node."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("AnimGraph graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("AnimGraph node GUID or fresh N-id"), true), FSmithUEToolParam(TEXT("property"), TEXT("string"), TEXT("Optional FAnimNode property pin name; run bp_read_anim_node to list valid names"), true), FSmithUEToolParam(TEXT("show"), TEXT("boolean"), TEXT("true to expose the property as a pin; false to hide it"), true) }), &HandleBpExposeAnimPin);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_bind_anim_property"), TEXT("Blueprint"), TEXT("MUTATES an AnimGraph UAnimGraphNode only: bind one anim node property to a MEMBER VARIABLE via PropertyBindings fast-path (no wire). variable must be a member variable name; empty variable unbinds. Not for functions, external objects, or state machines."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("AnimGraph graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("AnimGraph node GUID or fresh N-id"), true), FSmithUEToolParam(TEXT("property"), TEXT("string"), TEXT("Bindable internal FAnimNode property name, e.g. PlayRate; run bp_read_anim_node first"), true), FSmithUEToolParam(TEXT("variable"), TEXT("string"), TEXT("Member variable name to bind; empty string removes existing binding"), true) }), &HandleBpBindAnimProperty);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_read_anim_node"), TEXT("Blueprint"), TEXT("READ-ONLY: inspect one AnimGraph UAnimGraphNode's internal FAnimNode settable properties, optional exposed pins, and PropertyBindings. Use before bp_set_anim_node_property/bp_expose_anim_pin/bp_bind_anim_property; not for regular K2 nodes or state machines."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("AnimGraph graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("AnimGraph node GUID or fresh N-id"), true) }), &HandleBpReadAnimNode);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_state_machine"), TEXT("Blueprint"), TEXT("CREATE: AnimBlueprint AnimGraph state machines ONLY. Adds a UAnimGraphNode_StateMachine to an AnimGraph and returns node_id plus state_machine_graph for follow-up bp_add_anim_state; ids go stale after graph mutation — re-run bp_describe_graph/bp_read_state_machine."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target AnimGraph graph name (usually AnimGraph)"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")) }), &HandleBpAddStateMachine);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_anim_state"), TEXT("Blueprint"), TEXT("CREATE: AnimBlueprint state-machine graphs ONLY. Adds a UAnimStateNode with its UAnimationStateGraph BoundGraph; state_machine accepts state-machine node_id or graph name. First state is wired from Entry. Returns bound_graph for bp_create_node/bp_set_anim_node_property population; ids go stale."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("state_machine"), TEXT("string"), TEXT("State machine node GUID/N-id or state machine graph name returned by bp_add_state_machine"), true), FSmithUEToolParam(TEXT("state_name"), TEXT("string"), TEXT("State name / BoundGraph rename suggestion"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} state node position")) }), &HandleBpAddAnimState);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_anim_transition"), TEXT("Blueprint"), TEXT("CREATE: AnimBlueprint state-machine graphs ONLY. Adds a UAnimStateTransitionNode between two states with its UAnimationTransitionGraph rule BoundGraph. from_state/to_state accept state node_id or state name. Returns rule_graph for condition nodes; ids go stale."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("state_machine"), TEXT("string"), TEXT("State machine node GUID/N-id or state machine graph name"), true), FSmithUEToolParam(TEXT("from_state"), TEXT("string"), TEXT("Source state node GUID/N-id or state name"), true), FSmithUEToolParam(TEXT("to_state"), TEXT("string"), TEXT("Target state node GUID/N-id or state name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} transition node position")) }), &HandleBpAddAnimTransition);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_read_state_machine"), TEXT("Blueprint"), TEXT("READ-ONLY pair for state-machine create tools: AnimBlueprint state machines ONLY. Reports states, transitions, Entry target, and every state/transition BoundGraph name; state_machine accepts node_id or graph name."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("AnimBlueprint asset path"), true), FSmithUEToolParam(TEXT("state_machine"), TEXT("string"), TEXT("State machine node GUID/N-id or state machine graph name"), true) }), &HandleBpReadStateMachine);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph Returns node ids that become stale after any graph mutation — re-run bp_describe_graph before reusing them."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_variable"), TEXT("Blueprint"), TEXT("Remove a Blueprint member variable by name"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name to remove"), true) }), &HandleBpRemoveVariable);
@@ -1449,13 +1844,33 @@ FString FSmithUEBpAtomicAPI::CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, 
 	{
 		FString VariableName;
 		if (!ExtraParams.IsValid() || !ExtraParams->TryGetStringField(TEXT("variable_name"), VariableName)) { return FString(); }
-		VariableGetNode->VariableReference.SetSelfMember(FName(*VariableName));
+		// Optional: owner_class allows targeting a variable that belongs to a foreign class
+		// (e.g. a property on a Cast result). When absent, falls back to SetSelfMember
+		// so existing callers are unaffected.
+		FString OwnerClassName;
+		if (ExtraParams.IsValid() && ExtraParams->TryGetStringField(TEXT("owner_class"), OwnerClassName))
+		{
+			UClass* OwnerClass = ResolveClassByName(OwnerClassName, UObject::StaticClass(), TEXT('U'));
+			if (!OwnerClass) { OwnerClass = ResolveClassByName(OwnerClassName, UObject::StaticClass(), TEXT('A')); }
+			if (OwnerClass) { VariableGetNode->VariableReference.SetExternalMember(FName(*VariableName), OwnerClass); }
+			else { VariableGetNode->VariableReference.SetSelfMember(FName(*VariableName)); }
+		}
+		else { VariableGetNode->VariableReference.SetSelfMember(FName(*VariableName)); }
 	}
 	else if (UK2Node_VariableSet* VariableSetNode = Cast<UK2Node_VariableSet>(NewNode))
 	{
 		FString VariableName;
 		if (!ExtraParams.IsValid() || !ExtraParams->TryGetStringField(TEXT("variable_name"), VariableName)) { return FString(); }
-		VariableSetNode->VariableReference.SetSelfMember(FName(*VariableName));
+		// Optional: owner_class allows targeting a variable that belongs to a foreign class.
+		FString OwnerClassName;
+		if (ExtraParams.IsValid() && ExtraParams->TryGetStringField(TEXT("owner_class"), OwnerClassName))
+		{
+			UClass* OwnerClass = ResolveClassByName(OwnerClassName, UObject::StaticClass(), TEXT('U'));
+			if (!OwnerClass) { OwnerClass = ResolveClassByName(OwnerClassName, UObject::StaticClass(), TEXT('A')); }
+			if (OwnerClass) { VariableSetNode->VariableReference.SetExternalMember(FName(*VariableName), OwnerClass); }
+			else { VariableSetNode->VariableReference.SetSelfMember(FName(*VariableName)); }
+		}
+		else { VariableSetNode->VariableReference.SetSelfMember(FName(*VariableName)); }
 	}
 	else if (UK2Node_MacroInstance* MacroNode = Cast<UK2Node_MacroInstance>(NewNode))
 	{
@@ -1486,6 +1901,7 @@ FString FSmithUEBpAtomicAPI::CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, 
 		if (ExtraParams.IsValid() && ExtraParams->TryGetStringField(TEXT("target_class"), TargetClassName))
 		{
 			UClass* TargetClass = ResolveClassByName(TargetClassName, UObject::StaticClass(), TEXT('U'));
+			if (!TargetClass) { TargetClass = ResolveClassByName(TargetClassName, UObject::StaticClass(), TEXT('A')); }
 			if (TargetClass) { CastNode->TargetType = TargetClass; }
 		}
 	}
@@ -1758,6 +2174,480 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetPinDefault(const TShared
 	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetBoolField(TEXT("updated"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetAnimNodeProperty(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name"), TEXT("node_id"), TEXT("property"), TEXT("value") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, GraphName, NodeId, PropertyName, Value;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+	Params->TryGetStringField(TEXT("node_id"), NodeId);
+	Params->TryGetStringField(TEXT("property"), PropertyName);
+	Params->TryGetStringField(TEXT("value"), Value);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	UAnimGraphNode_Base* AnimNode = ResolveAnimGraphNode(Blueprint, Graph, BpPath, GraphName, NodeId, Error);
+	if (!AnimNode) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FStructProperty* NodeStructProperty = FindAnimNodeStructProperty(AnimNode);
+	if (!NodeStructProperty)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Anim node '%s' has no internal FAnimNode struct property (usually named 'Node'); cannot set '%s'."), *NodeId, *PropertyName));
+	}
+
+	FProperty* InnerProperty = FindAnimNodeInnerProperty(NodeStructProperty, PropertyName);
+	if (!InnerProperty)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Anim node property '%s' not found on %s. Available properties: %s. Run bp_read_anim_node for details."), *PropertyName, *NodeStructProperty->Struct->GetName(), *JoinPropertyNames(GetAnimNodeInnerPropertyNames(NodeStructProperty))));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpSetAnimNodeProperty", "SmithUE: Set Anim Node Property"));
+	Blueprint->Modify();
+	AnimNode->Modify();
+	uint8* NodeStructPtr = NodeStructProperty->ContainerPtrToValuePtr<uint8>(AnimNode);
+	void* ValuePtr = InnerProperty->ContainerPtrToValuePtr<void>(NodeStructPtr);
+	FString BeforeValue;
+	InnerProperty->ExportTextItem_Direct(BeforeValue, ValuePtr, nullptr, AnimNode, PPF_None);
+	FOutputDeviceNull ErrorDevice;
+	const TCHAR* ImportResult = InnerProperty->ImportText_Direct(*Value, ValuePtr, AnimNode, PPF_None, &ErrorDevice);
+	if (!ImportResult)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to import value '%s' for anim node property '%s' (%s). Use Unreal ImportText format; asset refs often need Class'/Game/Path.Asset'."), *Value, *InnerProperty->GetName(), *InnerProperty->GetClass()->GetName()));
+	}
+
+	FString AfterValue;
+	InnerProperty->ExportTextItem_Direct(AfterValue, ValuePtr, nullptr, AnimNode, PPF_None);
+	AnimNode->ReconstructNode();
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("updated"), true);
+	Data->SetStringField(TEXT("property"), InnerProperty->GetName());
+	Data->SetStringField(TEXT("before"), BeforeValue);
+	Data->SetStringField(TEXT("after"), AfterValue);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpExposeAnimPin(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name"), TEXT("node_id"), TEXT("property"), TEXT("show") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, GraphName, NodeId, PropertyName;
+	bool bShow = false;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+	Params->TryGetStringField(TEXT("node_id"), NodeId);
+	Params->TryGetStringField(TEXT("property"), PropertyName);
+	Params->TryGetBoolField(TEXT("show"), bShow);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	UAnimGraphNode_Base* AnimNode = ResolveAnimGraphNode(Blueprint, Graph, BpPath, GraphName, NodeId, Error);
+	if (!AnimNode) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	const int32 OptionalPinIndex = FindOptionalAnimPinIndex(AnimNode, PropertyName);
+	if (OptionalPinIndex == INDEX_NONE)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Optional anim pin property '%s' not found. Available optional pins: %s. Run bp_read_anim_node for details."), *PropertyName, *JoinPropertyNames(GetOptionalAnimPinNames(AnimNode))));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpExposeAnimPin", "SmithUE: Expose Anim Pin"));
+	Blueprint->Modify();
+	AnimNode->Modify();
+	const bool bBefore = AnimNode->ShowPinForProperties[OptionalPinIndex].bShowPin;
+	AnimNode->SetPinVisibility(bShow, OptionalPinIndex);
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+	FSmithUEToolRegistry::Get().NidSession.MarkStale(BpPath + TEXT("::") + GraphName);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("property"), AnimNode->ShowPinForProperties[OptionalPinIndex].PropertyName.ToString());
+	Data->SetBoolField(TEXT("before_show"), bBefore);
+	Data->SetBoolField(TEXT("show"), AnimNode->ShowPinForProperties[OptionalPinIndex].bShowPin);
+	Data->SetBoolField(TEXT("nid_stale"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBindAnimProperty(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name"), TEXT("node_id"), TEXT("property"), TEXT("variable") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, GraphName, NodeId, PropertyName, VariableName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+	Params->TryGetStringField(TEXT("node_id"), NodeId);
+	Params->TryGetStringField(TEXT("property"), PropertyName);
+	Params->TryGetStringField(TEXT("variable"), VariableName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	UAnimGraphNode_Base* AnimNode = ResolveAnimGraphNode(Blueprint, Graph, BpPath, GraphName, NodeId, Error);
+	if (!AnimNode) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FStructProperty* NodeStructProperty = FindAnimNodeStructProperty(AnimNode);
+	FProperty* InnerProperty = FindAnimNodeInnerProperty(NodeStructProperty, PropertyName);
+	if (!InnerProperty)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Cannot bind unknown anim node property '%s'. Available properties: %s. Run bp_read_anim_node first."), *PropertyName, *JoinPropertyNames(GetAnimNodeInnerPropertyNames(NodeStructProperty))));
+	}
+
+	const int32 OptionalPinIndex = FindOptionalAnimPinIndex(AnimNode, InnerProperty->GetName());
+	if (OptionalPinIndex == INDEX_NONE)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Anim node property '%s' is not bindable/exposable on this node. Bindable optional pins: %s."), *InnerProperty->GetName(), *JoinPropertyNames(GetOptionalAnimPinNames(AnimNode))));
+	}
+
+	const FName BindingName = AnimNode->ShowPinForProperties[OptionalPinIndex].PropertyName;
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpBindAnimProperty", "SmithUE: Bind Anim Property"));
+	Blueprint->Modify();
+	AnimNode->Modify();
+
+	if (VariableName.IsEmpty())
+	{
+		const bool bRemoved = AnimNode->PropertyBindings.Remove(BindingName) > 0;
+		AnimNode->ReconstructNode();
+		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("property"), BindingName.ToString());
+		Data->SetBoolField(TEXT("bound"), false);
+		Data->SetBoolField(TEXT("removed"), bRemoved);
+		return FSmithUECommonUtils::CreateSuccessResponse(Data);
+	}
+
+	if (!BlueprintHasMemberVariable(Blueprint, VariableName))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Member variable '%s' not found on this AnimBlueprint. bp_bind_anim_property only supports member variables (not wires/functions/external paths). Available member variables: %s."), *VariableName, *JoinPropertyNames(GetBlueprintMemberVariableNames(Blueprint))));
+	}
+
+	AnimNode->SetPinVisibility(true, OptionalPinIndex);
+	if (UEdGraphPin* Pin = AnimNode->FindPin(BindingName))
+	{
+		Pin->BreakAllPinLinks();
+	}
+
+	FAnimGraphNodePropertyBinding Binding;
+	Binding.PropertyName = BindingName;
+	Binding.PropertyPath.Add(VariableName);
+	Binding.PathAsText = FText::FromString(VariableName);
+	Binding.Type = EAnimGraphNodePropertyBindingType::Property;
+	Binding.bIsBound = true;
+	AnimNode->PropertyBindings.Add(BindingName, Binding);
+	AnimNode->ReconstructNode();
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("property"), BindingName.ToString());
+	Data->SetStringField(TEXT("variable"), VariableName);
+	Data->SetBoolField(TEXT("bound"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpReadAnimNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name"), TEXT("node_id") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, GraphName, NodeId;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+	Params->TryGetStringField(TEXT("node_id"), NodeId);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	UAnimGraphNode_Base* AnimNode = ResolveAnimGraphNode(Blueprint, Graph, BpPath, GraphName, NodeId, Error);
+	if (!AnimNode) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FStructProperty* NodeStructProperty = FindAnimNodeStructProperty(AnimNode);
+	if (!NodeStructProperty)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Anim node '%s' has no internal FAnimNode struct property to inspect."), *NodeId));
+	}
+
+	uint8* NodeStructPtr = NodeStructProperty->ContainerPtrToValuePtr<uint8>(AnimNode);
+	TArray<TSharedPtr<FJsonValue>> PropertiesArray;
+	for (TFieldIterator<FProperty> It(NodeStructProperty->Struct); It; ++It)
+	{
+		FProperty* Property = *It;
+		if (!Property) { continue; }
+		void* ValuePtr = Property->ContainerPtrToValuePtr<void>(NodeStructPtr);
+		FString Value;
+		Property->ExportTextItem_Direct(Value, ValuePtr, nullptr, AnimNode, PPF_None);
+
+		TSharedPtr<FJsonObject> PropObj = MakeShared<FJsonObject>();
+		PropObj->SetStringField(TEXT("name"), Property->GetName());
+		PropObj->SetStringField(TEXT("cpp_type"), Property->GetCPPType());
+		PropObj->SetStringField(TEXT("value"), Value);
+		PropObj->SetBoolField(TEXT("has_optional_pin"), FindOptionalAnimPinIndex(AnimNode, Property->GetName()) != INDEX_NONE);
+		PropertiesArray.Add(MakeShared<FJsonValueObject>(PropObj));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> PinsArray;
+	for (const FOptionalPinFromProperty& OptionalPin : AnimNode->ShowPinForProperties)
+	{
+		TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+		PinObj->SetStringField(TEXT("property"), OptionalPin.PropertyName.ToString());
+		PinObj->SetStringField(TEXT("friendly_name"), OptionalPin.PropertyFriendlyName);
+		PinObj->SetBoolField(TEXT("show"), OptionalPin.bShowPin);
+		PinObj->SetBoolField(TEXT("can_toggle_visibility"), OptionalPin.bCanToggleVisibility);
+		PinsArray.Add(MakeShared<FJsonValueObject>(PinObj));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> BindingsArray;
+	for (const TPair<FName, FAnimGraphNodePropertyBinding>& BindingPair : AnimNode->PropertyBindings)
+	{
+		TSharedPtr<FJsonObject> BindingObj = MakeShared<FJsonObject>();
+		BindingObj->SetStringField(TEXT("property"), BindingPair.Key.ToString());
+		AppendJsonNameArray(BindingObj, TEXT("property_path"), BindingPair.Value.PropertyPath);
+		BindingObj->SetStringField(TEXT("path_text"), BindingPair.Value.PathAsText.ToString());
+		BindingObj->SetBoolField(TEXT("is_bound"), BindingPair.Value.bIsBound);
+		BindingObj->SetStringField(TEXT("type"), BindingPair.Value.Type == EAnimGraphNodePropertyBindingType::Function ? TEXT("Function") : (BindingPair.Value.Type == EAnimGraphNodePropertyBindingType::Property ? TEXT("Property") : TEXT("None")));
+		BindingsArray.Add(MakeShared<FJsonValueObject>(BindingObj));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	Data->SetStringField(TEXT("graph_name"), GraphName);
+	Data->SetStringField(TEXT("node_id"), AnimNode->NodeGuid.ToString());
+	Data->SetStringField(TEXT("node_class"), AnimNode->GetClass()->GetName());
+	Data->SetStringField(TEXT("node_struct_property"), NodeStructProperty->GetName());
+	Data->SetStringField(TEXT("node_struct_type"), NodeStructProperty->Struct->GetName());
+	Data->SetArrayField(TEXT("settable_properties"), PropertiesArray);
+	Data->SetArrayField(TEXT("optional_pins"), PinsArray);
+	Data->SetArrayField(TEXT("bindings"), BindingsArray);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddStateMachine(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("graph_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, GraphName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("graph_name"), GraphName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Cast<UAnimBlueprint>(Blueprint)) { return CreateMissingAnimBlueprintError(BpPath); }
+
+	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
+	if (!Graph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("AnimGraph '%s' not found. bp_add_state_machine only creates UAnimGraphNode_StateMachine inside an existing AnimBlueprint AnimGraph; use anim_read_blueprint/bp_describe_graph to find the graph name."), *GraphName));
+	}
+	if (!IsAnimationGraph(Graph))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Graph '%s' is '%s', not an AnimGraph/UAnimationGraph. State machines can only be added to AnimBlueprint AnimGraph graphs."), *GraphName, *Graph->GetClass()->GetName()));
+	}
+
+	const FVector2D Position = GetPositionFromJson(Params);
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddStateMachine", "SmithUE: Add Anim State Machine"));
+	Blueprint->Modify();
+	Graph->Modify();
+
+	UAnimGraphNode_StateMachine* StateMachineNode = NewObject<UAnimGraphNode_StateMachine>(Graph, UAnimGraphNode_StateMachine::StaticClass());
+	if (!StateMachineNode)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to allocate UAnimGraphNode_StateMachine"));
+	}
+
+	StateMachineNode->SetFlags(RF_Transactional);
+	StateMachineNode->CreateNewGuid();
+	StateMachineNode->NodePosX = FMath::RoundToInt(Position.X);
+	StateMachineNode->NodePosY = FMath::RoundToInt(Position.Y);
+	Graph->AddNode(StateMachineNode, false, false);
+	StateMachineNode->PostPlacedNewNode();
+	StateMachineNode->AllocateDefaultPins();
+	StateMachineNode->ReconstructNode();
+
+	if (!StateMachineNode->EditorStateMachineGraph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("State-machine node was created but EditorStateMachineGraph is null. This should be created by UAnimGraphNode_StateMachineBase::PostPlacedNewNode; rebuild with AnimGraph module support."));
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	FSmithUEToolRegistry::Get().NidSession.MarkStale(GraphPathKey(BpPath, GraphName));
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("node_id"), StateMachineNode->NodeGuid.ToString());
+	Data->SetStringField(TEXT("state_machine_graph"), StateMachineNode->EditorStateMachineGraph->GetName());
+	Data->SetStringField(TEXT("entry_node_id"), StateMachineNode->EditorStateMachineGraph->EntryNode ? StateMachineNode->EditorStateMachineGraph->EntryNode->NodeGuid.ToString() : FString());
+	Data->SetBoolField(TEXT("nid_stale"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddAnimState(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("state_machine"), TEXT("state_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, StateMachineRef, StateName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("state_machine"), StateMachineRef);
+	Params->TryGetStringField(TEXT("state_name"), StateName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	UAnimationStateMachineGraph* StateMachineGraph = ResolveStateMachineGraph(Blueprint, BpPath, StateMachineRef, Error);
+	if (!StateMachineGraph) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	for (UEdGraphNode* Node : StateMachineGraph->Nodes)
+	{
+		if (UAnimStateNode* ExistingState = Cast<UAnimStateNode>(Node))
+		{
+			if (ExistingState->GetStateName().Equals(StateName, ESearchCase::IgnoreCase))
+			{
+				return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("State '%s' already exists in state machine '%s'. Use bp_read_state_machine to inspect existing state node_ids/bound_graphs."), *StateName, *StateMachineGraph->GetName()));
+			}
+		}
+	}
+
+	const bool bWasFirstState = !HasRealStates(StateMachineGraph);
+	const FVector2D Position = GetPositionFromJson(Params);
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddAnimState", "SmithUE: Add Anim State"));
+	Blueprint->Modify();
+	StateMachineGraph->Modify();
+
+	UAnimStateNode* StateNode = FEdGraphSchemaAction_NewStateNode::SpawnNodeFromTemplate<UAnimStateNode>(StateMachineGraph, NewObject<UAnimStateNode>(), Position, false);
+	if (!StateNode || !StateNode->BoundGraph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create UAnimStateNode with BoundGraph. Engine PostPlacedNewNode should create UAnimationStateGraph; check AnimGraph module dependency."));
+	}
+
+	FEdGraphUtilities::RenameGraphToNameOrCloseToName(StateNode->BoundGraph, StateName);
+	const FString BoundGraphName = StateNode->BoundGraph->GetName();
+
+	bool bEntryWired = false;
+	if (bWasFirstState)
+	{
+		UAnimStateEntryNode* EntryNode = EnsureStateMachineEntry(StateMachineGraph);
+		UEdGraphPin* EntryPin = FirstPinByDirection(EntryNode, EGPD_Output);
+		UEdGraphPin* StateInputPin = StateNode->GetInputPin();
+		if (EntryPin && StateInputPin && StateMachineGraph->GetSchema())
+		{
+			bEntryWired = StateMachineGraph->GetSchema()->TryCreateConnection(EntryPin, StateInputPin);
+		}
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	MarkStateMachineGraphStale(BpPath, StateMachineGraph);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("state_node_id"), StateNode->NodeGuid.ToString());
+	Data->SetStringField(TEXT("state_name"), StateNode->GetStateName());
+	Data->SetStringField(TEXT("bound_graph"), BoundGraphName);
+	Data->SetStringField(TEXT("state_machine_graph"), StateMachineGraph->GetName());
+	Data->SetBoolField(TEXT("entry_wired"), bEntryWired);
+	Data->SetBoolField(TEXT("nid_stale"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddAnimTransition(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("state_machine"), TEXT("from_state"), TEXT("to_state") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, StateMachineRef, FromStateRef, ToStateRef;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("state_machine"), StateMachineRef);
+	Params->TryGetStringField(TEXT("from_state"), FromStateRef);
+	Params->TryGetStringField(TEXT("to_state"), ToStateRef);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	UAnimationStateMachineGraph* StateMachineGraph = ResolveStateMachineGraph(Blueprint, BpPath, StateMachineRef, Error);
+	if (!StateMachineGraph) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	UAnimStateNode* FromStateNode = FindAnimStateNode(StateMachineGraph, BpPath, FromStateRef, Error);
+	if (!FromStateNode) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	UAnimStateNode* ToStateNode = FindAnimStateNode(StateMachineGraph, BpPath, ToStateRef, Error);
+	if (!ToStateNode) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	if (FromStateNode == ToStateNode)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("from_state and to_state resolve to the same state. bp_add_anim_transition requires two different UAnimStateNode states."));
+	}
+
+	const FVector2D Position = GetPositionFromJson(Params);
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddAnimTransition", "SmithUE: Add Anim Transition"));
+	Blueprint->Modify();
+	StateMachineGraph->Modify();
+
+	UAnimStateTransitionNode* TransitionNode = FEdGraphSchemaAction_NewStateNode::SpawnNodeFromTemplate<UAnimStateTransitionNode>(StateMachineGraph, NewObject<UAnimStateTransitionNode>(), Position, false);
+	if (!TransitionNode || !TransitionNode->GetBoundGraph())
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create UAnimStateTransitionNode with rule BoundGraph. Engine PostPlacedNewNode should create UAnimationTransitionGraph; check AnimGraph module dependency."));
+	}
+	TransitionNode->CreateConnections(FromStateNode, ToStateNode);
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	MarkStateMachineGraphStale(BpPath, StateMachineGraph);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("transition_node_id"), TransitionNode->NodeGuid.ToString());
+	Data->SetStringField(TEXT("from_state"), FromStateNode->GetStateName());
+	Data->SetStringField(TEXT("to_state"), ToStateNode->GetStateName());
+	Data->SetStringField(TEXT("rule_graph"), TransitionNode->GetBoundGraph()->GetName());
+	Data->SetStringField(TEXT("state_machine_graph"), StateMachineGraph->GetName());
+	Data->SetBoolField(TEXT("nid_stale"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpReadStateMachine(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("state_machine") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	FString BpPath, StateMachineRef;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("state_machine"), StateMachineRef);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	UAnimationStateMachineGraph* StateMachineGraph = ResolveStateMachineGraph(Blueprint, BpPath, StateMachineRef, Error);
+	if (!StateMachineGraph) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+
+	TArray<TSharedPtr<FJsonValue>> StatesArray;
+	TArray<TSharedPtr<FJsonValue>> TransitionsArray;
+	for (UEdGraphNode* Node : StateMachineGraph->Nodes)
+	{
+		if (UAnimStateNode* StateNode = Cast<UAnimStateNode>(Node))
+		{
+			TSharedPtr<FJsonObject> StateObj = MakeShared<FJsonObject>();
+			StateObj->SetStringField(TEXT("node_id"), StateNode->NodeGuid.ToString());
+			StateObj->SetStringField(TEXT("state_name"), StateNode->GetStateName());
+			StateObj->SetStringField(TEXT("bound_graph"), StateNode->BoundGraph ? StateNode->BoundGraph->GetName() : FString());
+			StatesArray.Add(MakeShared<FJsonValueObject>(StateObj));
+		}
+		else if (UAnimStateTransitionNode* TransitionNode = Cast<UAnimStateTransitionNode>(Node))
+		{
+			UAnimStateNodeBase* PreviousState = TransitionNode->GetPreviousState();
+			UAnimStateNodeBase* NextState = TransitionNode->GetNextState();
+			TSharedPtr<FJsonObject> TransitionObj = MakeShared<FJsonObject>();
+			TransitionObj->SetStringField(TEXT("node_id"), TransitionNode->NodeGuid.ToString());
+			TransitionObj->SetStringField(TEXT("from_state"), PreviousState ? PreviousState->GetStateName() : FString());
+			TransitionObj->SetStringField(TEXT("to_state"), NextState ? NextState->GetStateName() : FString());
+			TransitionObj->SetStringField(TEXT("rule_graph"), TransitionNode->GetBoundGraph() ? TransitionNode->GetBoundGraph()->GetName() : FString());
+			TransitionObj->SetBoolField(TEXT("bidirectional"), TransitionNode->Bidirectional);
+			TransitionObj->SetNumberField(TEXT("priority_order"), TransitionNode->PriorityOrder);
+			TransitionsArray.Add(MakeShared<FJsonValueObject>(TransitionObj));
+		}
+	}
+
+	UAnimStateEntryNode* EntryNode = EnsureStateMachineEntry(StateMachineGraph);
+	UEdGraphNode* EntryOutputNode = EntryNode ? EntryNode->GetOutputNode() : nullptr;
+	UAnimStateNodeBase* EntryState = Cast<UAnimStateNodeBase>(EntryOutputNode);
+	UAnimGraphNode_StateMachineBase* StateMachineNode = FindStateMachineNodeForGraph(Blueprint, StateMachineGraph);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	Data->SetStringField(TEXT("state_machine_graph"), StateMachineGraph->GetName());
+	Data->SetStringField(TEXT("state_machine_node_id"), StateMachineNode ? StateMachineNode->NodeGuid.ToString() : FString());
+	Data->SetStringField(TEXT("entry_node_id"), EntryNode ? EntryNode->NodeGuid.ToString() : FString());
+	Data->SetStringField(TEXT("entry_state"), EntryState ? EntryState->GetStateName() : FString());
+	Data->SetArrayField(TEXT("states"), StatesArray);
+	Data->SetArrayField(TEXT("transitions"), TransitionsArray);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

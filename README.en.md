@@ -93,13 +93,13 @@ Unreal Engine 5.2 Editor
 
 ## Command Reference
 
-SmithUE provides **221 tools** organized across **24 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **229 tools** organized across **24 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
 ### Domain Overview
 
 | Domain | Tools | Description |
 |---|---|---|
-| Blueprint | 35 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace, bulk component edit |
+| Blueprint | 43 | BP creation, nodes, functions, variables, components, DSL, health/diff/trace, bulk component edit, AnimGraph editing |
 | Material | 20 | Materials, material instances, MPC, material functions |
 | Niagara | 17 | Particle systems, emitters, modules, renderers, parameters |
 | Asset | 18 | Asset CRUD, browser ops, content browser selection/navigation, AI texture generation |
@@ -163,6 +163,12 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > Full history in [CHANGELOG.md](CHANGELOG.md).
 
+### v1.15.0 (UE5.2, 2026-07-03)
+- **AnimGraph editing tools**: added 8 tools for anim-node property edits, optional pin exposure, member-variable bindings, anim-node reads, and state-machine / state / transition authoring with state-machine read-back.
+- **Cross-class Blueprint node fixes**: `bp_create_node` adds `owner_class` for cross-class VariableGet/Set; `target_class` accepts `/Game/...` Blueprint paths and resolves DynamicCast generated `_C` classes.
+- **Asset deletion and port maintenance**: `delete_asset force=true` now truly force-deletes and nulls in-memory referencers; portfile prune now uses PID liveness.
+- **Release tooling**: `regen-tools.mjs` supports a `SMITHUE_PORT` override for regenerating `TOOLS.md` from another host editor that shares the plugin.
+
 ### v1.12.0 (UE5.2, 2026-06-26)
 - **Self-describing material tools**: `connect_material_pins` `dest_input_index` now documents `7=WorldPositionOffset` (was 0–6 only); `set_expression_property` lists node-type-specific valid keys and its error echoes the node's valid keys. PITFALLS #15.
 
@@ -191,7 +197,7 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 > **Positioning: different from other UE AI plugins.** Most UE AI plugins stop at the "let AI drive the editor" demo; SmithUE targets real enterprise pain points — **legacy-project collaboration** and **asset compliance standardization** — and lays infrastructure groundwork for **future transcoding / migration standardization**. It delivers not one-off automation scripts, but a **git-trackable, auditable, team-reusable "atomic tool layer + spec layer."**
 
 ### Phase 1 (shipped) — Atomic capability foundation
-- 24 domains, 221 atomic HTTP tools across Blueprint / Material / Niagara / Level / Asset / Analysis, etc.
+- 24 domains, 229 atomic HTTP tools across Blueprint / AnimGraph / Material / Niagara / Level / Asset / Analysis, etc.
 - Spec-driven blueprint factory + compliance linter: specs live as git text in the host project; AI generates compliant blueprints in bulk and audits them in plain language.
 - Plugin environment self-check & self-service deployment (startup Node/npm/CLI detection, one-click install/upgrade panel), lowering the barrier for legacy machines / projects / intranet environments.
 

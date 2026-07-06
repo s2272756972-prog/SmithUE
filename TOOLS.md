@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **221 tools** across **24 domains**.
+> Generated from `/api/v1/tools`. Total: **229 tools** across **24 domains**.
 
 ---
 
@@ -229,7 +229,7 @@ Duplicate an asset to a new path
 
 ### `delete_asset`
 
-Delete an asset. Checks references first and returns them if found. Use force=true to delete anyway.
+Delete an asset. Checks references first; returns referencers if found. force=true force-deletes even with in-memory referencers, nulling them.
 
 **Parameters:**
 
@@ -384,7 +384,8 @@ Create a node inside a Blueprint graph (in-graph: adds a node inside a Blueprint
 - `macro_path` (string): Macro graph asset path for K2Node_MacroInstance nodes
 - `key` (string): Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes
 - `input_action` (string): InputAction asset path for K2Node_EnhancedInputAction nodes
-- `target_class` (string): Target class path for K2Node_DynamicCast nodes
+- `target_class` (string): Target class for K2Node_DynamicCast nodes. Accepts a native class name or a /Game/... Blueprint asset path (resolves the generated _C class).
+- `owner_class` (string): Optional owner class for K2Node_VariableGet/VariableSet when the variable belongs to a FOREIGN class (e.g. a variable on a Cast result). Accepts a native class name or a /Game/... Blueprint asset path. Omit to resolve against the current Blueprint (Self).
 
 ### `bp_connect_pins`
 
@@ -423,6 +424,94 @@ Set a Blueprint node pin default value
 - `node_id` (string, required): Node GUID
 - `pin_name` (string, required): Pin name
 - `value` (string, required): Default value string
+
+### `bp_set_anim_node_property`
+
+MUTATES an AnimGraph UAnimGraphNode only: set an internal FAnimNode struct property by reflection (e.g. Sequence or PlayRate). Not for regular K2 nodes or state machines; use bp_read_anim_node first for valid property names.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `graph_name` (string, required): AnimGraph graph name as returned by bp_describe_graph/anim_read_blueprint
+- `node_id` (string, required): AnimGraph node GUID or fresh N-id
+- `property` (string, required): Internal FAnimNode property name; run bp_read_anim_node to list valid names
+- `value` (string, required): ImportText value string, e.g. 1.0, True, or an asset reference
+
+### `bp_expose_anim_pin`
+
+MUTATES an AnimGraph UAnimGraphNode only: show or hide one optional internal FAnimNode property pin. Not for regular Blueprint pins; ids can go stale after mutation — re-run bp_describe_graph/bp_read_anim_node.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `graph_name` (string, required): AnimGraph graph name
+- `node_id` (string, required): AnimGraph node GUID or fresh N-id
+- `property` (string, required): Optional FAnimNode property pin name; run bp_read_anim_node to list valid names
+- `show` (boolean, required): true to expose the property as a pin; false to hide it
+
+### `bp_bind_anim_property`
+
+MUTATES an AnimGraph UAnimGraphNode only: bind one anim node property to a MEMBER VARIABLE via PropertyBindings fast-path (no wire). variable must be a member variable name; empty variable unbinds. Not for functions, external objects, or state machines.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `graph_name` (string, required): AnimGraph graph name
+- `node_id` (string, required): AnimGraph node GUID or fresh N-id
+- `property` (string, required): Bindable internal FAnimNode property name, e.g. PlayRate; run bp_read_anim_node first
+- `variable` (string, required): Member variable name to bind; empty string removes existing binding
+
+### `bp_read_anim_node`
+
+READ-ONLY: inspect one AnimGraph UAnimGraphNode's internal FAnimNode settable properties, optional exposed pins, and PropertyBindings. Use before bp_set_anim_node_property/bp_expose_anim_pin/bp_bind_anim_property; not for regular K2 nodes or state machines.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `graph_name` (string, required): AnimGraph graph name
+- `node_id` (string, required): AnimGraph node GUID or fresh N-id
+
+### `bp_add_state_machine`
+
+CREATE: AnimBlueprint AnimGraph state machines ONLY. Adds a UAnimGraphNode_StateMachine to an AnimGraph and returns node_id plus state_machine_graph for follow-up bp_add_anim_state; ids go stale after graph mutation — re-run bp_describe_graph/bp_read_state_machine.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `graph_name` (string, required): Target AnimGraph graph name (usually AnimGraph)
+- `position` (object): Optional {x,y} node position
+
+### `bp_add_anim_state`
+
+CREATE: AnimBlueprint state-machine graphs ONLY. Adds a UAnimStateNode with its UAnimationStateGraph BoundGraph; state_machine accepts state-machine node_id or graph name. First state is wired from Entry. Returns bound_graph for bp_create_node/bp_set_anim_node_property population; ids go stale.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `state_machine` (string, required): State machine node GUID/N-id or state machine graph name returned by bp_add_state_machine
+- `state_name` (string, required): State name / BoundGraph rename suggestion
+- `position` (object): Optional {x,y} state node position
+
+### `bp_add_anim_transition`
+
+CREATE: AnimBlueprint state-machine graphs ONLY. Adds a UAnimStateTransitionNode between two states with its UAnimationTransitionGraph rule BoundGraph. from_state/to_state accept state node_id or state name. Returns rule_graph for condition nodes; ids go stale.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `state_machine` (string, required): State machine node GUID/N-id or state machine graph name
+- `from_state` (string, required): Source state node GUID/N-id or state name
+- `to_state` (string, required): Target state node GUID/N-id or state name
+- `position` (object): Optional {x,y} transition node position
+
+### `bp_read_state_machine`
+
+READ-ONLY pair for state-machine create tools: AnimBlueprint state machines ONLY. Reports states, transitions, Entry target, and every state/transition BoundGraph name; state_machine accepts node_id or graph name.
+
+**Parameters:**
+
+- `bp_path` (string, required): AnimBlueprint asset path
+- `state_machine` (string, required): State machine node GUID/N-id or state machine graph name
 
 ### `bp_delete_node`
 
