@@ -563,6 +563,51 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleGetMaterialInfo(const TS
     Data->SetNumberField(TEXT("expression_count"), Material->GetExpressions().Num());
     Data->SetNumberField(TEXT("num_textures"), NumTextures);
     Data->SetArrayField(TEXT("expressions"), ExpressionsArray);
+
+    // --- Connections (wiring): expression->expression and expression->material root ---
+    TMap<UMaterialExpression*, int32> ExprIndex;
+    for (int32 i = 0; i < Material->GetExpressions().Num(); ++i)
+    {
+        if (UMaterialExpression* E = Material->GetExpressions()[i]) { ExprIndex.Add(E, i); }
+    }
+    TArray<TSharedPtr<FJsonValue>> EdgesArray;
+    for (int32 i = 0; i < Material->GetExpressions().Num(); ++i)
+    {
+        UMaterialExpression* Expr = Material->GetExpressions()[i];
+        if (!Expr) { continue; }
+        const int32 NumIn = Expr->CountInputs();
+        for (int32 j = 0; j < NumIn; ++j)
+        {
+            FExpressionInput* In = Expr->GetInput(j);
+            if (In && In->Expression)
+            {
+                const int32* SrcIdx = ExprIndex.Find(In->Expression);
+                TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+                E->SetNumberField(TEXT("from"), SrcIdx ? *SrcIdx : -1);
+                E->SetNumberField(TEXT("from_output"), In->OutputIndex);
+                E->SetNumberField(TEXT("to"), i);
+                E->SetStringField(TEXT("to_input"), Expr->GetInputName(j).ToString());
+                EdgesArray.Add(MakeShared<FJsonValueObject>(E));
+            }
+        }
+    }
+    static const TCHAR* RootInputNames[] = { TEXT("BaseColor"), TEXT("Metallic"), TEXT("Roughness"), TEXT("Normal"), TEXT("EmissiveColor"), TEXT("Opacity"), TEXT("OpacityMask"), TEXT("WorldPositionOffset"), TEXT("FrontMaterial") };
+    for (int32 k = 0; k < 9; ++k)
+    {
+        FExpressionInput* In = GetMaterialBaseInput(Material, k);
+        if (In && In->Expression)
+        {
+            const int32* SrcIdx = ExprIndex.Find(In->Expression);
+            TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+            E->SetNumberField(TEXT("from"), SrcIdx ? *SrcIdx : -1);
+            E->SetNumberField(TEXT("from_output"), In->OutputIndex);
+            E->SetStringField(TEXT("to"), TEXT("output"));
+            E->SetStringField(TEXT("to_input"), RootInputNames[k]);
+            EdgesArray.Add(MakeShared<FJsonValueObject>(E));
+        }
+    }
+    Data->SetArrayField(TEXT("edges"), EdgesArray);
+    Data->SetNumberField(TEXT("edge_count"), EdgesArray.Num());
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

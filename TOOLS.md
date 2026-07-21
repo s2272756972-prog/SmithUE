@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **239 tools** across **26 domains**.
+> Generated from `/api/v1/tools`. Total: **241 tools** across **26 domains**.
 
 ---
 
@@ -357,6 +357,24 @@ Create a new Blueprint asset (asset-level: creates a new Blueprint ASSET at a pa
 - `name` (string, required): Blueprint asset name
 - `parent_class` (string, required): Parent class name
 - `save_path` (string, required): Destination content path
+
+### `create_blueprint_interface`
+
+Create a Blueprint Interface asset (UInterface, BPTYPE_Interface). Add interface functions with bp_add_function; implement it on a Blueprint with bp_implement_interface.
+
+**Parameters:**
+
+- `name` (string, required): Interface asset name (convention: BPI_*)
+- `save_path` (string, required): Destination content path
+
+### `bp_implement_interface`
+
+Add (implement) an interface on a Blueprint. interface_path = a Blueprint-interface asset path (e.g. /Game/BPI_Foo) or a native UInterface class name. Compiles the Blueprint afterwards.
+
+**Parameters:**
+
+- `bp_path` (string, required): Target Blueprint path
+- `interface_path` (string, required): Interface asset path or native UInterface class name
 
 ### `bp_add_function`
 

@@ -1713,6 +1713,8 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	BpCollisionResponsesParam.SetExample(TEXT("{\"Pawn\":\"Ignore\"}"));
 
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_create"), TEXT("Blueprint"), TEXT("Create a new Blueprint asset (asset-level: creates a new Blueprint ASSET at a package path; for adding a node inside a graph use bp_create_node)."), { FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Blueprint asset name"), true), FSmithUEToolParam(TEXT("parent_class"), TEXT("string"), TEXT("Parent class name"), true), FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Destination content path"), true) }), &HandleBpCreate);
+	Registry.Register(FSmithUEToolSchema(TEXT("create_blueprint_interface"), TEXT("Blueprint"), TEXT("Create a Blueprint Interface asset (UInterface, BPTYPE_Interface). Add interface functions with bp_add_function; implement it on a Blueprint with bp_implement_interface."), { FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Interface asset name (convention: BPI_*)"), true), FSmithUEToolParam(TEXT("save_path"), TEXT("string"), TEXT("Destination content path"), true) }), &HandleBpCreateInterface);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_implement_interface"), TEXT("Blueprint"), TEXT("Add (implement) an interface on a Blueprint. interface_path = a Blueprint-interface asset path (e.g. /Game/BPI_Foo) or a native UInterface class name. Compiles the Blueprint afterwards."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Target Blueprint path"), true), FSmithUEToolParam(TEXT("interface_path"), TEXT("string"), TEXT("Interface asset path or native UInterface class name"), true) }), &HandleBpImplementInterface);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_function"), TEXT("Blueprint"), TEXT("Add a function graph to a Blueprint"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("New function name"), true), FSmithUEToolParam(TEXT("inputs"), TEXT("array"), TEXT("Optional input pin definitions"), false, FString(), TEXT("object")), FSmithUEToolParam(TEXT("outputs"), TEXT("array"), TEXT("Optional output pin definitions"), false, FString(), TEXT("object")) }), &HandleBpAddFunction);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_create_node"), TEXT("Blueprint"), TEXT("Create a node inside a Blueprint graph (in-graph: adds a node inside a Blueprint graph; for a new Blueprint ASSET use bp_create). Returns node ids that become stale after any graph mutation — re-run bp_describe_graph before reusing them."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_class"), TEXT("string"), TEXT("Node class name"), true), FSmithUEToolParam(TEXT("position"), TEXT("object"), TEXT("Optional {x,y} node position")), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function name or 'ClassName::FunctionName' for K2Node_CallFunction nodes"), false), FSmithUEToolParam(TEXT("variable_name"), TEXT("string"), TEXT("Variable name for K2Node_VariableGet or K2Node_VariableSet nodes"), false), FSmithUEToolParam(TEXT("macro_path"), TEXT("string"), TEXT("Macro graph asset path for K2Node_MacroInstance nodes"), false), FSmithUEToolParam(TEXT("key"), TEXT("string"), TEXT("Input key name (e.g. 'W', 'Gamepad_LeftX') for K2Node_InputKey nodes"), false), FSmithUEToolParam(TEXT("input_action"), TEXT("string"), TEXT("InputAction asset path for K2Node_EnhancedInputAction nodes"), false), FSmithUEToolParam(TEXT("target_class"), TEXT("string"), TEXT("Target class for K2Node_DynamicCast nodes. Accepts a native class name or a /Game/... Blueprint asset path (resolves the generated _C class)."), false), FSmithUEToolParam(TEXT("owner_class"), TEXT("string"), TEXT("Optional owner class for K2Node_VariableGet/VariableSet when the variable belongs to a FOREIGN class (e.g. a variable on a Cast result). Accepts a native class name or a /Game/... Blueprint asset path. Omit to resolve against the current Blueprint (Self)."), false) }), &HandleBpCreateNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_connect_pins"), TEXT("Blueprint"), TEXT("Connect two Blueprint node pins (adds a wire between two pins; to remove an existing wire use bp_disconnect_pins)."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("source_node_id"), TEXT("string"), TEXT("Source node GUID"), true), FSmithUEToolParam(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), true), FSmithUEToolParam(TEXT("target_node_id"), TEXT("string"), TEXT("Target node GUID"), true), FSmithUEToolParam(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), true) }), &HandleBpConnectPins);
@@ -2075,6 +2077,61 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCreate(const TSharedPtr<FJs
 	NewBlueprint->MarkPackageDirty();
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("bp_path"), PackagePath);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCreateInterface(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("name"), TEXT("save_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString Name, SavePath;
+	Params->TryGetStringField(TEXT("name"), Name); Params->TryGetStringField(TEXT("save_path"), SavePath);
+	const FString CleanSavePath = SavePath.EndsWith(TEXT("/")) ? SavePath.LeftChop(1) : SavePath;
+	const FString PackagePath = FString::Printf(TEXT("%s/%s"), *CleanSavePath, *Name);
+	if (LoadObject<UBlueprint>(nullptr, *NormalizeObjectPath(PackagePath))) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Blueprint already exists at target path")); }
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpCreateInterface", "SmithUE: Create Blueprint Interface"));
+	UPackage* Package = CreatePackage(*PackagePath);
+	UBlueprint* NewBP = FKismetEditorUtilities::CreateBlueprint(UInterface::StaticClass(), Package, FName(*Name), BPTYPE_Interface, UBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass());
+	if (!NewBP) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create Blueprint Interface")); }
+	FAssetRegistryModule::AssetCreated(NewBP);
+	NewBP->MarkPackageDirty();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bp_path"), PackagePath);
+	Data->SetStringField(TEXT("type"), TEXT("BlueprintInterface"));
+	Data->SetStringField(TEXT("hint"), TEXT("Add interface functions with bp_add_function; implement it on a Blueprint with bp_implement_interface."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpImplementInterface(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("interface_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BpPath, InterfacePath;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath); Params->TryGetStringField(TEXT("interface_path"), InterfacePath);
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+
+	// Resolve the interface class: a Blueprint-interface path (use its GeneratedClass) or a native UInterface class name.
+	UClass* InterfaceClass = nullptr;
+	if (InterfacePath.Contains(TEXT("/")))
+	{
+		FString CleanPath = InterfacePath;
+		if (CleanPath.EndsWith(TEXT("_C"))) { int32 Dot; if (CleanPath.FindLastChar(TEXT('.'), Dot)) { CleanPath = CleanPath.Left(Dot); } }
+		if (UBlueprint* IfaceBP = LoadBlueprint(CleanPath)) { InterfaceClass = IfaceBP->GeneratedClass; }
+	}
+	if (!InterfaceClass) { InterfaceClass = ResolveClassByName(InterfacePath, UInterface::StaticClass(), TEXT('U')); }
+	if (!InterfaceClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Interface class not found: '%s' (pass a Blueprint-interface asset path or a native UInterface class name)"), *InterfacePath)); }
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpImplementInterface", "SmithUE: Implement Interface"));
+	const bool bImplemented = FBlueprintEditorUtils::ImplementNewInterface(Blueprint, InterfaceClass->GetClassPathName());
+	if (!bImplemented) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to implement interface '%s' (already implemented?)"), *InterfaceClass->GetName())); }
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipGarbageCollection);
+	Blueprint->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bp_path"), BpPath);
+	Data->SetStringField(TEXT("interface"), InterfaceClass->GetName());
+	Data->SetBoolField(TEXT("implemented"), true);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

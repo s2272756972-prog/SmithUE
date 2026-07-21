@@ -22,6 +22,8 @@ public:
 
 private:
 	static TSharedPtr<FJsonObject> HandleBpCreate(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpCreateInterface(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpImplementInterface(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpAddFunction(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpCreateNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpConnectPins(const TSharedPtr<FJsonObject>& Params);

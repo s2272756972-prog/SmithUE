@@ -327,27 +327,34 @@ TSharedPtr<FJsonObject> FSmithUEDataCommands::HandleDataAddRow(const TSharedPtr<
         return FSmithUECommonUtils::CreateErrorResponse(TEXT("DataTable has no row struct"));
     }
 
-    // Build a JSON string containing just this single row, then import it
+    // UDataTable::CreateTableFromJSONString REPLACES the whole table, so to APPEND a
+    // row we must re-emit all existing rows plus the new one (replacing any same-named row).
     const FName RowName(*RowNameString);
-    DataTable->RemoveRow(RowName);
 
-    // Serialize row_data back to JSON string for import
+    TArray<TSharedPtr<FJsonValue>> RowArray;
+    for (const TPair<FName, uint8*>& Pair : DataTable->GetRowMap())
+    {
+        if (Pair.Key == RowName || !Pair.Value) { continue; } // same-named row gets replaced below
+        TSharedRef<FJsonObject> ExistingObj = MakeShared<FJsonObject>();
+        ExistingObj->SetStringField(TEXT("Name"), Pair.Key.ToString());
+        FJsonObjectConverter::UStructToJsonObject(DataTable->RowStruct, Pair.Value, ExistingObj, 0, 0);
+        RowArray.Add(MakeShared<FJsonValueObject>(ExistingObj));
+    }
+
+    // The new/updated row.
     TSharedRef<FJsonObject> RowJsonObj = MakeShared<FJsonObject>();
     RowJsonObj->SetStringField(TEXT("Name"), RowNameString);
-    // Copy all fields from the incoming row_data
     for (const auto& Field : (*RowDataObjectPtr)->Values)
     {
         RowJsonObj->SetField(Field.Key.ToView(), Field.Value);
     }
-    
-    TArray<TSharedPtr<FJsonValue>> RowArray;
     RowArray.Add(MakeShared<FJsonValueObject>(RowJsonObj));
-    
+
     FString JsonString;
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
     FJsonSerializer::Serialize(RowArray, Writer);
     Writer->Close();
-    
+
     TArray<FString> ImportProblems = DataTable->CreateTableFromJSONString(JsonString);
     
     if (ImportProblems.Num() > 0)
@@ -355,13 +362,16 @@ TSharedPtr<FJsonObject> FSmithUEDataCommands::HandleDataAddRow(const TSharedPtr<
         return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Row import had issues: %s"), *FString::Join(ImportProblems, TEXT("; "))));
     }
     
+    // Mark dirty only — do NOT synchronously SaveLoadedAsset here: saving on every
+    // row triggers DataValidation + texture-streaming work (ensure !IsAssetStreamingSuspended)
+    // and is slow for bulk inserts. Callers persist explicitly via save_asset.
     DataTable->MarkPackageDirty();
-    UEditorAssetLibrary::SaveLoadedAsset(DataTable);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("table_path"), DataTable->GetPathName());
     Data->SetStringField(TEXT("row_name"), RowNameString);
     Data->SetNumberField(TEXT("row_count"), DataTable->GetRowMap().Num());
+    Data->SetStringField(TEXT("note"), TEXT("Row added in-memory; call save_asset to persist."));
     UE_LOG(LogSmithUE, Log, TEXT("data_add_row: added row %s to %s"), *RowNameString, *DataTable->GetPathName());
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

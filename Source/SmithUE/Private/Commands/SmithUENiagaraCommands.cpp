@@ -328,13 +328,23 @@ TSharedPtr<FJsonObject> FSmithUENiagaraCommands::HandleNiagaraAddEmitter(const T
     if (!System)
         return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load UNiagaraSystem at '%s'"), *SystemPath));
 
-    // Load the "Empty" template emitter which has proper graph structure, output nodes,
-    // and basic modules (InitializeParticle, EmitterState, ParticleState) already wired up.
-    UNiagaraEmitter* TemplateEmitter = Cast<UNiagaraEmitter>(
-        StaticLoadObject(UNiagaraEmitter::StaticClass(), nullptr,
-            TEXT("/Niagara/DefaultAssets/Templates/Emitters/Empty.Empty")));
+    // Load a template emitter that has proper graph structure/output nodes. The old
+    // 5.2 "Empty" template was removed in UE5.8, so try several known template emitters.
+    static const TCHAR* TemplateCandidates[] = {
+        TEXT("/Niagara/DefaultAssets/Templates/CascadeConversion/CompletelyEmpty.CompletelyEmpty"),
+        TEXT("/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain"),
+        TEXT("/Niagara/DefaultAssets/Templates/Emitters/SimpleSpriteBurst.SimpleSpriteBurst"),
+        TEXT("/Niagara/DefaultAssets/Templates/Emitters/Empty.Empty"), // pre-5.8 fallback
+    };
+    UNiagaraEmitter* TemplateEmitter = nullptr;
+    FString UsedTemplate;
+    for (const TCHAR* Candidate : TemplateCandidates)
+    {
+        TemplateEmitter = Cast<UNiagaraEmitter>(StaticLoadObject(UNiagaraEmitter::StaticClass(), nullptr, Candidate));
+        if (TemplateEmitter) { UsedTemplate = Candidate; break; }
+    }
     if (!TemplateEmitter)
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to load template emitter '/Niagara/DefaultAssets/Templates/Emitters/Empty'"));
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to load any Niagara template emitter (CompletelyEmpty/Fountain/SimpleSpriteBurst). Ensure the Niagara plugin content is present."));
 
     FVersionedNiagaraEmitterData* TemplateData = TemplateEmitter->GetLatestEmitterData();
     if (!TemplateData)
