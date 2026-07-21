@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **237 tools** across **26 domains**.
+> Generated from `/api/v1/tools`. Total: **239 tools** across **26 domains**.
 
 ---
 
@@ -1864,11 +1864,32 @@ Create an empty PCG Graph asset (Procedural Content Generation). Read it back wi
 
 ### `read_pcg_graph`
 
-Read a PCG Graph asset: name, path, node count, and whether it has input/output nodes. Read-only.
+Read a PCG Graph asset: input/output nodes plus every inner node (with its index, title, class, and input/output pin labels) and all edges (from_node.pin -> to_node.pin). Use the node 'index' values with connect_pcg_nodes. Read-only.
 
 **Parameters:**
 
 - `graph_path` (string, required): PCG Graph asset path, e.g. /Game/PCG/MyGraph
+
+### `add_pcg_node`
+
+Add an inner node to a PCG Graph by settings class (fuzzy name, e.g. 'SurfaceSampler', 'TransformPoints', 'StaticMeshSpawner', or full 'UPCGSurfaceSamplerSettings'). Returns the new node's index (use it with connect_pcg_nodes) plus its input/output pin labels. MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `settings_class` (string, required): PCG settings class (fuzzy), e.g. SurfaceSampler / TransformPoints / StaticMeshSpawner / DensityFilter
+
+### `connect_pcg_nodes`
+
+Connect two nodes in a PCG Graph. Node refs are 'input'/'output' (the graph's I/O nodes) or an inner node INDEX from read_pcg_graph. Pin labels default to the source's first output pin and the target's first input pin (usually 'Out'->'In'); the graph input node's output pin is 'Input' and the output node's input pin is 'Output'. MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `from_node` (string, required): Source node: 'input' or an inner node index
+- `to_node` (string, required): Target node: 'output' or an inner node index
+- `from_pin` (string): Source output pin label (default: first output pin)
+- `to_pin` (string): Target input pin label (default: first input pin)
 
 ### `find_pcg_graphs`
 

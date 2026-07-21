@@ -13,7 +13,13 @@
 #include "Engine/World.h"
 #include "Editor.h"
 #include "EngineUtils.h"
+#include "UObject/UObjectIterator.h"
 #include "PCGGraph.h"
+#include "PCGNode.h"
+#include "PCGPin.h"
+#include "PCGEdge.h"
+#include "PCGSettings.h"
+#include "PCGCommon.h"
 #include "PCGVolume.h"
 #include "PCGComponent.h"
 
@@ -38,6 +44,89 @@ namespace
 			if ((*Obj)->TryGetNumberField(TEXT("z"), V)) { InOut.Z = V; }
 		}
 	}
+
+	/** Resolve a UPCGSettings subclass by fuzzy name (e.g. "SurfaceSampler", "PCGSurfaceSamplerSettings"). */
+	UClass* ResolvePcgSettingsClass(const FString& Name)
+	{
+		if (Name.IsEmpty())
+		{
+			return nullptr;
+		}
+		// 1) exact class-name match (with/without leading U), among UPCGSettings subclasses
+		const TArray<FString> Exact = {
+			Name,
+			FString::Printf(TEXT("PCG%sSettings"), *Name),
+			FString::Printf(TEXT("%sSettings"), *Name),
+			FString::Printf(TEXT("UPCG%sSettings"), *Name)
+		};
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			UClass* C = *It;
+			if (!C->IsChildOf(UPCGSettings::StaticClass()) || C->HasAnyClassFlags(CLASS_Abstract))
+			{
+				continue;
+			}
+			const FString CN = C->GetName();
+			for (const FString& Cand : Exact)
+			{
+				if (CN.Equals(Cand, ESearchCase::IgnoreCase))
+				{
+					return C;
+				}
+			}
+		}
+		// 2) substring fallback
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			UClass* C = *It;
+			if (C->IsChildOf(UPCGSettings::StaticClass()) && !C->HasAnyClassFlags(CLASS_Abstract) &&
+				C->GetName().Contains(Name, ESearchCase::IgnoreCase))
+			{
+				return C;
+			}
+		}
+		return nullptr;
+	}
+
+	/** Resolve a node reference: "input"/"output" for graph I/O, or an integer index into GetNodes(). */
+	UPCGNode* ResolvePcgNode(UPCGGraph* Graph, const FString& Ref)
+	{
+		if (!Graph)
+		{
+			return nullptr;
+		}
+		if (Ref.Equals(TEXT("input"), ESearchCase::IgnoreCase))
+		{
+			return Graph->GetInputNode();
+		}
+		if (Ref.Equals(TEXT("output"), ESearchCase::IgnoreCase))
+		{
+			return Graph->GetOutputNode();
+		}
+		if (Ref.IsNumeric())
+		{
+			const int32 Index = FCString::Atoi(*Ref);
+			const TArray<UPCGNode*>& Nodes = Graph->GetNodes();
+			if (Nodes.IsValidIndex(Index))
+			{
+				return Nodes[Index];
+			}
+		}
+		return nullptr;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> PinLabels(const TArray<TObjectPtr<UPCGPin>>& Pins)
+	{
+		TArray<TSharedPtr<FJsonValue>> Arr;
+		for (const UPCGPin* Pin : Pins)
+		{
+			if (Pin)
+			{
+				Arr.Add(MakeShared<FJsonValueString>(Pin->Properties.Label.ToString()));
+			}
+		}
+		return Arr;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -61,11 +150,37 @@ void FSmithUEPCGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		FSmithUEToolSchema(
 			TEXT("read_pcg_graph"),
 			TEXT("PCG"),
-			TEXT("Read a PCG Graph asset: name, path, node count, and whether it has input/output nodes. Read-only."),
+			TEXT("Read a PCG Graph asset: input/output nodes plus every inner node (with its index, title, class, and input/output pin labels) and all edges (from_node.pin -> to_node.pin). Use the node 'index' values with connect_pcg_nodes. Read-only."),
 			{
 				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path, e.g. /Game/PCG/MyGraph"), /*required*/ true)
 			}),
 		&FSmithUEPCGCommands::HandleReadPcgGraph);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("add_pcg_node"),
+			TEXT("PCG"),
+			TEXT("Add an inner node to a PCG Graph by settings class (fuzzy name, e.g. 'SurfaceSampler', 'TransformPoints', 'StaticMeshSpawner', or full 'UPCGSurfaceSamplerSettings'). Returns the new node's index (use it with connect_pcg_nodes) plus its input/output pin labels. MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("settings_class"), TEXT("string"), TEXT("PCG settings class (fuzzy), e.g. SurfaceSampler / TransformPoints / StaticMeshSpawner / DensityFilter"), /*required*/ true)
+					.SetExample(TEXT("SurfaceSampler"))
+			}),
+		&FSmithUEPCGCommands::HandleAddPcgNode);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("connect_pcg_nodes"),
+			TEXT("PCG"),
+			TEXT("Connect two nodes in a PCG Graph. Node refs are 'input'/'output' (the graph's I/O nodes) or an inner node INDEX from read_pcg_graph. Pin labels default to the source's first output pin and the target's first input pin (usually 'Out'->'In'); the graph input node's output pin is 'Input' and the output node's input pin is 'Output'. MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("from_node"), TEXT("string"), TEXT("Source node: 'input' or an inner node index"), /*required*/ true),
+				FSmithUEToolParam(TEXT("to_node"), TEXT("string"), TEXT("Target node: 'output' or an inner node index"), /*required*/ true),
+				FSmithUEToolParam(TEXT("from_pin"), TEXT("string"), TEXT("Source output pin label (default: first output pin)"), /*required*/ false),
+				FSmithUEToolParam(TEXT("to_pin"), TEXT("string"), TEXT("Target input pin label (default: first input pin)"), /*required*/ false)
+			}),
+		&FSmithUEPCGCommands::HandleConnectPcgNodes);
 
 	Registry.Register(
 		FSmithUEToolSchema(
@@ -171,12 +286,203 @@ TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleReadPcgGraph(const TSharedPtr
 		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath));
 	}
 
+	auto NodeToJson = [](UPCGNode* Node, int32 Index) -> TSharedPtr<FJsonObject>
+	{
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetNumberField(TEXT("index"), Index);
+		Obj->SetStringField(TEXT("title"), Node ? Node->GetNodeTitle(EPCGNodeTitleType::ListView).ToString() : FString());
+		const UPCGSettings* S = Node ? Node->GetSettings() : nullptr;
+		Obj->SetStringField(TEXT("class"), S ? S->GetClass()->GetName() : FString());
+		Obj->SetArrayField(TEXT("input_pins"), PinLabels(Node ? Node->GetInputPins() : TArray<TObjectPtr<UPCGPin>>()));
+		Obj->SetArrayField(TEXT("output_pins"), PinLabels(Node ? Node->GetOutputPins() : TArray<TObjectPtr<UPCGPin>>()));
+		return Obj;
+	};
+
+	const TArray<UPCGNode*>& Nodes = Graph->GetNodes();
+
+	TArray<TSharedPtr<FJsonValue>> NodesArr;
+	for (int32 i = 0; i < Nodes.Num(); ++i)
+	{
+		NodesArr.Add(MakeShared<FJsonValueObject>(NodeToJson(Nodes[i], i)));
+	}
+
+	// Edges: walk every node's (and the input node's) output pins.
+	TArray<TSharedPtr<FJsonValue>> EdgesArr;
+	auto RefFor = [&](const UPCGNode* N) -> FString
+	{
+		if (N == Graph->GetInputNode()) { return TEXT("input"); }
+		if (N == Graph->GetOutputNode()) { return TEXT("output"); }
+		const int32 Idx = Nodes.IndexOfByKey(N);
+		return Idx != INDEX_NONE ? FString::FromInt(Idx) : TEXT("?");
+	};
+	TArray<UPCGNode*> AllNodes = Nodes;
+	AllNodes.Add(Graph->GetInputNode());
+	for (UPCGNode* N : AllNodes)
+	{
+		if (!N) { continue; }
+		for (const UPCGPin* OutPin : N->GetOutputPins())
+		{
+			if (!OutPin) { continue; }
+			for (const UPCGEdge* Edge : OutPin->Edges)
+			{
+				if (!Edge) { continue; }
+				const UPCGPin* OtherPin = Edge->GetOtherPin(OutPin);
+				if (!OtherPin || !OtherPin->Node) { continue; }
+				TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+				E->SetStringField(TEXT("from_node"), RefFor(N));
+				E->SetStringField(TEXT("from_pin"), OutPin->Properties.Label.ToString());
+				E->SetStringField(TEXT("to_node"), RefFor(OtherPin->Node));
+				E->SetStringField(TEXT("to_pin"), OtherPin->Properties.Label.ToString());
+				EdgesArr.Add(MakeShared<FJsonValueObject>(E));
+			}
+		}
+	}
+
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("name"), Graph->GetName());
 	Data->SetStringField(TEXT("path"), Graph->GetPathName());
-	Data->SetNumberField(TEXT("node_count"), Graph->GetNodes().Num());
+	Data->SetNumberField(TEXT("node_count"), Nodes.Num());
 	Data->SetBoolField(TEXT("has_input_node"), Graph->GetInputNode() != nullptr);
 	Data->SetBoolField(TEXT("has_output_node"), Graph->GetOutputNode() != nullptr);
+	// The graph's I/O nodes: connect FROM input node's output pins, TO output node's input pins.
+	if (UPCGNode* InNode = Graph->GetInputNode())
+	{
+		TSharedPtr<FJsonObject> IO = MakeShared<FJsonObject>();
+		IO->SetArrayField(TEXT("output_pins"), PinLabels(InNode->GetOutputPins()));
+		Data->SetObjectField(TEXT("input_node"), IO);
+	}
+	if (UPCGNode* OutNode = Graph->GetOutputNode())
+	{
+		TSharedPtr<FJsonObject> IO = MakeShared<FJsonObject>();
+		IO->SetArrayField(TEXT("input_pins"), PinLabels(OutNode->GetInputPins()));
+		Data->SetObjectField(TEXT("output_node"), IO);
+	}
+	Data->SetArrayField(TEXT("nodes"), NodesArr);
+	Data->SetArrayField(TEXT("edges"), EdgesArr);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleAddPcgNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("settings_class") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString GraphPath, SettingsClassName;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("settings_class"), SettingsClassName);
+
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath));
+	}
+
+	UClass* SettingsClass = ResolvePcgSettingsClass(SettingsClassName);
+	if (!SettingsClass)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Unknown PCG settings class '%s'. Try a fuzzy name like 'SurfaceSampler', 'TransformPoints', 'StaticMeshSpawner', 'DensityFilter'."), *SettingsClassName));
+	}
+
+	UPCGSettings* DefaultSettings = nullptr;
+	UPCGNode* Node = Graph->AddNodeOfType(SettingsClass, DefaultSettings);
+	if (!Node)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to add PCG node of type '%s'"), *SettingsClass->GetName()));
+	}
+	Graph->MarkPackageDirty();
+
+	const int32 NewIndex = Graph->GetNodes().IndexOfByKey(Node);
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("index"), NewIndex);
+	Data->SetStringField(TEXT("title"), Node->GetNodeTitle(EPCGNodeTitleType::ListView).ToString());
+	Data->SetStringField(TEXT("class"), SettingsClass->GetName());
+	Data->SetArrayField(TEXT("input_pins"), PinLabels(Node->GetInputPins()));
+	Data->SetArrayField(TEXT("output_pins"), PinLabels(Node->GetOutputPins()));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleConnectPcgNodes(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("from_node"), TEXT("to_node") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+
+	FString GraphPath, FromRef, ToRef, FromPin, ToPin;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("from_node"), FromRef);
+	Params->TryGetStringField(TEXT("to_node"), ToRef);
+	Params->TryGetStringField(TEXT("from_pin"), FromPin);
+	Params->TryGetStringField(TEXT("to_pin"), ToPin);
+
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath));
+	}
+
+	UPCGNode* From = ResolvePcgNode(Graph, FromRef);
+	UPCGNode* To = ResolvePcgNode(Graph, ToRef);
+	if (!From || !To)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Could not resolve node(s): from='%s' to='%s'. Use 'input'/'output' or an inner node index from read_pcg_graph."), *FromRef, *ToRef));
+	}
+
+	// Default pins: source's first output, target's first input.
+	if (FromPin.IsEmpty())
+	{
+		const TArray<TObjectPtr<UPCGPin>>& OutPins = From->GetOutputPins();
+		if (OutPins.Num() > 0 && OutPins[0]) { FromPin = OutPins[0]->Properties.Label.ToString(); }
+	}
+	if (ToPin.IsEmpty())
+	{
+		const TArray<TObjectPtr<UPCGPin>>& InPins = To->GetInputPins();
+		if (InPins.Num() > 0 && InPins[0]) { ToPin = InPins[0]->Properties.Label.ToString(); }
+	}
+
+	// Validate the pins exist (AddLabeledEdge's bool return means "broke other edges",
+	// NOT success, so we cannot rely on it — pre-check instead).
+	if (!From->GetOutputPin(FName(*FromPin)))
+	{
+		const TArray<TSharedPtr<FJsonValue>> Avail = PinLabels(From->GetOutputPins());
+		FString Labels; for (const TSharedPtr<FJsonValue>& V : Avail) { Labels += (Labels.IsEmpty() ? TEXT("") : TEXT(", ")) + V->AsString(); }
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Source node '%s' has no output pin '%s'. Available output pins: %s"), *FromRef, *FromPin, *Labels));
+	}
+	if (!To->GetInputPin(FName(*ToPin)))
+	{
+		const TArray<TSharedPtr<FJsonValue>> Avail = PinLabels(To->GetInputPins());
+		FString Labels; for (const TSharedPtr<FJsonValue>& V : Avail) { Labels += (Labels.IsEmpty() ? TEXT("") : TEXT(", ")) + V->AsString(); }
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Target node '%s' has no input pin '%s'. Available input pins: %s"), *ToRef, *ToPin, *Labels));
+	}
+
+	Graph->AddLabeledEdge(From, FName(*FromPin), To, FName(*ToPin)); // bool = "broke edges", not success
+	Graph->MarkPackageDirty();
+
+	// Confirm the edge now exists.
+	bool bConnected = false;
+	if (const UPCGPin* FP = From->GetOutputPin(FName(*FromPin)))
+	{
+		for (const UPCGEdge* Edge : FP->Edges)
+		{
+			const UPCGPin* Other = Edge ? Edge->GetOtherPin(FP) : nullptr;
+			if (Other && Other->Node == To && Other->Properties.Label == FName(*ToPin)) { bConnected = true; break; }
+		}
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("connected"), bConnected);
+	Data->SetStringField(TEXT("from_node"), FromRef);
+	Data->SetStringField(TEXT("from_pin"), FromPin);
+	Data->SetStringField(TEXT("to_node"), ToRef);
+	Data->SetStringField(TEXT("to_pin"), ToPin);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

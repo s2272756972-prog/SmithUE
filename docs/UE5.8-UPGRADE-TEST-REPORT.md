@@ -81,8 +81,8 @@
 
 ## 5. 新增功能与增强（UE5.8 分支，均已实测）
 
-### 5.1 PCG 域（新增 5 工具 → 26 域 / 237 工具）
-移植自 UE5.7 分支并适配 5.8 + 按 TOOL_SPEC 增强：`create_pcg_graph` / `read_pcg_graph`（新增，create↔read 对称）/ `find_pcg_graphs` / `spawn_pcg_volume` / `pcg_generate`。实测：建图→读回(node_count/has_input/output)→查找→在关卡 spawn PCG Volume 并 `Generate()`→按 label 重生成，全通过。`SmithUE.Build.cs` 加 `PCG` 模块、`.uplugin` 加 PCG 插件依赖。
+### 5.1 PCG 域（新增 7 工具 → 26 域）
+移植自 UE5.7 分支并适配 5.8 + 按 TOOL_SPEC 增强：`create_pcg_graph` / `read_pcg_graph`（列出图内节点+引脚+连线+ I/O 节点引脚）/ `add_pcg_node`（按 settings 类模糊名加图内节点）/ `connect_pcg_nodes`（图内连线）/ `find_pcg_graphs` / `spawn_pcg_volume` / `pcg_generate`。实测**图内建节点+连线闭环**：`input→SurfaceSampler→StaticMeshSpawner→output` 三边全 `connected:true`，read 返回完整 wiring。注意点：PCG 的 `AddLabeledEdge` 返回的是"是否打断其他边"而非成功，故 connect 改为**预检引脚存在性 + 连后校验边**（不依赖其 bool）。`SmithUE.Build.cs` 加 `PCG` 模块、`.uplugin` 加 PCG 插件依赖。
 
 ### 5.2 Graph 节点自动错开（修复"叠在一块"）
 `bp_create_node` 不传 `position` 时曾一律落 (0,0)，多节点全堆原点。现于 `CreateNode` 增 `ComputeCascadeNodePosition`：无显式位置时按现有节点包围盒向右级联（实测 5 个无位置节点落在 x=360/720/1080/1440，0 重叠）。`bp_describe_graph` 输出新增 `pos_x`/`pos_y` 便于检阅；整图整理仍可用 `auto_layout_graph`（连线感知）。
