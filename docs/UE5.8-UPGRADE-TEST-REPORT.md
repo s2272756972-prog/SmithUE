@@ -50,12 +50,14 @@
 
 ## 4. 需人工复测（重点）
 
-### 4.1 AnimGraph 绑定类工具 — 优先复测
-本次对 `UAnimGraphNode_Base::PropertyBindings` 的访问做了**反射重写**（5.8 该成员迁入引擎私有类，无法直接访问）。已确认编译通过、反射逻辑自洽，但**未做运行时往返**（需要带 Skeleton 的真实 AnimBlueprint + 动画节点，CLI 难以造数据）。请人工在真实 AnimBP 上验证：
-- `bp_bind_anim_property`（绑定成员变量到 anim 节点属性）
-- `bp_read_anim_node`（读取绑定列表 `bindings`）
-- `bp_set_anim_node_property` / `bp_expose_anim_pin`
-- `bp_add_state_machine` / `bp_add_anim_state` / `bp_add_anim_transition` / `bp_read_state_machine`
+### 4.1 AnimGraph 绑定类工具 — 已用真实骨骼验证通过 ✅
+本次对 `UAnimGraphNode_Base::PropertyBindings` 的访问做了**反射重写**（5.8 该成员迁入引擎私有类）。已用真实骨骼 `/Game/Characters/Mannequins/Meshes/SK_Mannequin` 做端到端往返验证：
+- `anim_create_blueprint` → 建 AnimBP ✅
+- `bp_create_node`（AnimGraphNode_SequencePlayer）→ 加可绑定 anim 节点 ✅
+- `bp_expose_anim_pin`（PlayRate）→ 暴露可绑定引脚 ✅
+- **`bp_bind_anim_property`（PlayRate ← Speed 变量）→ `bound:true`（反射写路径）✅**
+- `bp_read_anim_node` → 读回 `bindings:[{property:"PlayRate", property_path:["Speed"], is_bound:true, type:"Property"}]`（反射读路径，完整往返）✅
+- `bp_compile` 无错、`save_asset` 成功 ✅
 
 > 注意点：若某 anim 节点 `GetMutableBinding()` 为空，`bp_bind_anim_property` 会返回可操作错误（提示重开/重建节点）——这是 5.8 下的新边界（插件无法从外部创建 binding 子对象）。
 
@@ -77,6 +79,17 @@
 - `get_actor_property` / `set_actor_property` 用 `property_name`（不是 `property`）。
 - `bp_get_compile_errors` 用 `blueprint_path`；`find_asset` 用 `name_pattern`；`get_actor_property` 用 `actor_label`。
 
-## 5. 已通过的关键往返（摘要）
+## 5. 新增功能与增强（UE5.8 分支，均已实测）
+
+### 5.1 PCG 域（新增 5 工具 → 26 域 / 237 工具）
+移植自 UE5.7 分支并适配 5.8 + 按 TOOL_SPEC 增强：`create_pcg_graph` / `read_pcg_graph`（新增，create↔read 对称）/ `find_pcg_graphs` / `spawn_pcg_volume` / `pcg_generate`。实测：建图→读回(node_count/has_input/output)→查找→在关卡 spawn PCG Volume 并 `Generate()`→按 label 重生成，全通过。`SmithUE.Build.cs` 加 `PCG` 模块、`.uplugin` 加 PCG 插件依赖。
+
+### 5.2 Graph 节点自动错开（修复"叠在一块"）
+`bp_create_node` 不传 `position` 时曾一律落 (0,0)，多节点全堆原点。现于 `CreateNode` 增 `ComputeCascadeNodePosition`：无显式位置时按现有节点包围盒向右级联（实测 5 个无位置节点落在 x=360/720/1080/1440，0 重叠）。`bp_describe_graph` 输出新增 `pos_x`/`pos_y` 便于检阅；整图整理仍可用 `auto_layout_graph`（连线感知）。
+
+### 5.3 level_save 无弹框另存
+`level_save` 加可选 `level_path`（`UEditorLoadingAndSavingUtils::SaveMap`，无模态框）。实测把未命名关卡与 basic-env 关卡另存到 `/Game/SmithUE58Test`（.umap 落盘、`modal_active:false`）。
+
+## 6. 已通过的关键往返（摘要）
 
 Curve/CurveAtlas/RenderTarget/PhysicalMaterial 建读；Data 结构体+枚举+表+加行+读表（UserDefinedStruct 头迁移路径）；Material 建/加表达式/设属性/连线/**编译**（GetMaterialResource 路径）/图布局（CountInputs 路径）/MPC/材质函数；Blueprint 建/变量/组件/override/建节点/**batch_op**（TSharedString key 路径）/编译/health_check/**set_component_collision responses**（TSharedString 路径）；Sequencer 建/加绑定/**读绑定名**（GetBindingDisplayName 修复）；set_material_property 的 usage（SetMaterialUsage）与 blendable（BL_ 重命名）；Dialog 三件套 + 真实模态框检测/关闭。

@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **232 tools** across **25 domains**.
+> Generated from `/api/v1/tools`. Total: **237 tools** across **26 domains**.
 
 ---
 
@@ -1850,6 +1850,52 @@ Open a Blueprint in its editor and capture the SCS (Components) viewport as a PN
 
 - `bp_path` (string, required): Blueprint asset path (e.g. /Game/Blueprints/BP_MyActor)
 - `path` (string, required): Full file path for the PNG output (e.g. C:/temp/preview.png)
+
+## PCG
+
+### `create_pcg_graph`
+
+Create an empty PCG Graph asset (Procedural Content Generation). Read it back with read_pcg_graph; drive it in a level via spawn_pcg_volume. Returns already_exists=true (not an error) if the asset is already present.
+
+**Parameters:**
+
+- `name` (string, required): Asset name (no extension)
+- `path` (string, required): Content folder, e.g. /Game/PCG
+
+### `read_pcg_graph`
+
+Read a PCG Graph asset: name, path, node count, and whether it has input/output nodes. Read-only.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path, e.g. /Game/PCG/MyGraph
+
+### `find_pcg_graphs`
+
+List PCG Graph assets under /Game (optionally filtered by a name substring). Read-only.
+
+**Parameters:**
+
+- `query` (string): Optional case-insensitive name filter substring
+
+### `spawn_pcg_volume`
+
+Spawn a PCG Volume actor in the current editor level, assign a PCG Graph to its PCG Component, and generate. MUTATES the level (spawns an actor). Needs an editor world (not during PIE).
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path to assign, e.g. /Game/PCG/MyGraph
+- `label` (string): Actor label (default 'PCG_Volume')
+- `location` (object): Spawn location {x,y,z} (default origin)
+- `scale` (object): Actor scale {x,y,z} (default {20,20,5})
+
+### `pcg_generate`
+
+Force-regenerate PCG on an existing PCG Volume actor (by label) in the current editor level.
+
+**Parameters:**
+
+- `actor` (string, required): Actor label of the PCG Volume
 
 ## PIE
 

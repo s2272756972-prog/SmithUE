@@ -353,6 +353,37 @@ namespace SmithUEBpAtomicAPIHelpers
 		return FVector2D(X, Y);
 	}
 
+	FVector2D ComputeCascadeNodePosition(UEdGraph* Graph)
+	{
+		// Empty graph -> origin. Otherwise place the new node just right of the
+		// existing bounding box, staggered vertically so repeated no-position
+		// creations don't perfectly overlap. Each new node becomes the rightmost,
+		// so successive nodes cascade left-to-right (readable, non-overlapping).
+		if (!Graph || Graph->Nodes.Num() == 0)
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		int32 MaxX = MIN_int32;
+		int32 MinY = MAX_int32;
+		for (const UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node)
+			{
+				continue;
+			}
+			MaxX = FMath::Max(MaxX, Node->NodePosX);
+			MinY = FMath::Min(MinY, Node->NodePosY);
+		}
+		if (MaxX == MIN_int32)
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		const int32 Stagger = (Graph->Nodes.Num() % 8) * 96; // avoid identical Y in the same column
+		return FVector2D(static_cast<double>(MaxX) + 360.0, static_cast<double>(MinY) + Stagger);
+	}
+
 	// Internal: resolve a single (non-container) type name to PinCategory/SubCategoryObject
 	static bool ResolveSingleType(const FString& Normalized, FEdGraphPinType& OutPinType)
 	{

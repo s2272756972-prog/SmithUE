@@ -2596,6 +2596,8 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpDescribeGraph(const T
         NodeObj->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
         NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
         NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+        NodeObj->SetNumberField(TEXT("pos_x"), Node->NodePosX);
+        NodeObj->SetNumberField(TEXT("pos_y"), Node->NodePosY);
 
         // summary mode: no pins
         if (Mode != TEXT("summary"))

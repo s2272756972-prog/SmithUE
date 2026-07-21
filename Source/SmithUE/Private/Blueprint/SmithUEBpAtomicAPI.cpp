@@ -1947,6 +1947,16 @@ FString FSmithUEBpAtomicAPI::CreateNode(UBlueprint* Blueprint, UEdGraph* Graph, 
 	Graph->Modify();
 	NewNode->SetFlags(RF_Transactional);
 	NewNode->CreateNewGuid();
+	// Auto-place when no explicit position was requested. GetPositionFromJson()
+	// returns (0,0) whenever the caller omits "position", which used to pile every
+	// atomic/batch-created node at the origin (hard to review). When the requested
+	// position is the origin, cascade the node to the right of the existing graph's
+	// bounding box so nodes don't overlap. Explicit non-origin positions are honored
+	// verbatim; run auto_layout_graph afterwards for full connection-aware layout.
+	if (Position.IsNearlyZero())
+	{
+		Position = SmithUEBpAtomicAPIHelpers::ComputeCascadeNodePosition(Graph);
+	}
 	NewNode->NodePosX = FMath::RoundToInt(Position.X);
 	NewNode->NodePosY = FMath::RoundToInt(Position.Y);
 	Graph->AddNode(NewNode, false, false);

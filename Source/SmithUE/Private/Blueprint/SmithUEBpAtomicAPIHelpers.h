@@ -18,6 +18,9 @@ namespace SmithUEBpAtomicAPIHelpers
 	FString NormalizeStructPinValue(UEdGraphPin* Pin, const FString& Input);
 	UClass* ResolveClassByName(const FString& ClassName, UClass* RequiredBaseClass, TCHAR ExpectedPrefix);
 	FVector2D GetPositionFromJson(const TSharedPtr<FJsonObject>& Params);
+
+	/** Non-overlapping fallback position: right of the graph's existing bounding box, cascaded. */
+	FVector2D ComputeCascadeNodePosition(UEdGraph* Graph);
 	bool ResolvePinType(const FString& TypeName, FEdGraphPinType& OutPinType);
 	UEdGraphNode* FindNodeByGuid(UEdGraph* Graph, const FString& GuidString);
 	UEdGraphNode* ResolveNodeId(UEdGraph* Graph, const FString& GraphPath, const FString& NodeIdStr, FString& OutError);

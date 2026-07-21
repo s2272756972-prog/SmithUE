@@ -73,7 +73,8 @@ public class SmithUE : ModuleRules
 					"EnhancedInput",
 				"InputBlueprintNodes",
 					"UMG",
-					"UMGEditor"
+					"UMGEditor",
+					"PCG"
 			}
 			);
 		}

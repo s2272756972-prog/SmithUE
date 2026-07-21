@@ -35,6 +35,7 @@
 #include "Commands/SmithUELiveCodingCommands.h"
 #include "Commands/SmithUEDialogCommands.h"
 #include "Dialog/SmithUEDialogWatcher.h"
+#include "Commands/SmithUEPCGCommands.h"
 #include "UI/SSmithUEStatusIndicator.h"
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
@@ -85,6 +86,7 @@ void FSmithUEModule::StartupModule()
 	FSmithUEAssetAuditCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUELiveCodingCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEDialogCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEPCGCommands::RegisterTools(FSmithUEToolRegistry::Get());
 
 	// Arm the modal-dialog watcher so blocking editor prompts can be observed and
 	// closed via worker-safe tools even while they jam the game thread.
