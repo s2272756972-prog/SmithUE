@@ -1,0 +1,338 @@
+// Copyright 2026, 123dx-svg. MIT License.
+
+#include "Commands/SmithUEAICommands.h"
+#include "ToolRegistry/SmithUEToolRegistry.h"
+#include "ToolRegistry/SmithUEToolSchema.h"
+#include "Utils/SmithUECommonUtils.h"
+
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "UObject/Package.h"
+
+// Blackboard
+#include "BehaviorTree/BlackboardData.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Bool.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Int.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Float.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Vector.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Rotator.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Object.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Class.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_String.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Name.h"
+// Behavior Tree
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BTCompositeNode.h"
+// EQS
+#include "EnvironmentQuery/EnvQuery.h"
+// State Tree
+#include "StateTree.h"
+#include "StateTreeEditorData.h"
+#include "StateTreeState.h"
+#include "StateTreeFactory.h"
+#include "Components/StateTreeComponentSchema.h"
+
+// ---------------------------------------------------------------------------
+namespace
+{
+	UPackage* MakeAssetPackage(const FString& Path, const FString& Name, FString& OutPackagePath)
+	{
+		FString P = Path;
+		if (!P.StartsWith(TEXT("/"))) { P = TEXT("/") + P; }
+		while (P.EndsWith(TEXT("/"))) { P.RemoveAt(P.Len() - 1); }
+		OutPackagePath = P + TEXT("/") + Name;
+		return CreatePackage(*OutPackagePath);
+	}
+
+	UClass* ResolveBlackboardKeyType(const FString& Type)
+	{
+		const FString T = Type.ToLower();
+		if (T == TEXT("bool"))    { return UBlackboardKeyType_Bool::StaticClass(); }
+		if (T == TEXT("int") || T == TEXT("int32")) { return UBlackboardKeyType_Int::StaticClass(); }
+		if (T == TEXT("float"))   { return UBlackboardKeyType_Float::StaticClass(); }
+		if (T == TEXT("vector"))  { return UBlackboardKeyType_Vector::StaticClass(); }
+		if (T == TEXT("rotator")) { return UBlackboardKeyType_Rotator::StaticClass(); }
+		if (T == TEXT("object"))  { return UBlackboardKeyType_Object::StaticClass(); }
+		if (T == TEXT("class"))   { return UBlackboardKeyType_Class::StaticClass(); }
+		if (T == TEXT("string"))  { return UBlackboardKeyType_String::StaticClass(); }
+		if (T == TEXT("name"))    { return UBlackboardKeyType_Name::StaticClass(); }
+		return nullptr;
+	}
+}
+
+// ---------------------------------------------------------------------------
+void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
+{
+	// ---- Blackboard ----
+	Registry.Register(FSmithUEToolSchema(TEXT("create_blackboard"), TEXT("AI"),
+		TEXT("Create a Blackboard Data asset (UBlackboardData). Add keys with blackboard_add_key; read with read_blackboard."),
+		{ FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Asset name (convention: BB_*)"), true),
+		  FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Content folder, e.g. /Game/AI"), true) }),
+		&FSmithUEAICommands::HandleCreateBlackboard);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("blackboard_add_key"), TEXT("AI"),
+		TEXT("Add a typed key to a Blackboard Data asset. MUTATES the asset; call save_asset to persist."),
+		{ FSmithUEToolParam(TEXT("blackboard_path"), TEXT("string"), TEXT("Blackboard asset path"), true),
+		  FSmithUEToolParam(TEXT("key_name"), TEXT("string"), TEXT("Key name"), true),
+		  FSmithUEToolParam(TEXT("key_type"), TEXT("string"), TEXT("Key type"), true)
+			.SetAllowedValues({ TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("vector"), TEXT("rotator"), TEXT("object"), TEXT("class"), TEXT("string"), TEXT("name") }) }),
+		&FSmithUEAICommands::HandleBlackboardAddKey);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("read_blackboard"), TEXT("AI"),
+		TEXT("Read a Blackboard Data asset: its keys (name + type) and parent. Read-only."),
+		{ FSmithUEToolParam(TEXT("blackboard_path"), TEXT("string"), TEXT("Blackboard asset path"), true) }),
+		&FSmithUEAICommands::HandleReadBlackboard);
+
+	// ---- Behavior Tree ----
+	Registry.Register(FSmithUEToolSchema(TEXT("create_behavior_tree"), TEXT("AI"),
+		TEXT("Create a Behavior Tree asset (UBehaviorTree), optionally linking a Blackboard. Open it in the editor to author the node graph (root/composites/tasks)."),
+		{ FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Asset name (convention: BT_*)"), true),
+		  FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Content folder"), true),
+		  FSmithUEToolParam(TEXT("blackboard_path"), TEXT("string"), TEXT("Optional Blackboard asset to link"), false) }),
+		&FSmithUEAICommands::HandleCreateBehaviorTree);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("bt_set_blackboard"), TEXT("AI"),
+		TEXT("Set/replace the Blackboard asset linked to a Behavior Tree. MUTATES the asset."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("blackboard_path"), TEXT("string"), TEXT("Blackboard asset path"), true) }),
+		&FSmithUEAICommands::HandleBtSetBlackboard);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("read_behavior_tree"), TEXT("AI"),
+		TEXT("Read a Behavior Tree asset: linked blackboard + root node class. Read-only."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true) }),
+		&FSmithUEAICommands::HandleReadBehaviorTree);
+
+	// ---- EQS ----
+	Registry.Register(FSmithUEToolSchema(TEXT("create_eqs"), TEXT("AI"),
+		TEXT("Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests."),
+		{ FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Asset name (convention: EQS_*)"), true),
+		  FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Content folder"), true) }),
+		&FSmithUEAICommands::HandleCreateEqs);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("read_eqs"), TEXT("AI"),
+		TEXT("Read an EQS asset: option/generator count. Read-only."),
+		{ FSmithUEToolParam(TEXT("eqs_path"), TEXT("string"), TEXT("EQS asset path"), true) }),
+		&FSmithUEAICommands::HandleReadEqs);
+
+	// ---- State Tree ----
+	Registry.Register(FSmithUEToolSchema(TEXT("create_state_tree"), TEXT("AI"),
+		TEXT("Create a State Tree asset (UStateTree) with the StateTree Component schema, a root state, and an initial compile. Open it in the editor to author states/tasks/transitions."),
+		{ FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Asset name (convention: ST_*)"), true),
+		  FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Content folder"), true) }),
+		&FSmithUEAICommands::HandleCreateStateTree);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("read_state_tree"), TEXT("AI"),
+		TEXT("Read a State Tree asset: schema + root/sub states. Read-only."),
+		{ FSmithUEToolParam(TEXT("state_tree_path"), TEXT("string"), TEXT("State Tree asset path"), true) }),
+		&FSmithUEAICommands::HandleReadStateTree);
+}
+
+// ---------------------------------------------------------------------------
+// Blackboard
+// ---------------------------------------------------------------------------
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleCreateBlackboard(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("name"), TEXT("path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString Name, Path; Params->TryGetStringField(TEXT("name"), Name); Params->TryGetStringField(TEXT("path"), Path);
+	FString PackagePath; UPackage* Package = MakeAssetPackage(Path, Name, PackagePath);
+	if (LoadObject<UBlackboardData>(nullptr, *PackagePath)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Blackboard already exists at target path")); }
+	UBlackboardData* BB = NewObject<UBlackboardData>(Package, FName(*Name), RF_Public | RF_Standalone | RF_Transactional);
+	if (!BB) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create UBlackboardData")); }
+	FAssetRegistryModule::AssetCreated(BB);
+	BB->MarkPackageDirty();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("blackboard_path"), PackagePath);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBlackboardAddKey(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("blackboard_path"), TEXT("key_name"), TEXT("key_type") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BbPath, KeyName, KeyType;
+	Params->TryGetStringField(TEXT("blackboard_path"), BbPath); Params->TryGetStringField(TEXT("key_name"), KeyName); Params->TryGetStringField(TEXT("key_type"), KeyType);
+	UBlackboardData* BB = LoadObject<UBlackboardData>(nullptr, *BbPath);
+	if (!BB) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blackboard not found: '%s'"), *BbPath)); }
+	UClass* KeyClass = ResolveBlackboardKeyType(KeyType);
+	if (!KeyClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown key_type '%s' (bool/int/float/vector/rotator/object/class/string/name)"), *KeyType)); }
+
+	const FName KeyFName(*KeyName);
+	for (const FBlackboardEntry& E : BB->Keys) { if (E.EntryName == KeyFName) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Key '%s' already exists"), *KeyName)); } }
+
+	FBlackboardEntry Entry;
+	Entry.EntryName = KeyFName;
+	Entry.KeyType = NewObject<UBlackboardKeyType>(BB, KeyClass);
+	BB->Keys.Add(Entry);
+	BB->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("key_name"), KeyName);
+	Data->SetStringField(TEXT("key_type"), KeyClass->GetName());
+	Data->SetNumberField(TEXT("key_count"), BB->Keys.Num());
+	Data->SetStringField(TEXT("note"), TEXT("Key added in-memory; call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleReadBlackboard(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("blackboard_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BbPath; Params->TryGetStringField(TEXT("blackboard_path"), BbPath);
+	UBlackboardData* BB = LoadObject<UBlackboardData>(nullptr, *BbPath);
+	if (!BB) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blackboard not found: '%s'"), *BbPath)); }
+	TArray<TSharedPtr<FJsonValue>> Keys;
+	for (const FBlackboardEntry& E : BB->Keys)
+	{
+		TSharedPtr<FJsonObject> K = MakeShared<FJsonObject>();
+		K->SetStringField(TEXT("name"), E.EntryName.ToString());
+		K->SetStringField(TEXT("type"), E.KeyType ? E.KeyType->GetClass()->GetName() : TEXT("None"));
+		Keys.Add(MakeShared<FJsonValueObject>(K));
+	}
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("name"), BB->GetName());
+	Data->SetStringField(TEXT("parent"), BB->Parent ? BB->Parent->GetPathName() : FString());
+	Data->SetNumberField(TEXT("key_count"), Keys.Num());
+	Data->SetArrayField(TEXT("keys"), Keys);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Behavior Tree
+// ---------------------------------------------------------------------------
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("name"), TEXT("path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString Name, Path, BbPath;
+	Params->TryGetStringField(TEXT("name"), Name); Params->TryGetStringField(TEXT("path"), Path); Params->TryGetStringField(TEXT("blackboard_path"), BbPath);
+	FString PackagePath; UPackage* Package = MakeAssetPackage(Path, Name, PackagePath);
+	if (LoadObject<UBehaviorTree>(nullptr, *PackagePath)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Behavior Tree already exists at target path")); }
+	UBehaviorTree* BT = NewObject<UBehaviorTree>(Package, FName(*Name), RF_Public | RF_Standalone | RF_Transactional);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create UBehaviorTree")); }
+	if (!BbPath.IsEmpty())
+	{
+		if (UBlackboardData* BB = LoadObject<UBlackboardData>(nullptr, *BbPath)) { BT->BlackboardAsset = BB; }
+	}
+	FAssetRegistryModule::AssetCreated(BT);
+	BT->MarkPackageDirty();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bt_path"), PackagePath);
+	Data->SetStringField(TEXT("blackboard"), BT->BlackboardAsset ? BT->BlackboardAsset->GetPathName() : FString());
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtSetBlackboard(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path"), TEXT("blackboard_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath, BbPath; Params->TryGetStringField(TEXT("bt_path"), BtPath); Params->TryGetStringField(TEXT("blackboard_path"), BbPath);
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+	UBlackboardData* BB = LoadObject<UBlackboardData>(nullptr, *BbPath);
+	if (!BB) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blackboard not found: '%s'"), *BbPath)); }
+	BT->BlackboardAsset = BB;
+	BT->MarkPackageDirty();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("bt_path"), BtPath);
+	Data->SetStringField(TEXT("blackboard"), BB->GetPathName());
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleReadBehaviorTree(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath; Params->TryGetStringField(TEXT("bt_path"), BtPath);
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("name"), BT->GetName());
+	Data->SetStringField(TEXT("blackboard"), BT->BlackboardAsset ? BT->BlackboardAsset->GetPathName() : FString());
+	Data->SetStringField(TEXT("root_node"), BT->RootNode ? BT->RootNode->GetClass()->GetName() : TEXT("None (author in editor)"));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// EQS
+// ---------------------------------------------------------------------------
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleCreateEqs(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("name"), TEXT("path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString Name, Path; Params->TryGetStringField(TEXT("name"), Name); Params->TryGetStringField(TEXT("path"), Path);
+	FString PackagePath; UPackage* Package = MakeAssetPackage(Path, Name, PackagePath);
+	if (LoadObject<UEnvQuery>(nullptr, *PackagePath)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("EQS already exists at target path")); }
+	UEnvQuery* Query = NewObject<UEnvQuery>(Package, FName(*Name), RF_Public | RF_Standalone | RF_Transactional);
+	if (!Query) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create UEnvQuery")); }
+	FAssetRegistryModule::AssetCreated(Query);
+	Query->MarkPackageDirty();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("eqs_path"), PackagePath);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleReadEqs(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("eqs_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString EqsPath; Params->TryGetStringField(TEXT("eqs_path"), EqsPath);
+	UEnvQuery* Query = LoadObject<UEnvQuery>(nullptr, *EqsPath);
+	if (!Query) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("EQS not found: '%s'"), *EqsPath)); }
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("name"), Query->GetName());
+	Data->SetNumberField(TEXT("option_count"), Query->GetOptions().Num());
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// State Tree
+// ---------------------------------------------------------------------------
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleCreateStateTree(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("name"), TEXT("path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString Name, Path; Params->TryGetStringField(TEXT("name"), Name); Params->TryGetStringField(TEXT("path"), Path);
+	FString PackagePath; UPackage* Package = MakeAssetPackage(Path, Name, PackagePath);
+	if (LoadObject<UStateTree>(nullptr, *PackagePath)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("State Tree already exists at target path")); }
+
+	// Reuse the engine factory (sets EditorData + schema + root state + initial compile).
+	UStateTreeFactory* Factory = NewObject<UStateTreeFactory>();
+	Factory->SetSchemaClass(UStateTreeComponentSchema::StaticClass());
+	UObject* Obj = Factory->FactoryCreateNew(UStateTree::StaticClass(), Package, FName(*Name), RF_Public | RF_Standalone | RF_Transactional, nullptr, GWarn);
+	UStateTree* ST = Cast<UStateTree>(Obj);
+	if (!ST) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create/compile UStateTree (schema/compile error)")); }
+	FAssetRegistryModule::AssetCreated(ST);
+	ST->MarkPackageDirty();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("state_tree_path"), PackagePath);
+	Data->SetStringField(TEXT("schema"), TEXT("StateTreeComponentSchema"));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleReadStateTree(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("state_tree_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString StPath; Params->TryGetStringField(TEXT("state_tree_path"), StPath);
+	UStateTree* ST = LoadObject<UStateTree>(nullptr, *StPath);
+	if (!ST) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("State Tree not found: '%s'"), *StPath)); }
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("name"), ST->GetName());
+	TArray<TSharedPtr<FJsonValue>> States;
+	if (UStateTreeEditorData* EditorData = Cast<UStateTreeEditorData>(ST->EditorData))
+	{
+		Data->SetStringField(TEXT("schema"), EditorData->Schema ? EditorData->Schema->GetClass()->GetName() : TEXT("None"));
+		for (const UStateTreeState* Root : EditorData->SubTrees)
+		{
+			if (!Root) { continue; }
+			TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
+			S->SetStringField(TEXT("name"), Root->Name.ToString());
+			S->SetNumberField(TEXT("children"), Root->Children.Num());
+			States.Add(MakeShared<FJsonValueObject>(S));
+		}
+	}
+	Data->SetArrayField(TEXT("root_states"), States);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}

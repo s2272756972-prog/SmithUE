@@ -1,8 +1,98 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **241 tools** across **26 domains**.
+> Generated from `/api/v1/tools`. Total: **251 tools** across **27 domains**.
 
 ---
+
+## AI
+
+### `create_blackboard`
+
+Create a Blackboard Data asset (UBlackboardData). Add keys with blackboard_add_key; read with read_blackboard.
+
+**Parameters:**
+
+- `name` (string, required): Asset name (convention: BB_*)
+- `path` (string, required): Content folder, e.g. /Game/AI
+
+### `blackboard_add_key`
+
+Add a typed key to a Blackboard Data asset. MUTATES the asset; call save_asset to persist.
+
+**Parameters:**
+
+- `blackboard_path` (string, required): Blackboard asset path
+- `key_name` (string, required): Key name
+- `key_type` (string, required): Key type
+
+### `read_blackboard`
+
+Read a Blackboard Data asset: its keys (name + type) and parent. Read-only.
+
+**Parameters:**
+
+- `blackboard_path` (string, required): Blackboard asset path
+
+### `create_behavior_tree`
+
+Create a Behavior Tree asset (UBehaviorTree), optionally linking a Blackboard. Open it in the editor to author the node graph (root/composites/tasks).
+
+**Parameters:**
+
+- `name` (string, required): Asset name (convention: BT_*)
+- `path` (string, required): Content folder
+- `blackboard_path` (string): Optional Blackboard asset to link
+
+### `bt_set_blackboard`
+
+Set/replace the Blackboard asset linked to a Behavior Tree. MUTATES the asset.
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+- `blackboard_path` (string, required): Blackboard asset path
+
+### `read_behavior_tree`
+
+Read a Behavior Tree asset: linked blackboard + root node class. Read-only.
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+
+### `create_eqs`
+
+Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests.
+
+**Parameters:**
+
+- `name` (string, required): Asset name (convention: EQS_*)
+- `path` (string, required): Content folder
+
+### `read_eqs`
+
+Read an EQS asset: option/generator count. Read-only.
+
+**Parameters:**
+
+- `eqs_path` (string, required): EQS asset path
+
+### `create_state_tree`
+
+Create a State Tree asset (UStateTree) with the StateTree Component schema, a root state, and an initial compile. Open it in the editor to author states/tasks/transitions.
+
+**Parameters:**
+
+- `name` (string, required): Asset name (convention: ST_*)
+- `path` (string, required): Content folder
+
+### `read_state_tree`
+
+Read a State Tree asset: schema + root/sub states. Read-only.
+
+**Parameters:**
+
+- `state_tree_path` (string, required): State Tree asset path
 
 ## Analysis
 

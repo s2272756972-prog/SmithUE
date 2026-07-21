@@ -74,7 +74,15 @@ public class SmithUE : ModuleRules
 				"InputBlueprintNodes",
 					"UMG",
 					"UMGEditor",
-					"PCG"
+					"PCG",
+					"AIModule",
+					"AIGraph",
+					"BehaviorTreeEditor",
+					"EnvironmentQueryEditor",
+					"StateTreeModule",
+					"StateTreeEditorModule",
+					"GameplayStateTreeModule",
+					"GameplayTags"
 			}
 			);
 		}
