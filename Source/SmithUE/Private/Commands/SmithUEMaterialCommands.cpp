@@ -236,7 +236,7 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("add_material_expression"),
             TEXT("Material"),
-            TEXT("Add a material expression node to a material"),
+            TEXT("Add a material expression node. If position_x/position_y are omitted the node is auto-cascaded (no overlap). After wiring the graph, call auto_layout_graph on the material for a clean left-to-right layout (source nodes left, result-feeding node rightmost)."),
             {
                 FSmithUEToolParam(TEXT("material_path"), TEXT("string"), TEXT("Full asset path"), true),
                 FSmithUEToolParam(TEXT("expression_class"), TEXT("string"), TEXT("Expression class name, e.g. MaterialExpressionConstant3Vector"), true),
@@ -253,7 +253,7 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("connect_material_pins"),
             TEXT("Material"),
-            TEXT("Connect material expression pins. Use dest_expression_index=-1 to connect to material output."),
+            TEXT("Connect material expression pins. Use dest_expression_index=-1 to connect to the material output (dest_input_index picks BaseColor/Metallic/... — see its description). Tip: after all connections, run auto_layout_graph on the material to tidy the wiring."),
             {
                 FSmithUEToolParam(TEXT("material_path"), TEXT("string"), TEXT("Full asset path"), true),
                 FSmithUEToolParam(TEXT("source_expression_index"), TEXT("number"), TEXT("Index of source expression in Expressions array"), true),

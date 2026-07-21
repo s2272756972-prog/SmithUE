@@ -1537,7 +1537,7 @@ Get information about a material including its expressions
 
 ### `add_material_expression`
 
-Add a material expression node to a material
+Add a material expression node. If position_x/position_y are omitted the node is auto-cascaded (no overlap). After wiring the graph, call auto_layout_graph on the material for a clean left-to-right layout (source nodes left, result-feeding node rightmost).
 
 **Parameters:**
 
@@ -1548,7 +1548,7 @@ Add a material expression node to a material
 
 ### `connect_material_pins`
 
-Connect material expression pins. Use dest_expression_index=-1 to connect to material output.
+Connect material expression pins. Use dest_expression_index=-1 to connect to the material output (dest_input_index picks BaseColor/Metallic/... — see its description). Tip: after all connections, run auto_layout_graph on the material to tidy the wiring.
 
 **Parameters:**
 

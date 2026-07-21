@@ -104,6 +104,18 @@
 - UMG：`create_widget_blueprint`（CanvasPanel）+ `add_widget`（VerticalBox/Button/TextBlock）+ `set_widget_property`（Text）+ `read_widget_blueprint`（层级）通过。
 - CLI：`smithue-cli exec/search` 直接调用新工具（PCG/Dialog）全部正常——**CLI 仓库无需升级**，工具自描述、运行时经 `/api/v1/tools` 自动发现，与引擎版本无关。
 
+### 5.7 AI 域（新增 10 工具 → 27 域）
+- **黑板**：`create_blackboard` + `blackboard_add_key`（bool/int/float/vector/rotator/object/class/string/name）+ `read_blackboard`。纯数据资产，完整可编。实测建 BB + 加 4 键 + 读回 5 键（含自动 SelfActor）。
+- **行为树**：`create_behavior_tree`（可选链接黑板）+ `bt_set_blackboard` + `read_behavior_tree`。资产可在编辑器编排节点图。
+- **EQS**：`create_eqs` + `read_eqs`。
+- **状态树**：`create_state_tree`（`UStateTreeComponentSchema` + root state + 初次编译，复用 `UStateTreeFactory`）+ `read_state_tree`。实测建树、编译通过、读回 root state。
+- Build.cs 加 AIModule/AIGraph/BehaviorTreeEditor/EnvironmentQueryEditor/StateTreeModule/StateTreeEditorModule/GameplayStateTreeModule/GameplayTags；`.uplugin` 启用 StateTree/GameplayStateTree/EnvironmentQueryEditor 插件。
+- 深度节点图编排（BT 树节点、EQS 生成器/测试、状态树子状态/任务）目前在编辑器内完成；插件暴露 create/read/link 层。
+
+### 5.8 材质连线可视化 + 布局
+- `get_material_info` 新增 `edges`（表达式↔表达式、表达式→材质根输入），连线可读。
+- `auto_layout_graph` 对材质做左→右分层（实测干净链 TexCoord(0)→Panner(400)→TextureSample(800)→Multiply(1200,最右接 BaseColor)）。add_material_expression/connect_material_pins 描述已引导"接线后跑 auto_layout_graph"。
+
 ## 6. 已通过的关键往返（摘要）
 
 Curve/CurveAtlas/RenderTarget/PhysicalMaterial 建读；Data 结构体+枚举+表+加行+读表（UserDefinedStruct 头迁移路径）；Material 建/加表达式/设属性/连线/**编译**（GetMaterialResource 路径）/图布局（CountInputs 路径）/MPC/材质函数；Blueprint 建/变量/组件/override/建节点/**batch_op**（TSharedString key 路径）/编译/health_check/**set_component_collision responses**（TSharedString 路径）；Sequencer 建/加绑定/**读绑定名**（GetBindingDisplayName 修复）；set_material_property 的 usage（SetMaterialUsage）与 blendable（BL_ 重命名）；Dialog 三件套 + 真实模态框检测/关闭。
