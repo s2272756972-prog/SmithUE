@@ -1,4 +1,4 @@
-﻿// Copyright 2026, 123dx-svg. MIT License.
+// Copyright 2026, 123dx-svg. MIT License.
 
 #include "Blueprint/SmithUEBpAtomicAPI.h"
 
@@ -585,6 +585,45 @@ namespace
 			}
 		}
 		return INDEX_NONE;
+	}
+
+	/**
+	 * UE5.8: UAnimGraphNode_Base::PropertyBindings was moved into a separate
+	 * instanced UAnimGraphNodeBinding subobject (the concrete type
+	 * UAnimGraphNodeBinding_Base lives in a Private engine header, so it cannot
+	 * be included by a plugin). We reach the map purely through reflection:
+	 *   AnimNode->Binding (UPROPERTY, TObjectPtr<UAnimGraphNodeBinding>)
+	 *     -> PropertyBindings (UPROPERTY, TMap<FName, FAnimGraphNodePropertyBinding>)
+	 * The map property address is reinterpreted as the concrete TMap (layout is
+	 * the real type, so this is safe). Returns nullptr when the binding subobject
+	 * is absent (which cannot be created from a plugin without engine-private API).
+	 */
+	TMap<FName, FAnimGraphNodePropertyBinding>* GetAnimNodePropertyBindings(UAnimGraphNode_Base* AnimNode)
+	{
+		if (!AnimNode)
+		{
+			return nullptr;
+		}
+
+		FObjectProperty* BindingProp = CastField<FObjectProperty>(AnimNode->GetClass()->FindPropertyByName(TEXT("Binding")));
+		if (!BindingProp)
+		{
+			return nullptr;
+		}
+
+		UObject* BindingObj = BindingProp->GetObjectPropertyValue_InContainer(AnimNode);
+		if (!BindingObj)
+		{
+			return nullptr;
+		}
+
+		FMapProperty* MapProp = CastField<FMapProperty>(BindingObj->GetClass()->FindPropertyByName(TEXT("PropertyBindings")));
+		if (!MapProp)
+		{
+			return nullptr;
+		}
+
+		return reinterpret_cast<TMap<FName, FAnimGraphNodePropertyBinding>*>(MapProp->ContainerPtrToValuePtr<void>(BindingObj));
 	}
 
 	TArray<FString> GetOptionalAnimPinNames(UAnimGraphNode_Base* AnimNode)
@@ -2310,7 +2349,8 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBindAnimProperty(const TSha
 
 	if (VariableName.IsEmpty())
 	{
-		const bool bRemoved = AnimNode->PropertyBindings.Remove(BindingName) > 0;
+		TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode);
+		const bool bRemoved = Bindings ? (Bindings->Remove(BindingName) > 0) : false;
 		AnimNode->ReconstructNode();
 		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -2337,7 +2377,12 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBindAnimProperty(const TSha
 	Binding.PathAsText = FText::FromString(VariableName);
 	Binding.Type = EAnimGraphNodePropertyBindingType::Property;
 	Binding.bIsBound = true;
-	AnimNode->PropertyBindings.Add(BindingName, Binding);
+	TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode);
+	if (!Bindings)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("This anim node has no binding container (GetMutableBinding() is null). Reopen the AnimBlueprint or reconstruct the node, then retry bp_bind_anim_property."));
+	}
+	Bindings->Add(BindingName, Binding);
 	AnimNode->ReconstructNode();
 	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 
@@ -2399,7 +2444,9 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpReadAnimNode(const TSharedP
 	}
 
 	TArray<TSharedPtr<FJsonValue>> BindingsArray;
-	for (const TPair<FName, FAnimGraphNodePropertyBinding>& BindingPair : AnimNode->PropertyBindings)
+	static const TMap<FName, FAnimGraphNodePropertyBinding> EmptyAnimBindings;
+	const TMap<FName, FAnimGraphNodePropertyBinding>* NodeBindings = GetAnimNodePropertyBindings(AnimNode);
+	for (const TPair<FName, FAnimGraphNodePropertyBinding>& BindingPair : (NodeBindings ? *NodeBindings : EmptyAnimBindings))
 	{
 		TSharedPtr<FJsonObject> BindingObj = MakeShared<FJsonObject>();
 		BindingObj->SetStringField(TEXT("property"), BindingPair.Key.ToString());
@@ -3251,10 +3298,10 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetComponentCollision(const
 	const TSharedPtr<FJsonObject>* RespObj = nullptr;
 	if (Params->TryGetObjectField(TEXT("responses"), RespObj) && RespObj && RespObj->IsValid())
 	{
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*RespObj)->Values)
+		for (const auto& Pair : (*RespObj)->Values)
 		{
 			ECollisionChannel Channel = ECC_WorldStatic;
-			if (!ResolveCollisionChannelByName(Pair.Key, Channel))
+			if (!ResolveCollisionChannelByName(FString(*Pair.Key), Channel))
 			{
 				return FSmithUECommonUtils::CreateErrorResponse(
 					FString::Printf(TEXT("Unknown response channel '%s'"), *Pair.Key));
@@ -3784,7 +3831,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCopyGraph(const TSharedPtr<
 		// Ensure the cloned graph has the correct name (CloneGraph may auto-rename on collision)
 		if (!ClonedGraph->GetName().Equals(NewGraphName, ESearchCase::CaseSensitive))
 		{
-			ClonedGraph->Rename(*NewGraphName, TargetBP, REN_DontCreateRedirectors | REN_ForceNoResetLoaders);
+			ClonedGraph->Rename(*NewGraphName, TargetBP, REN_DontCreateRedirectors);
 		}
 
 		// Add to the appropriate graph array in the target Blueprint
@@ -3813,7 +3860,7 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpCopyGraph(const TSharedPtr<
 	if (ClonedGraph->GetOuter() != TargetBP)
 	{
 		// Recovery: force re-outer the graph back to the Blueprint
-		ClonedGraph->Rename(*ClonedGraph->GetName(), TargetBP, REN_DontCreateRedirectors | REN_ForceNoResetLoaders);
+		ClonedGraph->Rename(*ClonedGraph->GetName(), TargetBP, REN_DontCreateRedirectors);
 	}
 
 	// Count nodes for response

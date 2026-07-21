@@ -978,7 +978,7 @@ namespace GraphLayoutInternal
     {
         if (!Expr) return 100.f;
         // Custom nodes are tall due to code preview + many inputs
-        int32 NumInputs = Expr->GetInputs().Num();
+        int32 NumInputs = Expr->CountInputs();
         float BaseHeight = 80.f;
         float PerInputHeight = 28.f;
         float Height = BaseHeight + NumInputs * PerInputHeight;
@@ -1039,9 +1039,10 @@ namespace GraphLayoutInternal
         {
             UMaterialExpression* Expr = Expressions[i];
             if (!Expr) continue;
-            const TArray<FExpressionInput*> Inputs = Expr->GetInputs();
-            for (FExpressionInput* Input : Inputs)
+            const int32 NumInputsE = Expr->CountInputs();
+            for (int32 j = 0; j < NumInputsE; ++j)
             {
+                FExpressionInput* Input = Expr->GetInput(j);
                 if (Input && Input->Expression)
                 {
                     int32* PredIdx = ExprToIndex.Find(Input->Expression);
@@ -1508,7 +1509,7 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleAutoLayoutGraph(const TSha
                 if (GraphName.IsEmpty() || G->GetName().Contains(GraphName))
                     FoundGraphs.Add(G);
             }
-        }, true);
+        }, EGetObjectsFlags::IncludeNestedObjects);
 
         if (FoundGraphs.Num() == 0)
         {

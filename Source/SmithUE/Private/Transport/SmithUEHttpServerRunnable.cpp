@@ -14,6 +14,8 @@
 #include "ToolRegistry/SmithUEToolRegistry.h"
 #include "Utils/SmithUECommonUtils.h"
 #include "Utils/SmithUEDispatcher.h"
+#include "Commands/SmithUEDialogCommands.h"
+#include "Dialog/SmithUEDialogWatcher.h"
 
 namespace SmithUEHttpServer::Private
 {
@@ -239,7 +241,10 @@ namespace SmithUEHttpServer::Private
 	{
 		return CommandName.Equals(TEXT("ping"), ESearchCase::IgnoreCase) ||
 			CommandName.Equals(TEXT("list_tools"), ESearchCase::IgnoreCase) ||
-			CommandName.Equals(TEXT("get_protocol_info"), ESearchCase::IgnoreCase);
+			CommandName.Equals(TEXT("get_protocol_info"), ESearchCase::IgnoreCase) ||
+			CommandName.Equals(TEXT("get_active_dialog"), ESearchCase::IgnoreCase) ||
+			CommandName.Equals(TEXT("dismiss_active_dialog"), ESearchCase::IgnoreCase) ||
+			CommandName.Equals(TEXT("set_dialog_auto_response"), ESearchCase::IgnoreCase);
 	}
 
 	TSharedPtr<FJsonObject> DispatchWorkerSafeCommand(const FString& CommandName, const TSharedPtr<FJsonObject>& Params)
@@ -286,7 +291,7 @@ namespace SmithUEHttpServer::Private
 			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 			Data->SetStringField(TEXT("protocol_version"), TEXT("1.0"));
 			Data->SetStringField(TEXT("server_name"), TEXT("SmithUE"));
-			Data->SetStringField(TEXT("ue_version"), TEXT("5.2"));
+			Data->SetStringField(TEXT("ue_version"), TEXT("5.8"));
 
 			TArray<TSharedPtr<FJsonValue>> SupportedDomains;
 			for (const TCHAR* Domain : {TEXT("Editor"), TEXT("Asset"), TEXT("Material"), TEXT("Project"), TEXT("Blueprint")})
@@ -300,6 +305,21 @@ namespace SmithUEHttpServer::Private
 
 			Response->SetObjectField(TEXT("data"), Data);
 			return Response;
+		}
+
+		if (CommandName.Equals(TEXT("get_active_dialog"), ESearchCase::IgnoreCase))
+		{
+			return FSmithUEDialogCommands::HandleGetActiveDialog(Params);
+		}
+
+		if (CommandName.Equals(TEXT("dismiss_active_dialog"), ESearchCase::IgnoreCase))
+		{
+			return FSmithUEDialogCommands::HandleDismissActiveDialog(Params);
+		}
+
+		if (CommandName.Equals(TEXT("set_dialog_auto_response"), ESearchCase::IgnoreCase))
+		{
+			return FSmithUEDialogCommands::HandleSetDialogAutoResponse(Params);
 		}
 
 		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown command: %s"), *CommandName));
@@ -324,7 +344,7 @@ namespace SmithUEHttpServer::Private
 			return false;
 		}
 
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Object->Values)
+		for (const auto& Pair : Object->Values)
 		{
 			if (JsonValueContainsNid(Pair.Value))
 			{
@@ -442,10 +462,12 @@ namespace SmithUEHttpServer::Private
 
 			const FString Version = InServer ? InServer->PluginVersion : TEXT("unknown");
 			const bool bPIE = InServer ? static_cast<bool>(InServer->bPIEActive) : false;
+			const bool bModal = FSmithUEDialogWatcher::Get().IsModalActive();
 			Result.Body = FString::Printf(
-				TEXT("{\"ready\":true,\"version\":\"%s\",\"pie_active\":%s}"),
+				TEXT("{\"ready\":true,\"version\":\"%s\",\"pie_active\":%s,\"modal_active\":%s}"),
 				*Version,
-				bPIE ? TEXT("true") : TEXT("false"));
+				bPIE ? TEXT("true") : TEXT("false"),
+				bModal ? TEXT("true") : TEXT("false"));
 			return Result;
 		}
 

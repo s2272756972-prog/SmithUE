@@ -33,6 +33,8 @@
 #include "Commands/SmithUEUMGCommands.h"
 #include "Commands/SmithUEAssetAuditCommands.h"
 #include "Commands/SmithUELiveCodingCommands.h"
+#include "Commands/SmithUEDialogCommands.h"
+#include "Dialog/SmithUEDialogWatcher.h"
 #include "UI/SSmithUEStatusIndicator.h"
 #include "Editor.h"
 #include "Modules/ModuleManager.h"
@@ -82,6 +84,11 @@ void FSmithUEModule::StartupModule()
 	FSmithUEUMGCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUEAssetAuditCommands::RegisterTools(FSmithUEToolRegistry::Get());
 	FSmithUELiveCodingCommands::RegisterTools(FSmithUEToolRegistry::Get());
+	FSmithUEDialogCommands::RegisterTools(FSmithUEToolRegistry::Get());
+
+	// Arm the modal-dialog watcher so blocking editor prompts can be observed and
+	// closed via worker-safe tools even while they jam the game thread.
+	FSmithUEDialogWatcher::Get().Initialize();
 
 	// Register project settings detail customization (clickable URLs)
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
@@ -145,6 +152,8 @@ void FSmithUEModule::StartupModule()
 void FSmithUEModule::ShutdownModule()
 {
 	UE_LOG(LogSmithUE, Log, TEXT("SmithUE module shutting down..."));
+
+	FSmithUEDialogWatcher::Get().Shutdown();
 
 	if (UObjectInitialized() && UToolMenus::IsToolMenuUIEnabled())
 	{

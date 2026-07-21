@@ -2,6 +2,7 @@
 
 #include "ToolRegistry/SmithUEToolRegistry.h"
 
+#include "Utils/SmithUECommonUtils.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
 #include "Misc/CommandLine.h"
@@ -258,7 +259,7 @@ void FSmithUEToolRegistry::RegisterBuiltinCommands()
 				TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 				Data->SetStringField(TEXT("protocol_version"), TEXT("1.0"));
 				Data->SetStringField(TEXT("server_name"), TEXT("SmithUE"));
-				Data->SetStringField(TEXT("ue_version"), TEXT("5.2"));
+				Data->SetStringField(TEXT("ue_version"), TEXT("5.8"));
 
 				TArray<TSharedPtr<FJsonValue>> SupportedDomains;
 				for (const TCHAR* Domain : {TEXT("Editor"), TEXT("Asset"), TEXT("Material"), TEXT("Project"), TEXT("Blueprint")})

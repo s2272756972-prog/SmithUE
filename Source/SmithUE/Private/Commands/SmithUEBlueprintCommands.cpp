@@ -2755,8 +2755,8 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpBatchOp(const TShared
             }
             for (const auto& KV : OpObj->Values)
             {
-                if (!KV.Key.Equals(TEXT("op"), ESearchCase::IgnoreCase) &&
-                    !KV.Key.Equals(TEXT("atomic"), ESearchCase::IgnoreCase))
+                if (!KV.Key.ToView().Equals(TEXT("op"), ESearchCase::IgnoreCase) &&
+                    !KV.Key.ToView().Equals(TEXT("atomic"), ESearchCase::IgnoreCase))
                 {
                     OpParams->Values.Add(KV.Key, KV.Value);
                 }
@@ -3071,7 +3071,7 @@ TSharedPtr<FJsonObject> FSmithUEBlueprintCommands::HandleBpBatchOp(const TShared
         // First: copy direct op-level fields (flat format: {op:"set_default", node_id:"N5", ...})
         for (const auto& KV : OpObj->Values)
         {
-            if (!KV.Key.Equals(TEXT("op"), ESearchCase::IgnoreCase))
+            if (!KV.Key.ToView().Equals(TEXT("op"), ESearchCase::IgnoreCase))
             {
                 OpParams->Values.Add(KV.Key, KV.Value);
             }

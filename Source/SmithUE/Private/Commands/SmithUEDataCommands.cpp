@@ -12,7 +12,7 @@
 #include "EditorAssetLibrary.h"
 #include "Engine/DataTable.h"
 #include "Engine/UserDefinedEnum.h"
-#include "Engine/UserDefinedStruct.h"
+#include "StructUtils/UserDefinedStruct.h"
 #include "EdGraphSchema_K2.h"
 #include "Factories/DataTableFactory.h"
 #include "IAssetTools.h"
@@ -105,9 +105,9 @@ namespace SmithUEData
             TSharedRef<FJsonObject> ValueObject = MakeShared<FJsonObject>();
             if (FJsonObjectConverter::UStructToJsonObject(DataTable->RowStruct, RowData, ValueObject, 0, 0))
             {
-                for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : ValueObject->Values)
+                for (const auto& Field : ValueObject->Values)
                 {
-                    RowObject->SetField(Field.Key, Field.Value);
+                    RowObject->SetField(Field.Key.ToView(), Field.Value);
                 }
             }
         }
@@ -335,9 +335,9 @@ TSharedPtr<FJsonObject> FSmithUEDataCommands::HandleDataAddRow(const TSharedPtr<
     TSharedRef<FJsonObject> RowJsonObj = MakeShared<FJsonObject>();
     RowJsonObj->SetStringField(TEXT("Name"), RowNameString);
     // Copy all fields from the incoming row_data
-    for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : (*RowDataObjectPtr)->Values)
+    for (const auto& Field : (*RowDataObjectPtr)->Values)
     {
-        RowJsonObj->SetField(Field.Key, Field.Value);
+        RowJsonObj->SetField(Field.Key.ToView(), Field.Value);
     }
     
     TArray<TSharedPtr<FJsonValue>> RowArray;

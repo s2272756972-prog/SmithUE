@@ -760,13 +760,13 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleCompileMaterial(const TS
     // Collect compile errors from material resources (shader-level)
     TArray<FString> Errors;
 
-    // Check SM5 and SM6 feature levels
-    static const ERHIFeatureLevel::Type FeatureLevels[] = { ERHIFeatureLevel::SM5, ERHIFeatureLevel::SM6 };
-    for (ERHIFeatureLevel::Type FL : FeatureLevels)
+    // Check SM5 and SM6 shader platforms (UE5.7+: GetMaterialResource(ERHIFeatureLevel) deprecated -> EShaderPlatform)
+    static const EShaderPlatform ShaderPlatforms[] = { SP_PCD3D_SM5, SP_PCD3D_SM6 };
+    for (EShaderPlatform SP : ShaderPlatforms)
     {
         for (int32 QL = 0; QL < EMaterialQualityLevel::Num; ++QL)
         {
-            FMaterialResource* Resource = Material->GetMaterialResource(FL, static_cast<EMaterialQualityLevel::Type>(QL));
+            FMaterialResource* Resource = Material->GetMaterialResource(SP, static_cast<EMaterialQualityLevel::Type>(QL));
             if (Resource)
             {
                 for (const FString& Err : Resource->GetCompileErrors())
@@ -913,25 +913,24 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
     if (Params->TryGetObjectField(TEXT("usage"), UsageObj) && UsageObj && (*UsageObj).IsValid())
     {
         bool bVal = false;
-        bool bNeedsRecompile = false;
         if ((*UsageObj)->TryGetBoolField(TEXT("niagara_sprites"), bVal) && bVal)
         {
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_NiagaraSprites);
+            Material->SetMaterialUsage(MATUSAGE_NiagaraSprites);
             Changed.Add(TEXT("usage_niagara_sprites"));
         }
         if ((*UsageObj)->TryGetBoolField(TEXT("niagara_ribbons"), bVal) && bVal)
         {
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_NiagaraRibbons);
+            Material->SetMaterialUsage(MATUSAGE_NiagaraRibbons);
             Changed.Add(TEXT("usage_niagara_ribbons"));
         }
         if ((*UsageObj)->TryGetBoolField(TEXT("niagara_mesh_particles"), bVal) && bVal)
         {
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_NiagaraMeshParticles);
+            Material->SetMaterialUsage(MATUSAGE_NiagaraMeshParticles);
             Changed.Add(TEXT("usage_niagara_mesh_particles"));
         }
         if ((*UsageObj)->TryGetBoolField(TEXT("particle_sprites"), bVal) && bVal)
         {
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_ParticleSprites);
+            Material->SetMaterialUsage(MATUSAGE_ParticleSprites);
             Changed.Add(TEXT("usage_particle_sprites"));
         }
     }
@@ -940,9 +939,9 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
     FString BlendableLoc;
     if (Params->TryGetStringField(TEXT("blendable_location"), BlendableLoc) && !BlendableLoc.IsEmpty())
     {
-        if (BlendableLoc == TEXT("before_tonemapping"))      { Material->BlendableLocation = BL_BeforeTonemapping; }
-        else if (BlendableLoc == TEXT("after_tonemapping"))  { Material->BlendableLocation = BL_AfterTonemapping; }
-        else if (BlendableLoc == TEXT("before_translucency")) { Material->BlendableLocation = BL_BeforeTranslucency; }
+        if (BlendableLoc == TEXT("before_tonemapping"))      { Material->BlendableLocation = BL_SceneColorAfterDOF; }
+        else if (BlendableLoc == TEXT("after_tonemapping"))  { Material->BlendableLocation = BL_SceneColorAfterTonemapping; }
+        else if (BlendableLoc == TEXT("before_translucency")) { Material->BlendableLocation = BL_SceneColorBeforeDOF; }
         else if (BlendableLoc == TEXT("replacing_tonemapper")) { Material->BlendableLocation = BL_ReplacingTonemapper; }
         else if (BlendableLoc == TEXT("ssr_input"))          { Material->BlendableLocation = BL_SSRInput; }
         else

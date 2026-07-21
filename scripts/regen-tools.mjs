@@ -4,7 +4,8 @@
  * Regenerates TOOLS.md from the live /api/v1/tools endpoint.
  *
  * Usage:  node scripts/regen-tools.mjs
- * Requires: UE Editor running with SmithUE plugin loaded (AIScript project).
+ * Requires: UE Editor running with SmithUE plugin loaded (any host project).
+ *           Optionally set SMITHUE_PROJECT=<name> or SMITHUE_PORT=<port>.
  */
 
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
@@ -21,8 +22,10 @@ const REPO_ROOT = resolve(__dirname, '..');
 // ---------------------------------------------------------------------------
 
 /**
- * Scans %LOCALAPPDATA%\.smithue\*.port, filters for project_name === 'AIScript',
- * and returns the port from the most recently started instance.
+ * Scans %LOCALAPPDATA%\.smithue\*.port and returns the port of the most recently
+ * started instance. Host-project-agnostic: the plugin can be embedded in any host
+ * project (see AGENTS.md — do not hardcode the host project name). Optionally
+ * filter by env SMITHUE_PROJECT (matches project_name) when multiple editors run.
  */
 function discoverPort() {
   const overridePort = Number(process.env.SMITHUE_PORT);
@@ -30,19 +33,21 @@ function discoverPort() {
     return overridePort;
   }
 
+  const wantProject = process.env.SMITHUE_PROJECT; // optional filter
   const smithueDir = join(process.env.LOCALAPPDATA, '.smithue');
   let best = null;
   for (const f of readdirSync(smithueDir).filter(x => x.endsWith('.port'))) {
     try {
       const data = JSON.parse(readFileSync(join(smithueDir, f), 'utf8'));
-      if (data.project_name === 'AIScript') {
-        if (!best || data.started_at > best.started_at) best = data;
-      }
+      if (wantProject && data.project_name !== wantProject) continue;
+      if (!best || data.started_at > best.started_at) best = data;
     } catch { /* skip malformed */ }
   }
   if (!best) {
     throw new Error(
-      'No AIScript port file found — is the UE editor running with SmithUE loaded?'
+      wantProject
+        ? `No port file for project '${wantProject}' — is that UE editor running with SmithUE loaded?`
+        : 'No SmithUE port file found — is a UE editor running with SmithUE loaded? (set SMITHUE_PORT or SMITHUE_PROJECT to disambiguate)'
     );
   }
   return best.port;

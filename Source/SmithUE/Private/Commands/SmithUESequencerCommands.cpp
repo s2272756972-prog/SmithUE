@@ -29,9 +29,33 @@
 #include "IAssetTools.h"
 #include "MovieSceneBinding.h"
 #include "MovieSceneSpawnable.h"
+#include "MovieScenePossessable.h"
 
 namespace SmithUESequencer
 {
+    /**
+     * UE5.7+: FMovieSceneBinding::GetName() is deprecated and returns a stale/empty
+     * string (binding display names moved to FMovieScenePossessable/FMovieSceneSpawnable).
+     * Resolve the display name from the possessable/spawnable that owns the binding GUID.
+     */
+    FString GetBindingDisplayName(UMovieScene* MovieScene, const FMovieSceneBinding& Binding)
+    {
+        if (!MovieScene)
+        {
+            return FString();
+        }
+        const FGuid Guid = Binding.GetObjectGuid();
+        if (const FMovieScenePossessable* Possessable = MovieScene->FindPossessable(Guid))
+        {
+            return Possessable->GetName();
+        }
+        if (const FMovieSceneSpawnable* Spawnable = MovieScene->FindSpawnable(Guid))
+        {
+            return Spawnable->GetName();
+        }
+        return FString();
+    }
+
     UWorld* GetEditorWorld()
     {
         return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -63,9 +87,9 @@ namespace SmithUESequencer
 
     FGuid FindBindingGuid(UMovieScene* MovieScene, const FString& BindingName)
     {
-        for (const FMovieSceneBinding& Binding : MovieScene->GetBindings())
+        for (const FMovieSceneBinding& Binding : AsConst(*MovieScene).GetBindings())
         {
-            if (Binding.GetName() == BindingName)
+            if (GetBindingDisplayName(MovieScene, Binding) == BindingName)
             {
                 return Binding.GetObjectGuid();
             }
@@ -223,10 +247,10 @@ TSharedPtr<FJsonObject> FSmithUESequencerCommands::HandleSeqRead(const TSharedPt
 
     // Bindings
     TArray<TSharedPtr<FJsonValue>> BindingsArray;
-    for (const FMovieSceneBinding& Binding : MovieScene->GetBindings())
+    for (const FMovieSceneBinding& Binding : AsConst(*MovieScene).GetBindings())
     {
         TSharedPtr<FJsonObject> BindingObj = MakeShared<FJsonObject>();
-        BindingObj->SetStringField(TEXT("name"), Binding.GetName());
+        BindingObj->SetStringField(TEXT("name"), SmithUESequencer::GetBindingDisplayName(MovieScene, Binding));
         BindingObj->SetStringField(TEXT("guid"), Binding.GetObjectGuid().ToString());
 
         TArray<TSharedPtr<FJsonValue>> TracksArray;
@@ -267,9 +291,9 @@ TSharedPtr<FJsonObject> FSmithUESequencerCommands::HandleSeqAddBinding(const TSh
     if (!MovieScene) return FSmithUECommonUtils::CreateErrorResponse(TEXT("No MovieScene"));
 
     // Check if already bound
-    for (const FMovieSceneBinding& Binding : MovieScene->GetBindings())
+    for (const FMovieSceneBinding& Binding : AsConst(*MovieScene).GetBindings())
     {
-        if (Binding.GetName() == ActorLabel)
+        if (SmithUESequencer::GetBindingDisplayName(MovieScene, Binding) == ActorLabel)
         {
             TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
             Data->SetStringField(TEXT("binding_name"), ActorLabel);

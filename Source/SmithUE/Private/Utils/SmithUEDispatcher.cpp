@@ -13,7 +13,7 @@
 /** Returns true if the engine is currently in a state where StaticLoadObject / StaticFindObject is illegal. */
 static bool IsInUnsafeObjectState()
 {
-	return GIsSavingPackage || IsGarbageCollecting();
+	return UE::IsSavingPackage() || IsGarbageCollecting();
 }
 
 FSmithUEDispatcher::FSmithUEDispatcher()

@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **229 tools** across **24 domains**.
+> Generated from `/api/v1/tools`. Total: **232 tools** across **25 domains**.
 
 ---
 
@@ -961,6 +961,28 @@ List all breakpoints in a Blueprint with their graph, node GUID, title, and enab
 **Parameters:**
 
 - `bp_path` (string, required): Blueprint asset path
+
+## Dialog
+
+### `get_active_dialog`
+
+Report whether a blocking modal editor dialog is currently open (title/type), the armed auto-response mode, and how many dialogs SmithUE has auto-dismissed. WORKER-SAFE: this still responds while a modal dialog has jammed the game thread. Read-only, no mutation.
+
+### `dismiss_active_dialog`
+
+Close a modal editor dialog that is blocking the game thread (e.g. an unexpected 'Save As'/confirm prompt). WORKER-SAFE. success = QUEUED, not finished: the close is applied on the next modal-loop tick; poll get_active_dialog (modal_active=false) to confirm. response=cancel (default) reliably destroys/closes the window; response=accept is BEST-EFFORT (focus + Enter = default action) and falls back to close if Enter does not dismiss it.
+
+**Parameters:**
+
+- `response` (string): How to respond: 'cancel' (default, reliably closes) or 'accept' (best-effort default action)
+
+### `set_dialog_auto_response`
+
+Arm a persistent auto-responder so ANY modal dialog that opens is answered automatically (prevents automation from hanging on unexpected prompts). WORKER-SAFE — arm this BEFORE running tools that might pop a modal (e.g. level_save on an unsaved level). mode=off (default, disarmed) | cancel (reliably close every modal) | accept (best-effort default action, falls back to close).
+
+**Parameters:**
+
+- `mode` (string, required): Auto-response mode: 'off' (disarm), 'cancel' (auto-close every modal), or 'accept' (best-effort default action)
 
 ## Editor
 
