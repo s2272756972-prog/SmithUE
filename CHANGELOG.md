@@ -1,5 +1,31 @@
 # SmithUE Changelog
 
+## v1.16.0（UE5.8，2026-07-22）
+
+### 升级到 Unreal Engine 5.8
+- **API 兼容适配**（详见 [docs/UE5.8-UPGRADE-TEST-REPORT.md](docs/UE5.8-UPGRADE-TEST-REPORT.md)）：
+  - `UMaterialExpression::GetInputs()` → `CountInputs()` + `GetInput(i)`；`GetMaterialResource(ERHIFeatureLevel)` → `GetMaterialResource(EShaderPlatform)`（SP_PCD3D_SM5/SM6）。
+  - `#include "Engine/UserDefinedStruct.h"` → `StructUtils/UserDefinedStruct.h`。
+  - `FJsonObject::Values` 的 key 变为 `UE::TSharedString<TCHAR>`（`.ToView()` 适配）。
+  - `UAnimGraphNode_Base::PropertyBindings` 迁入引擎私有类 → 纯反射访问（不碰私有头）。
+  - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
+- **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
+
+### 新增域与工具（→ 251 工具 / 27 域）
+- **AI 域（10）**：`create_blackboard`/`blackboard_add_key`/`read_blackboard`、`create_behavior_tree`/`bt_set_blackboard`/`read_behavior_tree`、`create_eqs`/`read_eqs`、`create_state_tree`/`read_state_tree`。
+- **PCG 域（7）**：`create_pcg_graph`/`read_pcg_graph`/`add_pcg_node`/`connect_pcg_nodes`/`find_pcg_graphs`/`spawn_pcg_volume`/`pcg_generate`。
+- **Dialog 域（3，worker-safe）**：`get_active_dialog`/`dismiss_active_dialog`/`set_dialog_auto_response`——基于 `FSlateApplication::OnModalLoopTickEvent`，模态框卡死 game thread 期间仍能识别与关闭弹窗；`/ready` 加 `modal_active`。
+- **蓝图接口**：`create_blueprint_interface` + `bp_implement_interface`。
+
+### 优化与修复
+- **节点防重叠**：Material/MaterialFunction 表达式、PCG 节点、Blueprint 节点无显式坐标时自动错开；`bp_describe_graph` 加 `pos_x/pos_y`，`get_material_info` 加连线 `edges`；`auto_layout_graph` 新增 PCGGraph 分支。
+- **5.8 Substrate**：可创建 `UMaterialExpressionSubstrate*` 节点；`connect_material_pins` `dest_input_index=8` → `FrontMaterial`（项目 `r.Substrate=1` 时生效）。
+- **Niagara**：`niagara_add_emitter` 修复 5.8 模板路径（CompletelyEmpty/Fountain 回退）。
+- **DataTable**：`data_add_row` 修复整表覆盖 bug（改为追加）；去掉逐行自动保存（避免流送 ensure，更快）。
+- **level_save**：新增可选 `level_path`，用 `UEditorLoadingAndSavingUtils::SaveMap` 免弹框另存。
+- **regen-tools.mjs**：端口发现改为宿主工程无关（支持 `SMITHUE_PROJECT`/`SMITHUE_PORT`）。
+- 宿主 target 构建设置对齐 5.8（`BuildSettingsVersion.Latest` + `IncludeOrderVersion.Latest`）。
+
 ## v1.15.0（UE5.2，2026-07-03）
 
 ### 新增：AnimGraph Phase 2 状态机编写工具

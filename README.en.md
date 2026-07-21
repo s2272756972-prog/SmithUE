@@ -50,13 +50,13 @@ npx smithue-cli list
 
 ## Quick Start
 
-1. Clone into `{YourProject}/Plugins/` on branch `UE5.2`:
+1. Clone into `{YourProject}/Plugins/` on branch `UE5.8`:
    ```bash
    cd {YourProject}/Plugins
-   git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+   git clone -b UE5.8 https://github.com/123dx-svg/SmithUE.git
    ```
 
-2. Build your project with Unreal Engine 5.2.
+2. Build your project with Unreal Engine 5.8.
 
 3. Launch the editor. SmithUE automatically starts the HTTP server and assigns a dynamic port.
 
@@ -86,14 +86,14 @@ AI Tool (OpenCode / Claude Code / Cline / GitHub Copilot)
      ↕ smithue-cli (npx smithue-cli exec/list/search/status)
 SmithUE UE5 Plugin (HTTP :dynamic port)
      ↕ UE Reflection API
-Unreal Engine 5.2 Editor
+Unreal Engine 5.8 Editor
 ```
 
 ---
 
 ## Command Reference
 
-SmithUE provides **229 tools** organized across **24 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **251 tools** organized across **27 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
 ### Domain Overview
 
@@ -162,6 +162,17 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 ## Changelog
 
 > Full history in [CHANGELOG.md](CHANGELOG.md).
+
+### v1.16.0 (UE5.8, 2026-07-22)
+- **Upgraded to Unreal Engine 5.8**: API compatibility (material `CountInputs`/`GetMaterialResource(EShaderPlatform)`, `StructUtils/UserDefinedStruct.h`, JSON key `TSharedString`, AnimGraph binding via reflection, scoped `EAutomationTestFlags`, `.uplugin` `PlatformAllowList`, ...), zero deprecation warnings. See [docs/UE5.8-UPGRADE-TEST-REPORT.md](docs/UE5.8-UPGRADE-TEST-REPORT.md).
+- **New AI domain (10 tools)**: Blackboard (create/add-key/read), Behavior Tree (create/link-blackboard/read), EQS (create/read), State Tree (create with ComponentSchema + compile / read).
+- **New PCG domain (7 tools)**: create PCG graph + in-graph node authoring (`add_pcg_node`/`connect_pcg_nodes`) + generate + level Volume.
+- **New Dialog domain (3 tools, worker-safe)**: detect & respond to blocking modal editor dialogs (e.g. `level_save`'s "Save As") even while a modal has jammed the game thread.
+- **Blueprint Interface**: `create_blueprint_interface` + `bp_implement_interface`.
+- **Anti-overlap node placement + auto-layout**: Material/MaterialFunction/PCG/Blueprint nodes auto-cascade on create; `auto_layout_graph` gains a PCG branch; `get_material_info` returns wiring `edges`.
+- **UE5.8 Substrate**: can create `SubstrateSlabBSDF` etc.; `connect_material_pins` supports `dest_input_index=8` (FrontMaterial).
+- **Fixes**: Niagara emitter template path (5.8), DataTable multi-row append, `level_save` `level_path` for dialog-free Save-As.
+- **251 tools / 27 domains** total.
 
 ### v1.15.0 (UE5.2, 2026-07-03)
 - **AnimGraph editing tools**: added 8 tools for anim-node property edits, optional pin exposure, member-variable bindings, anim-node reads, and state-machine / state / transition authoring with state-machine read-back.

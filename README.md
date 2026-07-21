@@ -50,13 +50,13 @@ npx smithue-cli list
 
 ## 快速入门
 
-1. 将仓库克隆到项目的 `Plugins/` 目录，并切换到 `UE5.2` 分支：
+1. 将仓库克隆到项目的 `Plugins/` 目录，并切换到 `UE5.8` 分支：
    ```bash
    cd {YourProject}/Plugins
-   git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+   git clone -b UE5.8 https://github.com/123dx-svg/SmithUE.git
    ```
 
-2. 使用虚幻引擎 5.2 构建项目（首次编译约 50 秒）。
+2. 使用虚幻引擎 5.8 构建项目（首次编译约 50 秒）。
 
 3. 启动编辑器。SmithUE 将自动启动 HTTP 服务器并分配动态端口。
 
@@ -109,14 +109,14 @@ AI 工具 (OpenCode / Claude Code / Cline / GitHub Copilot)
      ↕ smithue-cli (npx smithue-cli exec/list/search/status)
 SmithUE UE5 插件 (HTTP :动态端口)
      ↕ UE 反射 API
-虚幻引擎 5.2 编辑器
+虚幻引擎 5.8 编辑器
 ```
 
 ---
 
 ## 命令参考
 
-SmithUE 提供了分布在 **24 个功能域** 中的 **229 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **27 个功能域** 中的 **251 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 
@@ -182,6 +182,17 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 ## 更新日志
 
 > 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+
+### v1.16.0（UE5.8，2026-07-22）
+- **升级到 Unreal Engine 5.8**：API 兼容适配（材质表达式 `CountInputs`/`GetMaterialResource(EShaderPlatform)`、`StructUtils/UserDefinedStruct.h`、JSON key `TSharedString`、AnimGraph 绑定反射、`EAutomationTestFlags` scoped、`.uplugin` `PlatformAllowList` 等），弃用告警清零。详见 [docs/UE5.8-UPGRADE-TEST-REPORT.md](docs/UE5.8-UPGRADE-TEST-REPORT.md)。
+- **新增 AI 域（10 工具）**：黑板（建/加键/读）、行为树（建/链黑板/读）、EQS（建/读）、状态树（建+ComponentSchema+编译/读）。
+- **新增 PCG 域（7 工具）**：PCG 图创建 + 图内节点/连线（`add_pcg_node`/`connect_pcg_nodes`）+ 生成 + 关卡 Volume。
+- **新增 Dialog 域（3 工具，worker-safe）**：识别并响应阻塞式编辑器模态框（如 `level_save` 的"另存为"），模态卡死 game thread 期间仍可用。
+- **蓝图接口**：`create_blueprint_interface` + `bp_implement_interface`。
+- **节点防重叠 + 自动布局**：Material/MaterialFunction/PCG/Blueprint 新建节点自动错开；`auto_layout_graph` 新增 PCG 分支；`get_material_info` 返回连线 `edges`。
+- **5.8 新材质系统 Substrate**：可创建 `SubstrateSlabBSDF` 等节点，`connect_material_pins` 支持 `dest_input_index=8`（FrontMaterial）。
+- **修复**：Niagara emitter 模板路径（5.8）、DataTable 多行追加、`level_save` 支持 `level_path` 免弹框另存。
+- 共 **251 工具 / 27 域**。
 
 ### v1.13.0（UE5.2，2026-06-26）
 - **SKILL 漂移检测**：每次环境探针后对比本地已部署 `smithue-control/SKILL.md` 与已安装 CLI 自带 bundle，结果写入 `LogSmithUE`（Unknown / NotDeployed / Stale / Synced）。

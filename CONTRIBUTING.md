@@ -28,7 +28,7 @@ A good bug report includes:
 - **What command was used**, for example, `create_material_instance`
 - **What happened**, for example, "Got error: Missing parameter 'parent'"
 - **What you expected**, for example, "A new material instance created in /Game/Materials"
-- **Your UE version**, for example, UE 5.2
+- **Your UE version**, for example, UE 5.8
 
 You don't need to provide code or a reproduction project. A clear description is enough.
 
@@ -77,7 +77,7 @@ For runtime operation of the editor (not development), the `smithue-control` ski
 
 To develop and compile the SmithUE plugin, you need:
 
-- Unreal Engine 5.2 installed
+- Unreal Engine 5.8 installed
 - Visual Studio 2022 with the "Game development with C++" workload
 - Node.js is only required if you are developing the separate `smithue-cli` repo; it is not needed for this plugin repo
 - Git for cloning the repository
@@ -85,7 +85,7 @@ To develop and compile the SmithUE plugin, you need:
 ### Getting Started
 
 ```bash
-git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+git clone -b UE5.8 https://github.com/123dx-svg/SmithUE.git
 cd SmithUE
 ```
 
@@ -193,9 +193,9 @@ curl -X POST http://localhost:<dynamic-port>/api/v1/execute -H "Content-Type: ap
 - **Response Format**: All handlers must return a JSON object via `FSmithUECommonUtils::CreateSuccessResponse(Data)` or `CreateErrorResponse(Message)`. The final envelope will have `status: "success"|"error"` and `data: {...}`.
 - **Logging**: Use the `SMITHUE_LOG` macro for consistent logging within the plugin.
 - **Validation**: Always validate parameters at the start of your handler. Return clear error messages for invalid or missing inputs.
-- **Categories**: Commands are organized into 23 domains (Blueprint, Material, Niagara, Asset, Analysis, Level, Environment, PIE, Editor, Data, Observation, Interaction, Animation, Viewport, Sequencer, Input, System, Project, Curve, UMG, Debug, RenderTarget, Physics). New domains may be added when 3 or more related commands form a distinct group.
+- **Categories**: Commands are organized into 27 domains (Blueprint, Material, Niagara, Asset, Analysis, Level, Environment, PIE, Editor, Data, Observation, Interaction, Animation, Viewport, Sequencer, Input, System, Project, Curve, UMG, Debug, RenderTarget, Physics, Dialog, PCG, AI, LiveCoding). New domains may be added when 3 or more related commands form a distinct group.
 - **Full Reference**: See [TOOLS.md](TOOLS.md) for the complete tool reference with parameter schemas.
-- **Compatibility**: Target Unreal Engine 5.2 only. Avoid using APIs introduced in 5.3 or later.
+- **Compatibility**: Target Unreal Engine 5.8 (this branch). Avoid using APIs introduced after 5.8.
 
 ### Example: Adding "list_actors"
 

@@ -28,7 +28,7 @@ SmithUE 的成长离不开社区的贡献。**即使你不会写代码，也可�
 - **使用的命令**，例如：`create_material_instance`
 - **发生的情况**，例如：报错 “Missing parameter 'parent'”
 - **你的预期结果**，例如：在 /Game/Materials 下创建一个新的材质实例
-- **你的 UE 版本**，例如：UE 5.2
+- **你的 UE 版本**，例如：UE 5.8
 
 你不需要提供代码或复现项目。清晰的文字描述就足够了。
 
@@ -83,7 +83,7 @@ AI 编码助手（OpenCode、Claude Code、Cline 等）应读取仓库根目录�
 ### 快速开始
 
 ```bash
-git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+git clone -b UE5.8 https://github.com/123dx-svg/SmithUE.git
 cd SmithUE
 ```
 

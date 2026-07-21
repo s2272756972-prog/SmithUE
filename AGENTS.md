@@ -2,11 +2,11 @@
 
 > 给 AI 代理 / 贡献者。动手前读本文件;新增/改工具前必读 [docs/spec/](docs/spec/) 与 [CONTRIBUTING.md](CONTRIBUTING.md)。
 >
-> 占位符约定(与 README / CONTRIBUTING 一致):`{EngineRoot}` = UE 5.2 安装根、`{ProjectRoot}` = 宿主工程根目录、`{Project}` = 宿主工程名。本仓库**当前**嵌于 AIScript 工程(故 `{Project}` = `AIScript`),但插件可被任意宿主工程复用,**勿把绝对路径写死进代码或文档**。
+> 占位符约定(与 README / CONTRIBUTING 一致):`{EngineRoot}` = UE 5.8 安装根、`{ProjectRoot}` = 宿主工程根目录、`{Project}` = 宿主工程名。本仓库**当前**嵌于 MassDemo 工程(故 `{Project}` = `MassDemo`),但插件可被任意宿主工程复用,**勿把绝对路径写死进代码或文档**。
 
 ## 这是什么 / 仓库边界(最易踩错)
 
-- 本目录是 **SmithUE 插件**(C++,UE 5.2)的**独立 git 仓库**:remote `123dx-svg/SmithUE`,**默认分支 `UE5.2`(不是 main)**。
+- 本目录是 **SmithUE 插件**(C++,UE 5.8)的**独立 git 仓库**:remote `123dx-svg/SmithUE`,**本分支为 `UE5.8`**(仓库另有 `UE5.2` 历史分支)。
 - 插件嵌在宿主工程内:`{ProjectRoot}\Plugins\SmithUE`;宿主工程为 `{ProjectRoot}\{Project}.uproject`。
 - **消费端 `smithue-cli` 是另一个独立仓库**(单独 clone):remote `123dx-svg/smithue-cli`,分支 `main`,TypeScript/npm,**已发布 npm 包 <https://www.npmjs.com/package/smithue-cli>**。改 CLI 去那个仓库,别在这里找。
 - 插件 ↔ CLI 走 HTTP JSON,**动态端口**(端口文件 `%LOCALAPPDATA%\.smithue\<pid>.port`,**不是固定 13721**——CONTRIBUTING 里的 13721 仅为示例)。两者**独立版本号,禁止互相比较**。
@@ -20,7 +20,7 @@ dotnet "{EngineRoot}\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll"
 # 之后重新启动编辑器即重新加载插件
 ```
 
-- 编译目标是 **`{Project}Editor`**(宿主工程 target,当前环境即 `AIScriptEditor`),不是 "SmithUE"。
+- 编译目标是 **`{Project}Editor`**(宿主工程 target,当前环境即 `MassDemoEditor`),不是 "SmithUE"。
 - UBT 误报 "Target is up to date" 不重编时 → 删 `{ProjectRoot}\Intermediate\Build\Win64\x64\{Project}Editor\ActionHistory.bin` 强制重建。
 
 ## 验证工具(编辑器运行后)
