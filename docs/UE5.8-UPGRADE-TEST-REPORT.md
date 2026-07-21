@@ -90,6 +90,20 @@
 ### 5.3 level_save 无弹框另存
 `level_save` 加可选 `level_path`（`UEditorLoadingAndSavingUtils::SaveMap`，无模态框）。实测把未命名关卡与 basic-env 关卡另存到 `/Game/SmithUE58Test`（.umap 落盘、`modal_active:false`）。
 
+### 5.4 节点不再"聚在一块"（Material / MaterialFunction / PCG）
+- `add_material_expression` / `add_mf_expression`：无显式坐标时按已有节点数**列式错开**（实测 5 节点 (-450,-300..220) 5/5 不重叠）；`get_material_info` 的 `position:{x,y}` 可检阅。
+- `add_pcg_node`：`SetNodePosition` 左→右级联。
+- `auto_layout_graph` **新增 PCGGraph 分支**（`LayoutPcgGraph`，按 input 节点最长路径分层，写 `UPCGNode::SetNodePosition`）——实测 6 节点 PCG 图 `asset_type:"PCGGraph"` 布局成功。Material/Blueprint 分支照旧。
+
+### 5.5 UE5.8 新材质系统 Substrate（可用）
+- 引擎默认 `r.Substrate=0`（MassDemo 未开），但新工程模板会开。SmithUE 的 `ResolveExpressionClass` 可直接创建 25 个 `UMaterialExpressionSubstrate*` 节点（实测 `SubstrateSlabBSDF`/`SubstrateShadingModels` 创建成功）。
+- 补齐**根输入映射**：`connect_material_pins` 的 `dest_input_index=8` → `UMaterialEditorOnlyData::FrontMaterial`（Substrate 单一根输入）。项目开 `r.Substrate=1` 时生效。
+
+### 5.6 综合应用实测
+- 材质：Material（5 表达式+连线+编译）+ MaterialFunction（3 节点）+ MaterialInstance（继承）联动通过。
+- UMG：`create_widget_blueprint`（CanvasPanel）+ `add_widget`（VerticalBox/Button/TextBlock）+ `set_widget_property`（Text）+ `read_widget_blueprint`（层级）通过。
+- CLI：`smithue-cli exec/search` 直接调用新工具（PCG/Dialog）全部正常——**CLI 仓库无需升级**，工具自描述、运行时经 `/api/v1/tools` 自动发现，与引擎版本无关。
+
 ## 6. 已通过的关键往返（摘要）
 
 Curve/CurveAtlas/RenderTarget/PhysicalMaterial 建读；Data 结构体+枚举+表+加行+读表（UserDefinedStruct 头迁移路径）；Material 建/加表达式/设属性/连线/**编译**（GetMaterialResource 路径）/图布局（CountInputs 路径）/MPC/材质函数；Blueprint 建/变量/组件/override/建节点/**batch_op**（TSharedString key 路径）/编译/health_check/**set_component_collision responses**（TSharedString 路径）；Sequencer 建/加绑定/**读绑定名**（GetBindingDisplayName 修复）；set_material_property 的 usage（SetMaterialUsage）与 blendable（BL_ 重命名）；Dialog 三件套 + 真实模态框检测/关闭。

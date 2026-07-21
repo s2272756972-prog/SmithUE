@@ -373,8 +373,16 @@ TSharedPtr<FJsonObject> FSmithUEMaterialFunctionCommands::HandleAddMfExpression(
     }
 
     double PosX = 0.0, PosY = 0.0;
-    Params->TryGetNumberField(TEXT("position_x"), PosX);
-    Params->TryGetNumberField(TEXT("position_y"), PosY);
+    const bool bHasX = Params->TryGetNumberField(TEXT("position_x"), PosX);
+    const bool bHasY = Params->TryGetNumberField(TEXT("position_y"), PosY);
+    if (!bHasX && !bHasY)
+    {
+        // Cascade in columns to the left so nodes don't stack at (0,0); run
+        // auto_layout_graph afterwards for a clean connection-aware layout.
+        const int32 Count = Func->GetExpressions().Num();
+        PosX = -450.0 - static_cast<double>(Count / 6) * 350.0;
+        PosY = -300.0 + static_cast<double>(Count % 6) * 130.0;
+    }
 
     UMaterialExpression* NewExpr = NewObject<UMaterialExpression>(Func, ExprClass);
     if (!NewExpr)

@@ -31,6 +31,10 @@
 #include "EdGraph/EdGraphPin.h"
 #include "FileHelpers.h"
 #include "Materials/MaterialExpression.h"
+#include "PCGGraph.h"
+#include "PCGNode.h"
+#include "PCGPin.h"
+#include "PCGEdge.h"
 #include "Misc/PackageName.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Engine/Blueprint.h"
@@ -1417,6 +1421,64 @@ namespace GraphLayoutInternal
         }
         return NumNodes;
     }
+
+    /** Layered left->right layout for a PCG graph (UPCGNode), by longest-path depth from the input node. */
+    int32 LayoutPcgGraph(UPCGGraph* Graph, float SpacingX, float SpacingY)
+    {
+#if WITH_EDITOR
+        if (!Graph) { return 0; }
+
+        TArray<UPCGNode*> AllNodes = Graph->GetNodes();
+        if (UPCGNode* In = Graph->GetInputNode()) { AllNodes.Add(In); }
+        if (UPCGNode* Out = Graph->GetOutputNode()) { AllNodes.Add(Out); }
+        if (AllNodes.Num() == 0) { return 0; }
+
+        // Depth = longest path from the input node following output edges (simple relaxation).
+        TMap<UPCGNode*, int32> Depth;
+        for (UPCGNode* N : AllNodes) { Depth.Add(N, 0); }
+        if (UPCGNode* In = Graph->GetInputNode()) { Depth[In] = 0; }
+        for (int32 Pass = 0; Pass < AllNodes.Num(); ++Pass)
+        {
+            bool bChanged = false;
+            for (UPCGNode* N : AllNodes)
+            {
+                const int32 D = Depth[N];
+                for (const UPCGPin* OutPin : N->GetOutputPins())
+                {
+                    if (!OutPin) { continue; }
+                    for (const UPCGEdge* Edge : OutPin->Edges)
+                    {
+                        const UPCGPin* Other = Edge ? Edge->GetOtherPin(OutPin) : nullptr;
+                        if (Other && Other->Node && Depth.Contains(Other->Node) && Depth[Other->Node] < D + 1)
+                        {
+                            Depth[Other->Node] = D + 1;
+                            bChanged = true;
+                        }
+                    }
+                }
+            }
+            if (!bChanged) { break; }
+        }
+
+        // Force the output node to sit at the far right.
+        int32 MaxDepth = 0;
+        for (const TPair<UPCGNode*, int32>& P : Depth) { MaxDepth = FMath::Max(MaxDepth, P.Value); }
+        if (UPCGNode* Out = Graph->GetOutputNode()) { Depth[Out] = FMath::Max(Depth[Out], MaxDepth); }
+
+        // Assign X by depth, Y by order within each depth column.
+        TMap<int32, int32> ColumnCount;
+        for (UPCGNode* N : AllNodes)
+        {
+            const int32 D = Depth[N];
+            const int32 Row = ColumnCount.FindOrAdd(D);
+            ColumnCount[D] = Row + 1;
+            N->SetNodePosition(static_cast<int32>(D * SpacingX), static_cast<int32>(Row * SpacingY));
+        }
+        return AllNodes.Num();
+#else
+        return 0;
+#endif
+    }
 } // namespace GraphLayoutInternal
 
 TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleAutoLayoutGraph(const TSharedPtr<FJsonObject>& Params)
@@ -1497,6 +1559,12 @@ TSharedPtr<FJsonObject> FSmithUEEditorCommands::HandleAutoLayoutGraph(const TSha
             TotalNodes += GraphLayoutInternal::LayoutEdGraph(G, bLeftToRight, SpacingX, SpacingY);
         }
         BP->MarkPackageDirty();
+    }
+    else if (UPCGGraph* PcgGraph = Cast<UPCGGraph>(Asset))
+    {
+        AssetType = TEXT("PCGGraph");
+        TotalNodes = GraphLayoutInternal::LayoutPcgGraph(PcgGraph, SpacingX, SpacingY);
+        PcgGraph->MarkPackageDirty();
     }
     else
     {

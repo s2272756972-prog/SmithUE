@@ -1448,7 +1448,7 @@ Connect material expression pins. Use dest_expression_index=-1 to connect to mat
 - `source_expression_index` (number, required): Index of source expression in Expressions array
 - `source_output_index` (number): Output pin index on source expression
 - `dest_expression_index` (number, required): Index of dest expression, or -1 for material output
-- `dest_input_index` (number): Input pin index. For material output (dest_expression_index=-1): 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=EmissiveColor,5=Opacity,6=OpacityMask,7=WorldPositionOffset (WPO, for vertex offset/spin). 8+ unsupported.
+- `dest_input_index` (number): Input pin index. For material output (dest_expression_index=-1): 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=EmissiveColor,5=Opacity,6=OpacityMask,7=WorldPositionOffset (WPO), 8=FrontMaterial (UE5.8 Substrate root; only valid when the project has r.Substrate=1). 9+ unsupported.
 
 ### `compile_material`
 

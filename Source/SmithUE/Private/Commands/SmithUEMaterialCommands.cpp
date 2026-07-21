@@ -173,6 +173,7 @@ namespace
         case 5: return &Material->GetEditorOnlyData()->Opacity;
         case 6: return &Material->GetEditorOnlyData()->OpacityMask;
         case 7: return &Material->GetEditorOnlyData()->WorldPositionOffset;
+        case 8: return &Material->GetEditorOnlyData()->FrontMaterial; // Substrate (UE5.8): single FrontMaterial root
         default: return nullptr;
         }
     }
@@ -258,7 +259,7 @@ void FSmithUEMaterialCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("source_expression_index"), TEXT("number"), TEXT("Index of source expression in Expressions array"), true),
                 FSmithUEToolParam(TEXT("source_output_index"), TEXT("number"), TEXT("Output pin index on source expression"), false, TEXT("0")),
                 FSmithUEToolParam(TEXT("dest_expression_index"), TEXT("number"), TEXT("Index of dest expression, or -1 for material output"), true),
-                FSmithUEToolParam(TEXT("dest_input_index"), TEXT("number"), TEXT("Input pin index. For material output (dest_expression_index=-1): 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=EmissiveColor,5=Opacity,6=OpacityMask,7=WorldPositionOffset (WPO, for vertex offset/spin). 8+ unsupported."), false, TEXT("0"))
+                FSmithUEToolParam(TEXT("dest_input_index"), TEXT("number"), TEXT("Input pin index. For material output (dest_expression_index=-1): 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=EmissiveColor,5=Opacity,6=OpacityMask,7=WorldPositionOffset (WPO), 8=FrontMaterial (UE5.8 Substrate root; only valid when the project has r.Substrate=1). 9+ unsupported."), false, TEXT("0"))
             }),
         [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
         {
@@ -599,8 +600,17 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleAddMaterialExpression(co
     }
 
     double PosX = 0.0, PosY = 0.0;
-    Params->TryGetNumberField(TEXT("position_x"), PosX);
-    Params->TryGetNumberField(TEXT("position_y"), PosY);
+    const bool bHasX = Params->TryGetNumberField(TEXT("position_x"), PosX);
+    const bool bHasY = Params->TryGetNumberField(TEXT("position_y"), PosY);
+    if (!bHasX && !bHasY)
+    {
+        // No explicit position: cascade in columns to the LEFT of the material root
+        // (material graphs flow left -> right into the result node) so nodes don't
+        // all stack at (0,0). Run auto_layout_graph afterwards for clean layout.
+        const int32 Count = Material->GetExpressions().Num();
+        PosX = -450.0 - static_cast<double>(Count / 6) * 350.0;
+        PosY = -300.0 + static_cast<double>(Count % 6) * 130.0;
+    }
 
     UMaterialExpression* NewExpr = NewObject<UMaterialExpression>(Material, ExprClass);
     if (!NewExpr)
@@ -684,7 +694,7 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleConnectMaterialPins(cons
         if (!Input)
         {
             return FSmithUECommonUtils::CreateErrorResponse(
-                FString::Printf(TEXT("dest_input_index %d is out of range for material output (0-6)"), DestInputIndex));
+                FString::Printf(TEXT("dest_input_index %d is out of range for material output (0-8; 8=FrontMaterial requires Substrate)"), DestInputIndex));
         }
         Input->Connect(SourceOutputIndex, SourceExpr);
     }

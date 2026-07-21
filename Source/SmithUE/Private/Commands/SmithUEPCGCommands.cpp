@@ -396,6 +396,11 @@ TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleAddPcgNode(const TSharedPtr<F
 	Graph->MarkPackageDirty();
 
 	const int32 NewIndex = Graph->GetNodes().IndexOfByKey(Node);
+#if WITH_EDITOR
+	// Cascade left->right so nodes don't stack at (0,0). auto_layout_graph gives a
+	// clean connection-aware layout afterwards.
+	Node->SetNodePosition(300 + (NewIndex / 6) * 420, -200 + (NewIndex % 6) * 160);
+#endif
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetNumberField(TEXT("index"), NewIndex);
 	Data->SetStringField(TEXT("title"), Node->GetNodeTitle(EPCGNodeTitleType::ListView).ToString());
