@@ -1321,7 +1321,11 @@ Open an existing level/map. Executes on the next frame — success means the ope
 
 ### `level_save`
 
-Save the current level
+Save the current level. Pass level_path to Save-As to an explicit /Game package path WITHOUT any dialog (recommended for unsaved/untitled levels). WITHOUT level_path an unsaved level opens a BLOCKING 'Save As' modal on the game thread (use the Dialog domain tools to detect/close it, or just pass level_path).
+
+**Parameters:**
+
+- `level_path` (string): Optional target /Game package path for Save-As (e.g. '/Game/Maps/MyLevel'). A trailing '/' appends the current map name. Omit to save in place.
 
 ### `level_get_info`
 

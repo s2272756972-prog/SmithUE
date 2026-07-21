@@ -13,6 +13,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "FileHelpers.h"
+#include "Misc/PackageName.h"
 #include "FoliageType_InstancedStaticMesh.h"
 #include "InstancedFoliageActor.h"
 #include "InstancedFoliage.h"
@@ -238,8 +239,11 @@ void FSmithUELevelCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("level_save"),
             TEXT("Level"),
-            TEXT("Save the current level"),
-            {}),
+            TEXT("Save the current level. Pass level_path to Save-As to an explicit /Game package path WITHOUT any dialog (recommended for unsaved/untitled levels). WITHOUT level_path an unsaved level opens a BLOCKING 'Save As' modal on the game thread (use the Dialog domain tools to detect/close it, or just pass level_path)."),
+            {
+                FSmithUEToolParam(TEXT("level_path"), TEXT("string"), TEXT("Optional target /Game package path for Save-As (e.g. '/Game/Maps/MyLevel'). A trailing '/' appends the current map name. Omit to save in place."), /*required*/ false)
+                    .SetExample(TEXT("/Game/Maps/MyLevel"))
+            }),
         &HandleLevelSave);
 
     Registry.Register(
@@ -436,17 +440,67 @@ TSharedPtr<FJsonObject> FSmithUELevelCommands::HandleLevelOpen(const TSharedPtr<
 
 TSharedPtr<FJsonObject> FSmithUELevelCommands::HandleLevelSave(const TSharedPtr<FJsonObject>& Params)
 {
+    UWorld* World = SmithUELevel::GetEditorWorld();
+    if (!World)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("No editor world is available"));
+    }
+
+    FString LevelPath;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("level_path"), LevelPath);
+        LevelPath.TrimStartAndEndInline();
+    }
+
+    // Save-As to an explicit package path (no modal dialog) — the safe path for
+    // unsaved/untitled levels, and how you save the current level to a chosen folder.
+    if (!LevelPath.IsEmpty())
+    {
+        FString SavePath = LevelPath;
+        if (SavePath.EndsWith(TEXT("/")))
+        {
+            // Bare folder: append the current map's short name.
+            SavePath += FPackageName::GetShortName(World->GetOutermost()->GetName());
+        }
+
+        if (!SavePath.StartsWith(TEXT("/")))
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("level_path must be a /Game package path (e.g. '/Game/Maps/MyLevel'), got '%s'."), *SavePath));
+        }
+
+        const bool bSavedAs = UEditorLoadingAndSavingUtils::SaveMap(World, SavePath);
+        if (!bSavedAs)
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Failed to save level to '%s'. Ensure it is a valid /Game package path (the /Game content folder must exist)."), *SavePath));
+        }
+
+        UWorld* SavedWorld = SmithUELevel::GetEditorWorld();
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("level_name"), SavedWorld ? SavedWorld->GetMapName() : TEXT(""));
+        Data->SetStringField(TEXT("level_path"), SavedWorld && SavedWorld->GetOutermost() ? SavedWorld->GetOutermost()->GetName() : SavePath);
+        Data->SetBoolField(TEXT("saved"), true);
+        Data->SetBoolField(TEXT("saved_as"), true);
+        return FSmithUECommonUtils::CreateSuccessResponse(Data);
+    }
+
+    // Save in place. NOTE: for an unsaved/untitled level this pops a BLOCKING
+    // 'Save As' modal on the game thread (pass level_path to avoid it).
     const bool bSaved = FEditorFileUtils::SaveCurrentLevel();
     if (!bSaved)
     {
-        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to save current level"));
+        return FSmithUECommonUtils::CreateErrorResponse(
+            TEXT("Failed to save current level. If this is an unsaved/untitled level a 'Save As' modal was likely shown/cancelled — pass level_path (e.g. '/Game/Maps/MyLevel') to save without a dialog."));
     }
 
-    UWorld* World = SmithUELevel::GetEditorWorld();
+    UWorld* SavedWorld = SmithUELevel::GetEditorWorld();
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("level_name"), World ? World->GetMapName() : TEXT(""));
-    Data->SetStringField(TEXT("level_path"), World && World->GetOutermost() ? World->GetOutermost()->GetName() : TEXT(""));
+    Data->SetStringField(TEXT("level_name"), SavedWorld ? SavedWorld->GetMapName() : TEXT(""));
+    Data->SetStringField(TEXT("level_path"), SavedWorld && SavedWorld->GetOutermost() ? SavedWorld->GetOutermost()->GetName() : TEXT(""));
     Data->SetBoolField(TEXT("saved"), true);
+    Data->SetBoolField(TEXT("saved_as"), false);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
