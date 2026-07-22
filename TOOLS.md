@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **260 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **263 tools** across **27 domains**.
 
 ---
 
@@ -90,6 +90,26 @@ Set a property on a Behavior Tree node's runtime instance (e.g. a Wait task's Wa
 - `property` (string, required): Property name on the node (see bt_read_node)
 - `value` (string, required): Value as string (property-reflection import, e.g. '2.5', 'true')
 
+### `bt_add_decorator`
+
+Attach a decorator (conditional) to a Behavior Tree node. decorator = fuzzy UBTDecorator subclass name (Blackboard, CompareBBEntries, Cooldown, TimeLimit, Loop, ...). node_index from bt_add_node. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+- `node_index` (int, required): Graph node index to attach the decorator to
+- `decorator` (string, required): Decorator class (fuzzy), e.g. Blackboard / Cooldown / Loop
+
+### `bt_add_service`
+
+Attach a service (periodic tick) to a Behavior Tree composite node. service = fuzzy UBTService subclass name (DefaultFocus, RunEQS, BlueprintBase, ...). node_index must be a composite. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+- `node_index` (int, required): Composite graph node index to attach the service to
+- `service` (string, required): Service class (fuzzy), e.g. DefaultFocus / RunEQS
+
 ### `create_eqs`
 
 Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests.
@@ -115,6 +135,16 @@ Add a generator option to an EQS asset (builds the editor graph + rebuilds runti
 
 - `eqs_path` (string, required): EQS asset path
 - `generator` (string, required): Generator class (fuzzy), e.g. SimpleGrid / ActorsOfClass / OnCircle
+
+### `eqs_add_test`
+
+Add a scoring/filtering test to an EQS option (generator). test = fuzzy UEnvQueryTest subclass name (Distance, Dot, Trace, Pathfinding, Overlap, Project, ...). option = 0-based index among the option/generator nodes (default: last added). MUTATES; call save_asset.
+
+**Parameters:**
+
+- `eqs_path` (string, required): EQS asset path
+- `test` (string, required): Test class (fuzzy), e.g. Distance / Dot / Trace / Pathfinding
+- `option` (int): Option index to add the test to (default: last)
 
 ### `create_state_tree`
 

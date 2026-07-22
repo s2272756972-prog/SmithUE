@@ -25,10 +25,13 @@ private:
 	static TSharedPtr<FJsonObject> HandleBtAddNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBtReadNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBtSetNodeProperty(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBtAddDecorator(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBtAddService(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadBehaviorTree(const TSharedPtr<FJsonObject>& Params);
 	// EQS
 	static TSharedPtr<FJsonObject> HandleCreateEqs(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleEqsAddOption(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleEqsAddTest(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadEqs(const TSharedPtr<FJsonObject>& Params);
 	// State Tree
 	static TSharedPtr<FJsonObject> HandleCreateStateTree(const TSharedPtr<FJsonObject>& Params);

@@ -32,6 +32,10 @@
 #include "BehaviorTreeGraphNode_Root.h"
 #include "BehaviorTreeGraphNode_Composite.h"
 #include "BehaviorTreeGraphNode_Task.h"
+#include "BehaviorTreeGraphNode_Decorator.h"
+#include "BehaviorTreeGraphNode_Service.h"
+#include "BehaviorTree/BTDecorator.h"
+#include "BehaviorTree/BTService.h"
 #include "EdGraphSchema_BehaviorTree.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
@@ -45,6 +49,8 @@
 #include "EnvironmentQueryGraph.h"
 #include "EnvironmentQueryGraphNode_Root.h"
 #include "EnvironmentQueryGraphNode_Option.h"
+#include "EnvironmentQueryGraphNode_Test.h"
+#include "EnvironmentQuery/EnvQueryTest.h"
 #include "EdGraphSchema_EnvironmentQuery.h"
 // State Tree
 #include "StateTree.h"
@@ -79,6 +85,26 @@ namespace
 		if (T == TEXT("class"))   { return UBlackboardKeyType_Class::StaticClass(); }
 		if (T == TEXT("string"))  { return UBlackboardKeyType_String::StaticClass(); }
 		if (T == TEXT("name"))    { return UBlackboardKeyType_Name::StaticClass(); }
+		return nullptr;
+	}
+
+	/** Resolve a concrete subclass of BaseClass by fuzzy name (exact, prefixed variants, then substring). */
+	UClass* ResolveSubclassByName(UClass* BaseClass, const FString& Name, const TArray<FString>& Prefixes)
+	{
+		if (!BaseClass || Name.IsEmpty()) { return nullptr; }
+		TArray<FString> Cands = { Name };
+		for (const FString& Pre : Prefixes) { Cands.Add(Pre + Name); }
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			UClass* C = *It;
+			if (!C->IsChildOf(BaseClass) || C->HasAnyClassFlags(CLASS_Abstract)) { continue; }
+			for (const FString& Cand : Cands) { if (C->GetName().Equals(Cand, ESearchCase::IgnoreCase)) { return C; } }
+		}
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			UClass* C = *It;
+			if (C->IsChildOf(BaseClass) && !C->HasAnyClassFlags(CLASS_Abstract) && C->GetName().Contains(Name, ESearchCase::IgnoreCase)) { return C; }
+		}
 		return nullptr;
 	}
 }
@@ -146,6 +172,20 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		  FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value as string (property-reflection import, e.g. '2.5', 'true')"), true) }),
 		&FSmithUEAICommands::HandleBtSetNodeProperty);
 
+	Registry.Register(FSmithUEToolSchema(TEXT("bt_add_decorator"), TEXT("AI"),
+		TEXT("Attach a decorator (conditional) to a Behavior Tree node. decorator = fuzzy UBTDecorator subclass name (Blackboard, CompareBBEntries, Cooldown, TimeLimit, Loop, ...). node_index from bt_add_node. MUTATES; call save_asset."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("node_index"), TEXT("int"), TEXT("Graph node index to attach the decorator to"), true),
+		  FSmithUEToolParam(TEXT("decorator"), TEXT("string"), TEXT("Decorator class (fuzzy), e.g. Blackboard / Cooldown / Loop"), true).SetExample(TEXT("Blackboard")) }),
+		&FSmithUEAICommands::HandleBtAddDecorator);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("bt_add_service"), TEXT("AI"),
+		TEXT("Attach a service (periodic tick) to a Behavior Tree composite node. service = fuzzy UBTService subclass name (DefaultFocus, RunEQS, BlueprintBase, ...). node_index must be a composite. MUTATES; call save_asset."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("node_index"), TEXT("int"), TEXT("Composite graph node index to attach the service to"), true),
+		  FSmithUEToolParam(TEXT("service"), TEXT("string"), TEXT("Service class (fuzzy), e.g. DefaultFocus / RunEQS"), true).SetExample(TEXT("DefaultFocus")) }),
+		&FSmithUEAICommands::HandleBtAddService);
+
 	// ---- EQS ----
 	Registry.Register(FSmithUEToolSchema(TEXT("create_eqs"), TEXT("AI"),
 		TEXT("Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests."),
@@ -163,6 +203,13 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		{ FSmithUEToolParam(TEXT("eqs_path"), TEXT("string"), TEXT("EQS asset path"), true),
 		  FSmithUEToolParam(TEXT("generator"), TEXT("string"), TEXT("Generator class (fuzzy), e.g. SimpleGrid / ActorsOfClass / OnCircle"), true).SetExample(TEXT("SimpleGrid")) }),
 		&FSmithUEAICommands::HandleEqsAddOption);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("eqs_add_test"), TEXT("AI"),
+		TEXT("Add a scoring/filtering test to an EQS option (generator). test = fuzzy UEnvQueryTest subclass name (Distance, Dot, Trace, Pathfinding, Overlap, Project, ...). option = 0-based index among the option/generator nodes (default: last added). MUTATES; call save_asset."),
+		{ FSmithUEToolParam(TEXT("eqs_path"), TEXT("string"), TEXT("EQS asset path"), true),
+		  FSmithUEToolParam(TEXT("test"), TEXT("string"), TEXT("Test class (fuzzy), e.g. Distance / Dot / Trace / Pathfinding"), true).SetExample(TEXT("Distance")),
+		  FSmithUEToolParam(TEXT("option"), TEXT("int"), TEXT("Option index to add the test to (default: last)"), false) }),
+		&FSmithUEAICommands::HandleEqsAddTest);
 
 	// ---- State Tree ----
 	Registry.Register(FSmithUEToolSchema(TEXT("create_state_tree"), TEXT("AI"),
@@ -512,6 +559,63 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtSetNodeProperty(const TShare
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtAddDecorator(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path"), TEXT("node_index"), TEXT("decorator") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath, DecoratorName; int32 NodeIndex = -1;
+	Params->TryGetStringField(TEXT("bt_path"), BtPath); Params->TryGetNumberField(TEXT("node_index"), NodeIndex); Params->TryGetStringField(TEXT("decorator"), DecoratorName);
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+	UBehaviorTreeGraph* Graph = Cast<UBehaviorTreeGraph>(BT->BTGraph);
+	if (!Graph || !Graph->Nodes.IsValidIndex(NodeIndex)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid node_index (author the BT graph first)")); }
+	UBehaviorTreeGraphNode* ParentNode = Cast<UBehaviorTreeGraphNode>(Graph->Nodes[NodeIndex]);
+	if (!ParentNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("node_index is not a Behavior Tree node")); }
+	UClass* DecClass = ResolveSubclassByName(UBTDecorator::StaticClass(), DecoratorName, { TEXT("BTDecorator_"), TEXT("UBTDecorator_") });
+	if (!DecClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown decorator '%s' (try Blackboard/Cooldown/Loop/TimeLimit)"), *DecoratorName)); }
+
+	UBehaviorTreeGraphNode_Decorator* DecNode = NewObject<UBehaviorTreeGraphNode_Decorator>(Graph);
+	DecNode->NodeInstance = NewObject<UBTDecorator>(BT, DecClass);
+	ParentNode->AddSubNode(DecNode, Graph);
+	Graph->UpdateAsset(UBehaviorTreeGraph::ClearDebuggerFlags | UBehaviorTreeGraph::KeepRebuildCounter);
+	BT->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("node_index"), NodeIndex);
+	Data->SetStringField(TEXT("decorator"), DecClass->GetName());
+	Data->SetNumberField(TEXT("decorator_count"), ParentNode->SubNodes.Num());
+	Data->SetStringField(TEXT("note"), TEXT("Decorator attached + runtime rebuilt; call save_asset. Set its properties with bt_set_node_property on the decorator's graph index."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtAddService(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path"), TEXT("node_index"), TEXT("service") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath, ServiceName; int32 NodeIndex = -1;
+	Params->TryGetStringField(TEXT("bt_path"), BtPath); Params->TryGetNumberField(TEXT("node_index"), NodeIndex); Params->TryGetStringField(TEXT("service"), ServiceName);
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+	UBehaviorTreeGraph* Graph = Cast<UBehaviorTreeGraph>(BT->BTGraph);
+	if (!Graph || !Graph->Nodes.IsValidIndex(NodeIndex)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid node_index")); }
+	UBehaviorTreeGraphNode* ParentNode = Cast<UBehaviorTreeGraphNode>(Graph->Nodes[NodeIndex]);
+	if (!ParentNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("node_index is not a Behavior Tree node")); }
+	UClass* SvcClass = ResolveSubclassByName(UBTService::StaticClass(), ServiceName, { TEXT("BTService_"), TEXT("UBTService_") });
+	if (!SvcClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown service '%s' (try DefaultFocus/RunEQS/BlueprintBase)"), *ServiceName)); }
+
+	UBehaviorTreeGraphNode_Service* SvcNode = NewObject<UBehaviorTreeGraphNode_Service>(Graph);
+	SvcNode->NodeInstance = NewObject<UBTService>(BT, SvcClass);
+	ParentNode->AddSubNode(SvcNode, Graph);
+	Graph->UpdateAsset(UBehaviorTreeGraph::ClearDebuggerFlags | UBehaviorTreeGraph::KeepRebuildCounter);
+	BT->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("node_index"), NodeIndex);
+	Data->SetStringField(TEXT("service"), SvcClass->GetName());
+	Data->SetStringField(TEXT("note"), TEXT("Service attached + runtime rebuilt; call save_asset."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
 // ---------------------------------------------------------------------------
 // EQS impl
 // ---------------------------------------------------------------------------
@@ -616,6 +720,41 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleEqsAddOption(const TSharedPtr<
 	Data->SetStringField(TEXT("generator"), GenClass->GetName());
 	Data->SetNumberField(TEXT("option_count"), Query->GetOptions().Num());
 	Data->SetStringField(TEXT("note"), TEXT("Option added + runtime rebuilt; call save_asset. Author tests on the option in the editor."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleEqsAddTest(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("eqs_path"), TEXT("test") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString EqsPath, TestName; int32 OptionIndex = -1;
+	Params->TryGetStringField(TEXT("eqs_path"), EqsPath); Params->TryGetStringField(TEXT("test"), TestName);
+	Params->TryGetNumberField(TEXT("option"), OptionIndex);
+	UEnvQuery* Query = LoadObject<UEnvQuery>(nullptr, *EqsPath);
+	if (!Query) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("EQS not found: '%s'"), *EqsPath)); }
+	UEnvironmentQueryGraph* Graph = Cast<UEnvironmentQueryGraph>(Query->EdGraph);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("EQS has no graph — add a generator option first (eqs_add_option)")); }
+
+	// Collect the option (generator) graph nodes.
+	TArray<UEnvironmentQueryGraphNode_Option*> Options;
+	for (UEdGraphNode* N : Graph->Nodes) { if (UEnvironmentQueryGraphNode_Option* O = Cast<UEnvironmentQueryGraphNode_Option>(N)) { Options.Add(O); } }
+	if (Options.Num() == 0) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("No generator option to add a test to (call eqs_add_option first)")); }
+	UEnvironmentQueryGraphNode_Option* Option = (OptionIndex >= 0 && Options.IsValidIndex(OptionIndex)) ? Options[OptionIndex] : Options.Last();
+
+	UClass* TestClass = ResolveSubclassByName(UEnvQueryTest::StaticClass(), TestName, { TEXT("EnvQueryTest_"), TEXT("UEnvQueryTest_") });
+	if (!TestClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown test '%s' (try Distance/Dot/Trace/Pathfinding/Overlap/Project)"), *TestName)); }
+
+	UEnvironmentQueryGraphNode_Test* TestNode = NewObject<UEnvironmentQueryGraphNode_Test>(Graph);
+	TestNode->NodeInstance = NewObject<UEnvQueryTest>(Query, TestClass);
+	Option->AddSubNode(TestNode, Graph);
+	Graph->UpdateAsset();
+	Query->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("test"), TestClass->GetName());
+	Data->SetNumberField(TEXT("option"), Options.IndexOfByKey(Option));
+	Data->SetNumberField(TEXT("test_count"), Option->SubNodes.Num());
+	Data->SetStringField(TEXT("note"), TEXT("Test added to the option + runtime rebuilt; call save_asset."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
