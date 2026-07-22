@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **273 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **275 tools** across **27 domains**.
 
 ---
 
@@ -323,6 +323,16 @@ Validate that asset paths resolve and load without errors
 
 - `asset_paths` (array, required): Array of asset package paths
 
+### `find_broken_assets`
+
+Scan a content folder for BROKEN assets: (1) missing hard references — the asset depends on a /Game package that no longer exists (dangling ref that will null/error at runtime), and (2) redirectors — stale ObjectRedirector assets that should be fixed up. Fast: uses the Asset Registry graph (no asset loading) unless load_check=true, which additionally loads each candidate to catch packages that fail to load. Scope with folder_path; cap results with max. Returns the broken asset list with per-asset reasons + the specific missing packages.
+
+**Parameters:**
+
+- `folder_path` (string): Content folder to scan (default: /Game)
+- `load_check` (bool): Also attempt to load each asset to catch load failures (slower). Default false.
+- `max` (int): Max broken assets to return (default 200)
+
 ### `map_check_errors`
 
 Run map check on the active editor world
@@ -505,6 +515,16 @@ Navigate the Content Browser to a folder or asset and bring it to focus
 
 - `folder_path` (string): Content folder to navigate to (e.g. /Game/Materials)
 - `asset_path` (string): Asset to select and reveal (e.g. /Game/Materials/M_Base)
+
+### `capture_asset_thumbnail`
+
+Render any /Game asset's thumbnail (material, texture, static/skeletal mesh, blueprint, particle, etc.) to a PNG file WITHOUT opening its editor. Uses the engine's thumbnail renderer, so it reflects the asset's real appearance. Size is a moderate square (default 256, clamped 64-1024) intended for AI visual inspection — avoid huge sizes. Great for visually verifying material/texture edits.
+
+**Parameters:**
+
+- `asset_path` (string, required): Asset object path, e.g. /Game/Materials/M_Rock
+- `path` (string, required): Full file path for the PNG output (e.g. C:/temp/thumb.png)
+- `size` (number): Square thumbnail size in px (default 256, clamped 64-1024)
 
 ### `generate_texture`
 

@@ -19,6 +19,7 @@ private:
     static TSharedPtr<FJsonObject> HandleAssetFindOrphans(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleAssetGetDependencyTree(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleAssetValidate(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleFindBrokenAssets(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleMapCheckErrors(const TSharedPtr<FJsonObject>& Params);
 
     // Breakpoint commands

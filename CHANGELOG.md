@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 273 工具 / 27 域）
+### 新增域与工具（→ 275 工具 / 27 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -23,6 +23,10 @@
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
+- **视觉/坏资产自动化(2 工具)**：
+  - **`capture_asset_thumbnail`(Asset)**：用引擎缩略图渲染器把任意 /Game 资产(材质/纹理/网格/蓝图/粒子…)渲成 PNG,**无需打开编辑器**;适中方形尺寸(默认 256,夹取 64–1024,适配 AI 视觉解析)。对材质/纹理编辑做视觉回归最直接。
+  - **`find_broken_assets`(Analysis)**:文件夹/全库扫描坏资产——(1)缺失硬引用(依赖的 /Game 包已不存在的悬空引用)、(2)redirector;基于 Asset Registry 图**免加载**,`load_check=true` 额外加载以捕获加载失败。返回坏资产清单 + 逐项原因 + 具体缺失包。实测 /Game 447 资产查出 14 坏(5 redirector + 9 缺失引用)。
+- **传输层:渲染类工具的 FAppTime ensure 根治**:命令派发由 `AsyncTask(GameThread)`(TaskGraph 任务,从 worker 派生 → 无继承时间上下文)改为 **CoreTicker(`FTSTicker`)在帧 tick 内直接执行**,使渲染/流式子任务继承有效时间上下文。消除 `capture_asset_thumbnail`/`compile_material`/`take_viewport_screenshot` 触发的 `IsInGameThread() FAppTime` 非致命 ensure(实测 4 缩略图+3 编译+1 视口截图后日志零 ensure)。
 - **图域 CRUD 对齐（删除/断连）**：
   - **Material（22）**：`disconnect_material_pins`（断开目标输入引脚,含材质输出 -1）、`remove_material_expression`（按索引删表达式,并清理其它节点/材质输出上指向它的悬空连线,返回 `cleared_references`）。
   - **PCG（11）**：`disconnect_pcg_nodes`（`RemoveEdge`,无边时报错)、`remove_pcg_node`（`RemoveNode` 连带删边,护 input/output 节点）。

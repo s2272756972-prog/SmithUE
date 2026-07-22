@@ -10,4 +10,5 @@ struct FSmithUEScreenshotCommands
 private:
     static TSharedPtr<FJsonObject> HandleTakeViewportScreenshot(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleTakeBlueprintPreviewScreenshot(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleCaptureAssetThumbnail(const TSharedPtr<FJsonObject>& Params);
 };

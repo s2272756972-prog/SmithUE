@@ -379,6 +379,18 @@ void FSmithUEDebugCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 
     Registry.Register(
         FSmithUEToolSchema(
+            TEXT("find_broken_assets"),
+            TEXT("Analysis"),
+            TEXT("Scan a content folder for BROKEN assets: (1) missing hard references — the asset depends on a /Game package that no longer exists (dangling ref that will null/error at runtime), and (2) redirectors — stale ObjectRedirector assets that should be fixed up. Fast: uses the Asset Registry graph (no asset loading) unless load_check=true, which additionally loads each candidate to catch packages that fail to load. Scope with folder_path; cap results with max. Returns the broken asset list with per-asset reasons + the specific missing packages."),
+            {
+                FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to scan (default: /Game)"), false, TEXT("/Game")),
+                FSmithUEToolParam(TEXT("load_check"), TEXT("bool"), TEXT("Also attempt to load each asset to catch load failures (slower). Default false."), false, TEXT("false")),
+                FSmithUEToolParam(TEXT("max"), TEXT("int"), TEXT("Max broken assets to return (default 200)"), false, TEXT("200"))
+            }),
+        &HandleFindBrokenAssets);
+
+    Registry.Register(
+        FSmithUEToolSchema(
             TEXT("map_check_errors"),
             TEXT("Analysis"),
             TEXT("Run map check on the active editor world"),
@@ -870,8 +882,104 @@ TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleAssetValidate(const TShared
 }
 
 // ---------------------------------------------------------------------------
-// Command: map_check_errors
+// Command: find_broken_assets
 // ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleFindBrokenAssets(const TSharedPtr<FJsonObject>& Params)
+{
+    FString FolderPath = TEXT("/Game");
+    bool bLoadCheck = false;
+    double MaxD = 200.0;
+    if (Params.IsValid())
+    {
+        Params->TryGetStringField(TEXT("folder_path"), FolderPath);
+        Params->TryGetBoolField(TEXT("load_check"), bLoadCheck);
+        Params->TryGetNumberField(TEXT("max"), MaxD);
+    }
+    if (FolderPath.IsEmpty()) { FolderPath = TEXT("/Game"); }
+    const int32 MaxResults = FMath::Clamp(static_cast<int32>(MaxD), 1, 5000);
+
+    IAssetRegistry& AssetRegistry = SmithUEDebug::GetDebugAssetRegistry();
+    FARFilter Filter;
+    Filter.PackagePaths.Add(FName(*FolderPath));
+    Filter.bRecursivePaths = true;
+
+    TArray<FAssetData> Assets;
+    AssetRegistry.GetAssets(Filter, Assets);
+
+    TArray<TSharedPtr<FJsonValue>> Broken;
+    int32 RedirectorCount = 0, MissingRefCount = 0, LoadFailCount = 0;
+
+    for (const FAssetData& AssetData : Assets)
+    {
+        if (Broken.Num() >= MaxResults) { break; }
+
+        TArray<FString> Reasons;
+        TArray<TSharedPtr<FJsonValue>> MissingRefs;
+
+        if (AssetData.IsRedirector())
+        {
+            Reasons.Add(TEXT("redirector"));
+            ++RedirectorCount;
+        }
+
+        // Missing hard references: any /Game dependency package that has no assets in the registry.
+        TArray<FName> Deps;
+        AssetRegistry.GetDependencies(AssetData.PackageName, Deps, UE::AssetRegistry::EDependencyCategory::Package);
+        for (const FName& Dep : Deps)
+        {
+            const FString DepStr = Dep.ToString();
+            if (!DepStr.StartsWith(TEXT("/Game/"))) { continue; } // only high-signal project content
+            if (Dep == AssetData.PackageName) { continue; }
+            TArray<FAssetData> DepAssets;
+            AssetRegistry.GetAssetsByPackageName(Dep, DepAssets, /*bIncludeOnlyOnDiskAssets*/ true);
+            if (DepAssets.Num() == 0)
+            {
+                MissingRefs.Add(MakeShared<FJsonValueString>(DepStr));
+            }
+        }
+        if (MissingRefs.Num() > 0)
+        {
+            Reasons.Add(TEXT("missing_references"));
+            ++MissingRefCount;
+        }
+
+        // Optional deep check: actually load the asset to catch package/load failures.
+        if (bLoadCheck && !AssetData.IsRedirector())
+        {
+            UObject* Obj = AssetData.GetAsset();
+            if (!Obj)
+            {
+                Reasons.Add(TEXT("load_failed"));
+                ++LoadFailCount;
+            }
+        }
+
+        if (Reasons.Num() == 0) { continue; }
+
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("asset_path"), AssetData.PackageName.ToString());
+        Entry->SetStringField(TEXT("object_path"), AssetData.GetObjectPathString());
+        Entry->SetStringField(TEXT("class"), AssetData.AssetClassPath.GetAssetName().ToString());
+        TArray<TSharedPtr<FJsonValue>> ReasonArr;
+        for (const FString& R : Reasons) { ReasonArr.Add(MakeShared<FJsonValueString>(R)); }
+        Entry->SetArrayField(TEXT("reasons"), ReasonArr);
+        if (MissingRefs.Num() > 0) { Entry->SetArrayField(TEXT("missing_references"), MissingRefs); }
+        Broken.Add(MakeShared<FJsonValueObject>(Entry));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("folder_path"), FolderPath);
+    Data->SetBoolField(TEXT("load_check"), bLoadCheck);
+    Data->SetNumberField(TEXT("scanned_count"), Assets.Num());
+    Data->SetNumberField(TEXT("broken_count"), Broken.Num());
+    Data->SetNumberField(TEXT("redirector_count"), RedirectorCount);
+    Data->SetNumberField(TEXT("missing_reference_count"), MissingRefCount);
+    Data->SetNumberField(TEXT("load_failed_count"), LoadFailCount);
+    Data->SetBoolField(TEXT("truncated"), Broken.Num() >= MaxResults);
+    Data->SetArrayField(TEXT("broken_assets"), Broken);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
 
 TSharedPtr<FJsonObject> FSmithUEDebugCommands::HandleMapCheckErrors(const TSharedPtr<FJsonObject>& Params)
 {

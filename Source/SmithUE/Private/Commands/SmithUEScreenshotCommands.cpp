@@ -18,6 +18,8 @@
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "BlueprintEditor.h"
 #include "SEditorViewport.h"
+#include "ObjectTools.h"
+#include "ThumbnailRendering/ThumbnailManager.h"
 
 #include "SmithUEModule.h"
 
@@ -43,6 +45,18 @@ void FSmithUEScreenshotCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Full file path for the PNG output (e.g. C:/temp/preview.png)"), true)
             }),
         [](const TSharedPtr<FJsonObject>& Params) { return HandleTakeBlueprintPreviewScreenshot(Params); });
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("capture_asset_thumbnail"),
+            TEXT("Asset"),
+            TEXT("Render any /Game asset's thumbnail (material, texture, static/skeletal mesh, blueprint, particle, etc.) to a PNG file WITHOUT opening its editor. Uses the engine's thumbnail renderer, so it reflects the asset's real appearance. Size is a moderate square (default 256, clamped 64-1024) intended for AI visual inspection — avoid huge sizes. Great for visually verifying material/texture edits."),
+            {
+                FSmithUEToolParam(TEXT("asset_path"), TEXT("string"), TEXT("Asset object path, e.g. /Game/Materials/M_Rock"), true),
+                FSmithUEToolParam(TEXT("path"), TEXT("string"), TEXT("Full file path for the PNG output (e.g. C:/temp/thumb.png)"), true),
+                FSmithUEToolParam(TEXT("size"), TEXT("number"), TEXT("Square thumbnail size in px (default 256, clamped 64-1024)"), false, TEXT("256"))
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) { return HandleCaptureAssetThumbnail(Params); });
 }
 
 TSharedPtr<FJsonObject> FSmithUEScreenshotCommands::HandleTakeViewportScreenshot(const TSharedPtr<FJsonObject>& Params)
@@ -256,5 +270,84 @@ TSharedPtr<FJsonObject> FSmithUEScreenshotCommands::HandleTakeBlueprintPreviewSc
     Data->SetNumberField(TEXT("height"), Height);
     Data->SetNumberField(TEXT("size_bytes"), (double)PngData.Num());
 
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEScreenshotCommands::HandleCaptureAssetThumbnail(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath) || AssetPath.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Parameter 'asset_path' is required"));
+
+    FString FilePath;
+    if (!Params->TryGetStringField(TEXT("path"), FilePath) || FilePath.IsEmpty())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Parameter 'path' is required"));
+
+    if (!FilePath.EndsWith(TEXT(".png"), ESearchCase::IgnoreCase))
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Parameter 'path' must end with .png"));
+
+    const FString Directory = FPaths::GetPath(FilePath);
+    if (!Directory.IsEmpty() && !FPaths::DirectoryExists(Directory))
+    {
+        IFileManager::Get().MakeDirectory(*Directory, true);
+        if (!FPaths::DirectoryExists(Directory))
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Directory does not exist and could not be created: %s"), *Directory));
+    }
+
+    double SizeD = 256.0;
+    Params->TryGetNumberField(TEXT("size"), SizeD);
+    const int32 Size = FMath::Clamp(static_cast<int32>(SizeD), 64, 1024);
+
+    UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+    if (!Asset)
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Asset not found or failed to load: %s"), *AssetPath));
+
+    // Render the asset's thumbnail off the editor thumbnail renderer (no editor window needed).
+    // NeverFlush avoids the async texture-streaming/loading flush that can spawn render tasks
+    // lacking a game-thread time context (harmless engine ensure); quality is fine for the
+    // just-loaded asset and for AI visual inspection.
+    FObjectThumbnail Thumbnail;
+    ThumbnailTools::RenderThumbnail(
+        Asset, Size, Size,
+        ThumbnailTools::EThumbnailTextureFlushMode::NeverFlush,
+        /*InRenderTargetResource*/ nullptr,
+        &Thumbnail);
+
+    const int32 Width = Thumbnail.GetImageWidth();
+    const int32 Height = Thumbnail.GetImageHeight();
+    const TArray<uint8>& Raw = Thumbnail.GetUncompressedImageData();
+    if (Width <= 0 || Height <= 0 || Raw.Num() == 0)
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Thumbnail renderer produced no image for %s (class %s may have no thumbnail renderer)"),
+                *AssetPath, *Asset->GetClass()->GetName()));
+
+    // FObjectThumbnail stores BGRA8 already; encode straight to PNG.
+    IImageWrapperModule& ImageWrapperModule =
+        FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
+    TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+    if (!ImageWrapper.IsValid())
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create PNG image wrapper"));
+
+    ImageWrapper->SetRaw(Raw.GetData(), Raw.Num(), Width, Height, ERGBFormat::BGRA, 8);
+    const TArray64<uint8>& PngData = ImageWrapper->GetCompressed();
+    if (PngData.Num() == 0)
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("PNG compression produced empty output"));
+
+    if (!FFileHelper::SaveArrayToFile(PngData, *FilePath))
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to write file: %s"), *FilePath));
+
+    UE_LOG(LogSmithUE, Log, TEXT("capture_asset_thumbnail: saved %s (%dx%d, %lld bytes) for %s"),
+        *FilePath, Width, Height, (int64)PngData.Num(), *AssetPath);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("file_path"), FilePath);
+    Data->SetStringField(TEXT("asset_path"), AssetPath);
+    Data->SetStringField(TEXT("class"), Asset->GetClass()->GetName());
+    Data->SetNumberField(TEXT("width"), Width);
+    Data->SetNumberField(TEXT("height"), Height);
+    Data->SetNumberField(TEXT("size_bytes"), (double)PngData.Num());
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

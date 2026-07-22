@@ -2,6 +2,7 @@
 
 #include "Async/Async.h"
 #include "Async/Future.h"
+#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/PlatformProcess.h"
@@ -382,20 +383,36 @@ namespace SmithUEHttpServer::Private
 		}
 	}
 
+	// Runs Fn on the game thread and blocks the calling (worker) thread for its result.
+	// Uses the CoreTicker (not AsyncTask) so Fn executes directly within the engine's frame
+	// tick call stack, where the game thread's inherited FAppTime time-context is live. This
+	// matters for tools that trigger rendering (thumbnail render, material compile, viewport
+	// draw): render/streaming child tasks then inherit a valid time context instead of hitting
+	// the non-fatal "IsInGameThread() FAppTime" ensure. AddTicker is thread-safe (FTSTicker);
+	// the delegate returns false to run one-shot.
+	template <typename ResultType, typename FnType>
+	ResultType RunOnGameThreadWithTimeContext(FnType Fn)
+	{
+		TSharedRef<TPromise<ResultType>> Promise = MakeShared<TPromise<ResultType>>();
+		TFuture<ResultType> Future = Promise->GetFuture();
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+			[Fn = MoveTemp(Fn), Promise](float) -> bool
+			{
+				Promise->SetValue(Fn());
+				return false; // one-shot
+			}));
+		return Future.Get();
+	}
+
 	FString DispatchNidCommandSyncOnGameThread(const FString& CommandName, const TSharedPtr<FJsonObject>& Params)
 	{
 		check(!IsInGameThread());
-
-		TPromise<FString> Promise;
-		TFuture<FString> Future = Promise.GetFuture();
-		AsyncTask(ENamedThreads::GameThread, [CommandName, Params, Promise = MoveTemp(Promise)]() mutable
+		return RunOnGameThreadWithTimeContext<FString>([CommandName, Params]() -> FString
 		{
 			check(IsInGameThread());
 			TSharedPtr<FJsonObject> Result = FSmithUEToolRegistry::Get().DispatchCommand(CommandName, Params);
-			Promise.SetValue(FSmithUECommonUtils::SerializeJson(Result));
+			return FSmithUECommonUtils::SerializeJson(Result);
 		});
-
-		return Future.Get();
 	}
 
 	FString ExtractTaskIdFromPath(const FString& Path)
@@ -685,14 +702,12 @@ uint32 FSmithUEHttpServerRunnable::Run()
 				SmithUEHttpServer::Private::FRouteResult RouteResult;
 				if (IsGameThreadRequired(Request))
 				{
-					TPromise<SmithUEHttpServer::Private::FRouteResult> Promise;
-					TFuture<SmithUEHttpServer::Private::FRouteResult> Future = Promise.GetFuture();
-					AsyncTask(ENamedThreads::GameThread, [Request, ServerPtr, Promise = MoveTemp(Promise)]() mutable
-					{
-						check(IsInGameThread());
-						Promise.SetValue(SmithUEHttpServer::Private::RouteRequest(Request, ServerPtr));
-					});
-					RouteResult = Future.Get();
+					RouteResult = SmithUEHttpServer::Private::RunOnGameThreadWithTimeContext<SmithUEHttpServer::Private::FRouteResult>(
+						[Request, ServerPtr]() -> SmithUEHttpServer::Private::FRouteResult
+						{
+							check(IsInGameThread());
+							return SmithUEHttpServer::Private::RouteRequest(Request, ServerPtr);
+						});
 				}
 				else
 				{
