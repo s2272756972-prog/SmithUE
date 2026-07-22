@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 297 工具 / 29 域）
+### 新增域与工具（→ 299 工具 / 29 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -32,6 +32,9 @@
   - 实测(SM_Door 副本):read→加 box+sphere 碰撞(0→1→2)→清空(→0)→Nanite 开/关→生成 4 级 LOD(screen sizes [2,0.75,0.56,0.42]),错误均拦截。Build.cs 加 `StaticMeshEditor` 依赖。
 
 ### 优化与修复
+- **Mesh 域补强(2 工具)— 材质槽 assign + 骨骼网格读取**：
+  - `mesh_set_material {mesh_path, slot, material_path}`：给静态或骨骼网格的材质槽赋材质(slot 支持索引或槽名);静态用 `UStaticMesh::SetMaterial`,骨骼改 `GetMaterials()[i].MaterialInterface`。实测静态槽0 + 骨骼按槽名 `M_HeadLegs`,坏 slot/材质拦截。
+  - `read_skeletal_mesh_info {mesh_path}`：读骨骼网格状态(材质槽 name+材质、skeleton、physics asset、LOD 数、socket 数)。实测 SKM_Manny_Simple → skeleton SK_Mannequin / physics PA_Mannequin / LOD 3 / 5 sockets / 2 槽。
 - **Blueprint 函数签名 / 局部变量 / Timeline(4 工具)**:补齐"函数创建后改签名、加局部变量、加 Timeline"缺口。
   - `bp_add_function_parameter {bp_path, function_name, param_name, param_type, direction}`：给已有函数加输入/输出参数(改签名),output 无 Result 节点时自动建;拦截重名。
   - `bp_remove_function_parameter {bp_path, function_name, param_name}`:按名删函数参数(自动判定输入/输出)。

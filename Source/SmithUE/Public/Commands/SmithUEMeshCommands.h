@@ -20,4 +20,6 @@ private:
 	static TSharedPtr<FJsonObject> HandleMeshRemoveCollision(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleMeshSetNanite(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleMeshGenerateLods(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleMeshSetMaterial(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleReadSkeletalMeshInfo(const TSharedPtr<FJsonObject>& Params);
 };

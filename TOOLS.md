@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **297 tools** across **29 domains**.
+> Generated from `/api/v1/tools`. Total: **299 tools** across **29 domains**.
 
 ---
 
@@ -2069,6 +2069,24 @@ Auto-generate reduction LODs for a Static Mesh. lod_count is the total number of
 
 - `mesh_path` (string, required): Static Mesh asset path
 - `lod_count` (int, required): Total LOD count incl. LOD0 (1-8)
+
+### `mesh_set_material`
+
+Assign a material to a Static Mesh or Skeletal Mesh material slot. slot = a 0-based slot index or a slot name (from read_mesh_info / read_skeletal_mesh_info). material_path is a Material or Material Instance asset. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `mesh_path` (string, required): Static or Skeletal Mesh asset path
+- `slot` (string, required): Material slot index or slot name
+- `material_path` (string, required): Material/MaterialInstance asset path
+
+### `read_skeletal_mesh_info`
+
+Read a Skeletal Mesh's state: material slots (name + assigned material), skeleton, physics asset, LOD count, socket count. Read-only.
+
+**Parameters:**
+
+- `mesh_path` (string, required): Skeletal Mesh asset path
 
 ## Niagara
 

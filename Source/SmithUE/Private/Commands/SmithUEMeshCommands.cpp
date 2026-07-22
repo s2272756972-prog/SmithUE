@@ -7,6 +7,11 @@
 
 #include "Editor.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/SkinnedAssetCommon.h"
+#include "Animation/Skeleton.h"
+#include "PhysicsEngine/PhysicsAsset.h"
+#include "Materials/MaterialInterface.h"
 #include "StaticMeshEditorSubsystem.h"
 #include "StaticMeshEditorSubsystemHelpers.h"
 #include "Dom/JsonObject.h"
@@ -68,6 +73,18 @@ void FSmithUEMeshCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		{ FSmithUEToolParam(TEXT("mesh_path"), TEXT("string"), TEXT("Static Mesh asset path"), true),
 		  FSmithUEToolParam(TEXT("lod_count"), TEXT("int"), TEXT("Total LOD count incl. LOD0 (1-8)"), true).SetExample(TEXT("4")) }),
 		&FSmithUEMeshCommands::HandleMeshGenerateLods);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("mesh_set_material"), TEXT("Mesh"),
+		TEXT("Assign a material to a Static Mesh or Skeletal Mesh material slot. slot = a 0-based slot index or a slot name (from read_mesh_info / read_skeletal_mesh_info). material_path is a Material or Material Instance asset. MUTATES; call save_asset."),
+		{ FSmithUEToolParam(TEXT("mesh_path"), TEXT("string"), TEXT("Static or Skeletal Mesh asset path"), true),
+		  FSmithUEToolParam(TEXT("slot"), TEXT("string"), TEXT("Material slot index or slot name"), true),
+		  FSmithUEToolParam(TEXT("material_path"), TEXT("string"), TEXT("Material/MaterialInstance asset path"), true) }),
+		&FSmithUEMeshCommands::HandleMeshSetMaterial);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("read_skeletal_mesh_info"), TEXT("Mesh"),
+		TEXT("Read a Skeletal Mesh's state: material slots (name + assigned material), skeleton, physics asset, LOD count, socket count. Read-only."),
+		{ FSmithUEToolParam(TEXT("mesh_path"), TEXT("string"), TEXT("Skeletal Mesh asset path"), true) }),
+		&FSmithUEMeshCommands::HandleReadSkeletalMeshInfo);
 }
 
 TSharedPtr<FJsonObject> FSmithUEMeshCommands::HandleReadMeshInfo(const TSharedPtr<FJsonObject>& Params)
@@ -188,5 +205,89 @@ TSharedPtr<FJsonObject> FSmithUEMeshCommands::HandleMeshGenerateLods(const TShar
 	Data->SetNumberField(TEXT("lod_count"), Sub->GetLodCount(Mesh));
 	Data->SetNumberField(TEXT("result"), Result);
 	Data->SetStringField(TEXT("note"), TEXT("LODs generated; call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMeshCommands::HandleMeshSetMaterial(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("mesh_path"), TEXT("slot"), TEXT("material_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString MeshPath, Slot, MaterialPath;
+	Params->TryGetStringField(TEXT("mesh_path"), MeshPath); Params->TryGetStringField(TEXT("slot"), Slot); Params->TryGetStringField(TEXT("material_path"), MaterialPath);
+
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+	if (!Material) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material not found: '%s'"), *MaterialPath)); }
+
+	// Resolve the slot: numeric index or a slot name.
+	auto ResolveSlotIndex = [&Slot](const auto& Materials) -> int32
+	{
+		if (Slot.IsNumeric()) { return FCString::Atoi(*Slot); }
+		const FName SlotF(*Slot);
+		for (int32 i = 0; i < Materials.Num(); ++i) { if (Materials[i].MaterialSlotName == SlotF) { return i; } }
+		return INDEX_NONE;
+	};
+
+	if (UStaticMesh* SM = LoadObject<UStaticMesh>(nullptr, *MeshPath))
+	{
+		const int32 Index = ResolveSlotIndex(SM->GetStaticMaterials());
+		if (!SM->GetStaticMaterials().IsValidIndex(Index)) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Invalid slot '%s' (mesh has %d slots)"), *Slot, SM->GetStaticMaterials().Num())); }
+		SM->Modify();
+		SM->SetMaterial(Index, Material);
+		SM->PostEditChange();
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("mesh_path"), MeshPath);
+		Data->SetStringField(TEXT("mesh_type"), TEXT("StaticMesh"));
+		Data->SetNumberField(TEXT("slot_index"), Index);
+		Data->SetStringField(TEXT("slot_name"), SM->GetStaticMaterials()[Index].MaterialSlotName.ToString());
+		Data->SetStringField(TEXT("material"), Material->GetPathName());
+		Data->SetStringField(TEXT("note"), TEXT("Material assigned; call save_asset to persist."));
+		return FSmithUECommonUtils::CreateSuccessResponse(Data);
+	}
+	if (USkeletalMesh* SK = LoadObject<USkeletalMesh>(nullptr, *MeshPath))
+	{
+		TArray<FSkeletalMaterial>& Materials = SK->GetMaterials();
+		const int32 Index = ResolveSlotIndex(Materials);
+		if (!Materials.IsValidIndex(Index)) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Invalid slot '%s' (mesh has %d slots)"), *Slot, Materials.Num())); }
+		SK->Modify();
+		Materials[Index].MaterialInterface = Material;
+		SK->PostEditChange();
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("mesh_path"), MeshPath);
+		Data->SetStringField(TEXT("mesh_type"), TEXT("SkeletalMesh"));
+		Data->SetNumberField(TEXT("slot_index"), Index);
+		Data->SetStringField(TEXT("slot_name"), Materials[Index].MaterialSlotName.ToString());
+		Data->SetStringField(TEXT("material"), Material->GetPathName());
+		Data->SetStringField(TEXT("note"), TEXT("Material assigned; call save_asset to persist."));
+		return FSmithUECommonUtils::CreateSuccessResponse(Data);
+	}
+	return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("No Static or Skeletal Mesh at '%s'"), *MeshPath));
+}
+
+TSharedPtr<FJsonObject> FSmithUEMeshCommands::HandleReadSkeletalMeshInfo(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("mesh_path") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString MeshPath; Params->TryGetStringField(TEXT("mesh_path"), MeshPath);
+	USkeletalMesh* SK = LoadObject<USkeletalMesh>(nullptr, *MeshPath);
+	if (!SK) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Skeletal Mesh not found: '%s'"), *MeshPath)); }
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("mesh_path"), MeshPath);
+	Data->SetStringField(TEXT("skeleton"), SK->GetSkeleton() ? SK->GetSkeleton()->GetPathName() : FString());
+	Data->SetStringField(TEXT("physics_asset"), SK->GetPhysicsAsset() ? SK->GetPhysicsAsset()->GetPathName() : FString());
+	Data->SetNumberField(TEXT("lod_count"), SK->GetLODNum());
+	Data->SetNumberField(TEXT("socket_count"), SK->NumSockets());
+
+	const TArray<FSkeletalMaterial>& Materials = SK->GetMaterials();
+	TArray<TSharedPtr<FJsonValue>> MatArr;
+	for (const FSkeletalMaterial& M : Materials)
+	{
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetStringField(TEXT("slot_name"), M.MaterialSlotName.ToString());
+		Obj->SetStringField(TEXT("material"), M.MaterialInterface ? M.MaterialInterface->GetPathName() : FString());
+		MatArr.Add(MakeShared<FJsonValueObject>(Obj));
+	}
+	Data->SetNumberField(TEXT("material_count"), MatArr.Num());
+	Data->SetArrayField(TEXT("materials"), MatArr);
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
