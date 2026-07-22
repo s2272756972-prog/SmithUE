@@ -23,6 +23,7 @@
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
+- **修复 `spawn_pcg_volume` 无 brush 几何 → PCG 生成 0 点**:程序化 `SpawnActor` 出的 `APCGVolume` 没有 brush,采样体退化。现按 `UActorFactory::CreateBrushForVolumeActor` 流程构建 200³ 盒体 brush(`UCubeBuilder::Build` + `FBSPOps::csgPrepMovingBrush`),再套 actor scale。实测 VolumeSampler 生成 **8000 点**(scale 10 → 2000³ 体,VoxelSize 100),`pcg_get_stats` 正确读出——PCG 端到端生成测试闭环。Build.cs 加 `BSPUtils` 依赖。
 - **PCG 图级用户参数(3 工具)— 完整生命周期**:补齐图暴露参数的脚本化编辑(此前只能在编辑器 UI 手动加)。
   - `add_pcg_param {graph_path, name, type}`：给图加用户参数(bool/int/int64/float/double/name/string/vector/rotator),基于 `FInstancedPropertyBag::AddProperty`。
   - `read_pcg_params {graph_path}`：列出所有用户参数(name/type/当前值,反射 ExportText)。

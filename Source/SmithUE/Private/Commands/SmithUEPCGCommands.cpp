@@ -30,6 +30,12 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "StructUtils/PropertyBag.h"
 #include "StructUtils/StructView.h"
+#include "Builders/CubeBuilder.h"
+#include "Model.h"
+#include "Engine/Polys.h"
+#include "Components/BrushComponent.h"
+#include "GameFramework/Volume.h"
+#include "BSPOps.h"
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -51,6 +57,36 @@ namespace
 			if ((*Obj)->TryGetNumberField(TEXT("y"), V)) { InOut.Y = V; }
 			if ((*Obj)->TryGetNumberField(TEXT("z"), V)) { InOut.Z = V; }
 		}
+	}
+
+	// Build actual box brush geometry for a programmatically-spawned volume. A volume spawned
+	// via SpawnActor has no brush, so its sample bounds are degenerate (PCG then generates 0
+	// points). Mirrors UActorFactory::CreateBrushForVolumeActor.
+	void BuildVolumeBoxBrush(AVolume* Volume, float SizeX, float SizeY, float SizeZ)
+	{
+		if (!Volume || !Volume->GetBrushComponent()) { return; }
+		Volume->PreEditChange(nullptr);
+		const EObjectFlags ObjectFlags = Volume->GetFlags() & (RF_Transient | RF_Transactional);
+		Volume->PolyFlags = 0;
+		Volume->Brush = NewObject<UModel>(Volume, NAME_None, ObjectFlags);
+		Volume->Brush->Initialize(nullptr, true);
+		Volume->Brush->Polys = NewObject<UPolys>(Volume->Brush, NAME_None, ObjectFlags);
+		Volume->GetBrushComponent()->Brush = Volume->Brush;
+
+		UCubeBuilder* Builder = NewObject<UCubeBuilder>();
+		Builder->X = SizeX;
+		Builder->Y = SizeY;
+		Builder->Z = SizeZ;
+		Volume->BrushBuilder = DuplicateObject<UBrushBuilder>(Builder, Volume);
+		Builder->Build(Volume->GetWorld(), Volume);
+
+		FBSPOps::csgPrepMovingBrush(Volume);
+
+		if (Volume->Brush && Volume->Brush->Polys)
+		{
+			for (FPoly& Poly : Volume->Brush->Polys->Element) { Poly.Material = nullptr; }
+		}
+		Volume->PostEditChange();
 	}
 
 	/** Resolve a UPCGSettings subclass by fuzzy name (e.g. "SurfaceSampler", "PCGSurfaceSamplerSettings"). */
@@ -854,8 +890,12 @@ TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleSpawnPcgVolume(const TSharedP
 		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to spawn APCGVolume"));
 	}
 
-	Volume->SetActorScale3D(Scale);
 	Volume->SetActorLabel(Label);
+
+	// Give the volume real box geometry (200³ base cube; the actor scale sizes it) so its
+	// sample bounds are valid — otherwise PCG generates 0 points.
+	BuildVolumeBoxBrush(Volume, 200.0f, 200.0f, 200.0f);
+	Volume->SetActorScale3D(Scale);
 
 	bool bGenerated = false;
 	if (UPCGComponent* Comp = Volume->FindComponentByClass<UPCGComponent>())

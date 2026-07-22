@@ -85,7 +85,8 @@ public class SmithUE : ModuleRules
 					"PropertyBindingUtils",
 					"GameplayTags",
 					"TraceServices",
-					"BlueprintEditorLibrary"
+					"BlueprintEditorLibrary",
+					"BSPUtils"
 			}
 			);
 		}
