@@ -44,6 +44,10 @@ private:
 	static TSharedPtr<FJsonObject> HandleBpSetVariableFlags(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpAddEventDispatcher(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpRemoveEventDispatcher(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpAddFunctionParameter(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpRemoveFunctionParameter(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpAddLocalVariable(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBpAddTimeline(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpAddComponent(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpRemoveComponent(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBpRenameComponent(const TSharedPtr<FJsonObject>& Params);

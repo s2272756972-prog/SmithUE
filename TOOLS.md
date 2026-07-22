@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **288 tools** across **28 domains**.
+> Generated from `/api/v1/tools`. Total: **292 tools** across **28 domains**.
 
 ---
 
@@ -840,6 +840,49 @@ Remove an Event Dispatcher (and its signature graph) from a Blueprint by name. R
 
 - `bp_path` (string, required): Blueprint asset path
 - `dispatcher_name` (string, required): Event dispatcher name to remove
+
+### `bp_add_function_parameter`
+
+Add an input or output parameter to an EXISTING Blueprint function (modifies its signature). direction=input adds to the function entry; direction=output adds to the return node (created if absent). Rejects a duplicate pin name. Recompiles.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `function_name` (string, required): Existing function graph name
+- `param_name` (string, required): Parameter name
+- `param_type` (string, required): Parameter type (float/int/bool/string/vector/object:<Class>...)
+- `direction` (string): input | output (default input)
+
+### `bp_remove_function_parameter`
+
+Remove a parameter (input or output) from an existing Blueprint function by name. Recompiles.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `function_name` (string, required): Function graph name
+- `param_name` (string, required): Parameter name to remove
+
+### `bp_add_local_variable`
+
+Add a local variable to a Blueprint function graph (scoped to that function). Recompiles.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `function_name` (string, required): Function graph name
+- `var_name` (string, required): Local variable name
+- `var_type` (string, required): Variable type (float/int/bool/string/vector/object:<Class>...)
+- `default_value` (string): Optional default value
+
+### `bp_add_timeline`
+
+Add a Timeline to a Blueprint (creates the timeline template/component). Add float/vector/color/event tracks and drive it from the event graph with a Timeline node (bp_create_node K2Node_Timeline). Recompiles.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `timeline_name` (string, required): Timeline name
 
 ### `bp_add_component`
 

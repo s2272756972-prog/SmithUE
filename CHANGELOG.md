@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 288 工具 / 28 域）
+### 新增域与工具（→ 292 工具 / 28 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -23,6 +23,13 @@
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
+- **Blueprint 函数签名 / 局部变量 / Timeline(4 工具)**:补齐"函数创建后改签名、加局部变量、加 Timeline"缺口。
+  - `bp_add_function_parameter {bp_path, function_name, param_name, param_type, direction}`：给已有函数加输入/输出参数(改签名),output 无 Result 节点时自动建;拦截重名。
+  - `bp_remove_function_parameter {bp_path, function_name, param_name}`:按名删函数参数(自动判定输入/输出)。
+  - `bp_add_local_variable {bp_path, function_name, var_name, var_type, default_value?}`:给函数图加局部变量(`FBlueprintEditorUtils::AddLocalVariable`);**显式拦截重名**(引擎 API 不查,重名会破坏编译)。
+  - `bp_add_timeline {bp_path, timeline_name}`:加 Timeline 模板/组件(`AddNewTimeline`),拦截重名;轨道与驱动节点(K2Node_Timeline)另加。
+  - `ResolvePinType` 增加小写结构体别名(vector/rotator/transform/color/vector2d,免写 `F` 前缀,与 PCG 参数一致)。
+  - 实测:输入+输出参数增删、局部变量(含 vector)增+重名拦截、Timeline 增+重名拦截,编译零错。
 - **修复 `spawn_pcg_volume` 无 brush 几何 → PCG 生成 0 点**:程序化 `SpawnActor` 出的 `APCGVolume` 没有 brush,采样体退化。现按 `UActorFactory::CreateBrushForVolumeActor` 流程构建 200³ 盒体 brush(`UCubeBuilder::Build` + `FBSPOps::csgPrepMovingBrush`),再套 actor scale。实测 VolumeSampler 生成 **8000 点**(scale 10 → 2000³ 体,VoxelSize 100),`pcg_get_stats` 正确读出——PCG 端到端生成测试闭环。Build.cs 加 `BSPUtils` 依赖。
 - **PCG 图级用户参数(3 工具)— 完整生命周期**:补齐图暴露参数的脚本化编辑(此前只能在编辑器 UI 手动加)。
   - `add_pcg_param {graph_path, name, type}`：给图加用户参数(bool/int/int64/float/double/name/string/vector/rotator),基于 `FInstancedPropertyBag::AddProperty`。

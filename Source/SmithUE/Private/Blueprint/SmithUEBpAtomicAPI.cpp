@@ -52,6 +52,7 @@
 #include "K2Node_EnhancedInputAction.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
+#include "Engine/TimelineTemplate.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_InputKey.h"
 #include "K2Node_MacroInstance.h"
@@ -1736,6 +1737,10 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_variable_flags"), TEXT("Blueprint"), TEXT("Set editor-facing flags/metadata on an existing Blueprint member variable: instance_editable (shows in the Details panel of instances), blueprint_read_only, expose_on_spawn (requires instance_editable), category, tooltip. Only the provided fields are changed."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("instance_editable"), TEXT("bool"), TEXT("Editable per-instance (not Blueprint-only)"), false), FSmithUEToolParam(TEXT("blueprint_read_only"), TEXT("bool"), TEXT("Read-only in Blueprint graphs"), false), FSmithUEToolParam(TEXT("expose_on_spawn"), TEXT("bool"), TEXT("Expose as a SpawnActor pin (needs instance_editable)"), false), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Variable category"), false), FSmithUEToolParam(TEXT("tooltip"), TEXT("string"), TEXT("Variable tooltip"), false) }), &HandleBpSetVariableFlags);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_event_dispatcher"), TEXT("Blueprint"), TEXT("Create an Event Dispatcher (multicast delegate) on a Blueprint — the core event-communication primitive. Other graphs Bind/Assign to it and Call it to broadcast. Optionally give it a typed signature via params (array of {name, type}, e.g. [{\"name\":\"NewHealth\",\"type\":\"float\"}]). Recompiles the Blueprint."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("dispatcher_name"), TEXT("string"), TEXT("Event dispatcher name (convention: On*)"), true), FSmithUEToolParam(TEXT("params"), TEXT("array"), TEXT("Optional signature params: array of {name, type} (type like float/int/bool/string/vector/object:<Class>)"), false) }), &HandleBpAddEventDispatcher);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_event_dispatcher"), TEXT("Blueprint"), TEXT("Remove an Event Dispatcher (and its signature graph) from a Blueprint by name. Recompiles the Blueprint."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("dispatcher_name"), TEXT("string"), TEXT("Event dispatcher name to remove"), true) }), &HandleBpRemoveEventDispatcher);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_function_parameter"), TEXT("Blueprint"), TEXT("Add an input or output parameter to an EXISTING Blueprint function (modifies its signature). direction=input adds to the function entry; direction=output adds to the return node (created if absent). Rejects a duplicate pin name. Recompiles."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Existing function graph name"), true), FSmithUEToolParam(TEXT("param_name"), TEXT("string"), TEXT("Parameter name"), true), FSmithUEToolParam(TEXT("param_type"), TEXT("string"), TEXT("Parameter type (float/int/bool/string/vector/object:<Class>...)"), true), FSmithUEToolParam(TEXT("direction"), TEXT("string"), TEXT("input | output (default input)"), false).SetAllowedValues({ TEXT("input"), TEXT("output") }) }), &HandleBpAddFunctionParameter);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_function_parameter"), TEXT("Blueprint"), TEXT("Remove a parameter (input or output) from an existing Blueprint function by name. Recompiles."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function graph name"), true), FSmithUEToolParam(TEXT("param_name"), TEXT("string"), TEXT("Parameter name to remove"), true) }), &HandleBpRemoveFunctionParameter);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_local_variable"), TEXT("Blueprint"), TEXT("Add a local variable to a Blueprint function graph (scoped to that function). Recompiles."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("function_name"), TEXT("string"), TEXT("Function graph name"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Local variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type (float/int/bool/string/vector/object:<Class>...)"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value"), false) }), &HandleBpAddLocalVariable);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_timeline"), TEXT("Blueprint"), TEXT("Add a Timeline to a Blueprint (creates the timeline template/component). Add float/vector/color/event tracks and drive it from the event graph with a Timeline node (bp_create_node K2Node_Timeline). Recompiles."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("timeline_name"), TEXT("string"), TEXT("Timeline name"), true) }), &HandleBpAddTimeline);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), BpAddComponentClassParam, FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_rename_component"), TEXT("Blueprint"), TEXT("Rename a Blueprint SCS component variable (updates all graph references)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Current component name"), true), FSmithUEToolParam(TEXT("new_name"), TEXT("string"), TEXT("New component name"), true) }), &HandleBpRenameComponent);
@@ -3055,6 +3060,197 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveEventDispatcher(const
 	Data->SetStringField(TEXT("dispatcher_name"), DispName);
 	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetStringField(TEXT("note"), TEXT("Event dispatcher removed + recompiled. Call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// Finds the function's entry/result terminator nodes within its graph.
+static void FindFunctionTerminators(UEdGraph* Graph, UK2Node_FunctionEntry*& OutEntry, UK2Node_FunctionResult*& OutResult)
+{
+	OutEntry = nullptr; OutResult = nullptr;
+	if (!Graph) { return; }
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (!OutEntry) { OutEntry = Cast<UK2Node_FunctionEntry>(Node); }
+		if (!OutResult) { OutResult = Cast<UK2Node_FunctionResult>(Node); }
+	}
+}
+
+static bool NodeHasUserPin(UK2Node_EditablePinBase* Node, const FName& PinName)
+{
+	if (!Node) { return false; }
+	for (const TSharedPtr<FUserPinInfo>& Pin : Node->UserDefinedPins)
+	{
+		if (Pin.IsValid() && Pin->PinName == PinName) { return true; }
+	}
+	return false;
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddFunctionParameter(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("function_name"), TEXT("param_name"), TEXT("param_type") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, FuncName, ParamName, ParamType, Direction;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("function_name"), FuncName);
+	Params->TryGetStringField(TEXT("param_name"), ParamName);
+	Params->TryGetStringField(TEXT("param_type"), ParamType);
+	Params->TryGetStringField(TEXT("direction"), Direction);
+	const bool bOutput = Direction.Equals(TEXT("output"), ESearchCase::IgnoreCase);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	UEdGraph* Graph = FindGraph(Blueprint, FuncName);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Function graph not found: '%s'"), *FuncName)); }
+
+	FEdGraphPinType PinType;
+	if (!ResolvePinType(ParamType, PinType)) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unsupported param_type '%s'"), *ParamType)); }
+
+	UK2Node_FunctionEntry* EntryNode = nullptr; UK2Node_FunctionResult* ResultNode = nullptr;
+	FindFunctionTerminators(Graph, EntryNode, ResultNode);
+	const FName ParamF(*ParamName);
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddFuncParam", "SmithUE: Add Function Parameter"));
+	if (bOutput)
+	{
+		if (!ResultNode)
+		{
+			FGraphNodeCreator<UK2Node_FunctionResult> ResultCreator(*Graph);
+			ResultNode = ResultCreator.CreateNode();
+			if (!ResultNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create function result node")); }
+			ResultNode->NodePosX = 800; ResultNode->NodePosY = 0;
+			ResultCreator.Finalize();
+			ResultNode->AllocateDefaultPins();
+		}
+		if (NodeHasUserPin(ResultNode, ParamF)) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Output parameter '%s' already exists"), *ParamName)); }
+		ResultNode->CreateUserDefinedPin(ParamF, PinType, EGPD_Input);
+	}
+	else
+	{
+		if (!EntryNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Function entry node not found")); }
+		if (NodeHasUserPin(EntryNode, ParamF)) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Input parameter '%s' already exists"), *ParamName)); }
+		EntryNode->CreateUserDefinedPin(ParamF, PinType, EGPD_Output);
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("function_name"), FuncName);
+	Data->SetStringField(TEXT("param_name"), ParamName);
+	Data->SetStringField(TEXT("direction"), bOutput ? TEXT("output") : TEXT("input"));
+	Data->SetStringField(TEXT("note"), TEXT("Parameter added + recompiled. Call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveFunctionParameter(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("function_name"), TEXT("param_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, FuncName, ParamName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("function_name"), FuncName);
+	Params->TryGetStringField(TEXT("param_name"), ParamName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	UEdGraph* Graph = FindGraph(Blueprint, FuncName);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Function graph not found: '%s'"), *FuncName)); }
+
+	UK2Node_FunctionEntry* EntryNode = nullptr; UK2Node_FunctionResult* ResultNode = nullptr;
+	FindFunctionTerminators(Graph, EntryNode, ResultNode);
+	const FName ParamF(*ParamName);
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpRemoveFuncParam", "SmithUE: Remove Function Parameter"));
+	FString RemovedFrom;
+	if (NodeHasUserPin(EntryNode, ParamF)) { EntryNode->RemoveUserDefinedPinByName(ParamF); RemovedFrom = TEXT("input"); }
+	else if (NodeHasUserPin(ResultNode, ParamF)) { ResultNode->RemoveUserDefinedPinByName(ParamF); RemovedFrom = TEXT("output"); }
+	else { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parameter '%s' not found on function '%s'"), *ParamName, *FuncName)); }
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("function_name"), FuncName);
+	Data->SetStringField(TEXT("param_name"), ParamName);
+	Data->SetStringField(TEXT("direction"), RemovedFrom);
+	Data->SetBoolField(TEXT("removed"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddLocalVariable(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("function_name"), TEXT("var_name"), TEXT("var_type") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, FuncName, VarName, VarType, DefaultValue;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("function_name"), FuncName);
+	Params->TryGetStringField(TEXT("var_name"), VarName);
+	Params->TryGetStringField(TEXT("var_type"), VarType);
+	Params->TryGetStringField(TEXT("default_value"), DefaultValue);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	UEdGraph* Graph = FindGraph(Blueprint, FuncName);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Function graph not found: '%s'"), *FuncName)); }
+
+	FEdGraphPinType PinType;
+	if (!ResolvePinType(VarType, PinType)) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unsupported var_type '%s'"), *VarType)); }
+
+	// AddLocalVariable does NOT check for duplicates — a second same-named local silently
+	// breaks compilation. Guard explicitly.
+	if (FBlueprintEditorUtils::FindLocalVariable(Blueprint, Graph, FName(*VarName)))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Local variable '%s' already exists in '%s'"), *VarName, *FuncName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddLocalVar", "SmithUE: Add Local Variable"));
+	if (!FBlueprintEditorUtils::AddLocalVariable(Blueprint, Graph, FName(*VarName), PinType, DefaultValue))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to add local variable '%s' (name may be in use)"), *VarName));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("function_name"), FuncName);
+	Data->SetStringField(TEXT("var_name"), VarName);
+	Data->SetStringField(TEXT("note"), TEXT("Local variable added. Call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddTimeline(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("timeline_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, TimelineName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("timeline_name"), TimelineName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	const FName TimelineF(*TimelineName);
+	if (Blueprint->FindTimelineTemplateByVariableName(TimelineF))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Timeline '%s' already exists"), *TimelineName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddTimeline", "SmithUE: Add Timeline"));
+	UTimelineTemplate* Template = FBlueprintEditorUtils::AddNewTimeline(Blueprint, TimelineF);
+	if (!Template)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to add timeline '%s'"), *TimelineName));
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("timeline_name"), TimelineName);
+	Data->SetStringField(TEXT("note"), TEXT("Timeline created + recompiled. Add tracks and drive it via a K2Node_Timeline node (bp_create_node). Call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

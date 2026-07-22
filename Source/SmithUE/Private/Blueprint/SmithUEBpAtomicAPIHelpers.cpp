@@ -453,32 +453,32 @@ namespace SmithUEBpAtomicAPIHelpers
 			return true;
 		}
 
-		// --- Common struct types ---
-		if (Normalized.Equals(TEXT("FVector"), ESearchCase::IgnoreCase))
+		// --- Common struct types (accept with or without the leading 'F' for convenience) ---
+		if (Normalized.Equals(TEXT("FVector"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("vector"), ESearchCase::IgnoreCase))
 		{
 			OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			OutPinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
 			return true;
 		}
-		if (Normalized.Equals(TEXT("FRotator"), ESearchCase::IgnoreCase))
+		if (Normalized.Equals(TEXT("FRotator"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("rotator"), ESearchCase::IgnoreCase))
 		{
 			OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			OutPinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
 			return true;
 		}
-		if (Normalized.Equals(TEXT("FTransform"), ESearchCase::IgnoreCase))
+		if (Normalized.Equals(TEXT("FTransform"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("transform"), ESearchCase::IgnoreCase))
 		{
 			OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			OutPinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
 			return true;
 		}
-		if (Normalized.Equals(TEXT("FLinearColor"), ESearchCase::IgnoreCase))
+		if (Normalized.Equals(TEXT("FLinearColor"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("color"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("linearcolor"), ESearchCase::IgnoreCase))
 		{
 			OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			OutPinType.PinSubCategoryObject = TBaseStructure<FLinearColor>::Get();
 			return true;
 		}
-		if (Normalized.Equals(TEXT("FVector2D"), ESearchCase::IgnoreCase))
+		if (Normalized.Equals(TEXT("FVector2D"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("vector2d"), ESearchCase::IgnoreCase))
 		{
 			OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			OutPinType.PinSubCategoryObject = TBaseStructure<FVector2D>::Get();
