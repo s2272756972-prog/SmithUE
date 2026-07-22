@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **267 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **271 tools** across **27 domains**.
 
 ---
 
@@ -1684,6 +1684,25 @@ Connect material expression pins. Use dest_expression_index=-1 to connect to the
 - `dest_expression_index` (number, required): Index of dest expression, or -1 for material output
 - `dest_input_index` (number): Input pin index. For material output (dest_expression_index=-1): 0=BaseColor,1=Metallic,2=Roughness,3=Normal,4=EmissiveColor,5=Opacity,6=OpacityMask,7=WorldPositionOffset (WPO), 8=FrontMaterial (UE5.8 Substrate root; only valid when the project has r.Substrate=1). 9+ unsupported.
 
+### `disconnect_material_pins`
+
+Break a connection at a destination input pin. dest_expression_index=-1 targets the material output (dest_input_index picks BaseColor/Metallic/... as in connect_material_pins); otherwise it targets that expression's input pin. Clears whatever was feeding that pin.
+
+**Parameters:**
+
+- `material_path` (string, required): Full asset path
+- `dest_expression_index` (number, required): Index of dest expression, or -1 for material output
+- `dest_input_index` (number): Input pin index (same mapping as connect_material_pins)
+
+### `remove_material_expression`
+
+Remove an expression node from a material by its index in the Expressions array (from get_material_info). Also clears any input pins (on other expressions and the material output) that were fed by it, so no dangling wires remain. Expression indices shift after removal. MUTATES; run compile_material afterwards.
+
+**Parameters:**
+
+- `material_path` (string, required): Full asset path
+- `expression_index` (number, required): Index of expression in Expressions array
+
 ### `compile_material`
 
 Trigger material recompilation
@@ -2144,6 +2163,27 @@ Connect two nodes in a PCG Graph. Node refs are 'input'/'output' (the graph's I/
 - `to_node` (string, required): Target node: 'output' or an inner node index
 - `from_pin` (string): Source output pin label (default: first output pin)
 - `to_pin` (string): Target input pin label (default: first input pin)
+
+### `disconnect_pcg_nodes`
+
+Remove an edge between two nodes in a PCG Graph. Node refs are 'input'/'output' or an inner node INDEX from read_pcg_graph. Pin labels default to the source's first output pin and the target's first input pin (as in connect_pcg_nodes). MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `from_node` (string, required): Source node: 'input' or an inner node index
+- `to_node` (string, required): Target node: 'output' or an inner node index
+- `from_pin` (string): Source output pin label (default: first output pin)
+- `to_pin` (string): Target input pin label (default: first input pin)
+
+### `remove_pcg_node`
+
+Remove an inner node (and its edges) from a PCG Graph by index (from read_pcg_graph). Cannot remove the graph 'input'/'output' nodes. Node indices shift after removal. MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `node` (string, required): Inner node index (from read_pcg_graph)
 
 ### `find_pcg_graphs`
 

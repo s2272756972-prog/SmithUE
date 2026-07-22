@@ -208,6 +208,31 @@ void FSmithUEPCGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 
 	Registry.Register(
 		FSmithUEToolSchema(
+			TEXT("disconnect_pcg_nodes"),
+			TEXT("PCG"),
+			TEXT("Remove an edge between two nodes in a PCG Graph. Node refs are 'input'/'output' or an inner node INDEX from read_pcg_graph. Pin labels default to the source's first output pin and the target's first input pin (as in connect_pcg_nodes). MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("from_node"), TEXT("string"), TEXT("Source node: 'input' or an inner node index"), /*required*/ true),
+				FSmithUEToolParam(TEXT("to_node"), TEXT("string"), TEXT("Target node: 'output' or an inner node index"), /*required*/ true),
+				FSmithUEToolParam(TEXT("from_pin"), TEXT("string"), TEXT("Source output pin label (default: first output pin)"), /*required*/ false),
+				FSmithUEToolParam(TEXT("to_pin"), TEXT("string"), TEXT("Target input pin label (default: first input pin)"), /*required*/ false)
+			}),
+		&FSmithUEPCGCommands::HandleDisconnectPcgNodes);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("remove_pcg_node"),
+			TEXT("PCG"),
+			TEXT("Remove an inner node (and its edges) from a PCG Graph by index (from read_pcg_graph). Cannot remove the graph 'input'/'output' nodes. Node indices shift after removal. MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("node"), TEXT("string"), TEXT("Inner node index (from read_pcg_graph)"), /*required*/ true)
+			}),
+		&FSmithUEPCGCommands::HandleRemovePcgNode);
+
+	Registry.Register(
+		FSmithUEToolSchema(
 			TEXT("find_pcg_graphs"),
 			TEXT("PCG"),
 			TEXT("List PCG Graph assets under /Game (optionally filtered by a name substring). Read-only."),
@@ -603,6 +628,93 @@ TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleConnectPcgNodes(const TShared
 	Data->SetStringField(TEXT("from_pin"), FromPin);
 	Data->SetStringField(TEXT("to_node"), ToRef);
 	Data->SetStringField(TEXT("to_pin"), ToPin);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleDisconnectPcgNodes(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("from_node"), TEXT("to_node") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath, FromRef, ToRef, FromPin, ToPin;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("from_node"), FromRef);
+	Params->TryGetStringField(TEXT("to_node"), ToRef);
+	Params->TryGetStringField(TEXT("from_pin"), FromPin);
+	Params->TryGetStringField(TEXT("to_pin"), ToPin);
+
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+	UPCGNode* From = ResolvePcgNode(Graph, FromRef);
+	UPCGNode* To = ResolvePcgNode(Graph, ToRef);
+	if (!From || !To)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Could not resolve node(s): from='%s' to='%s'. Use 'input'/'output' or an inner node index from read_pcg_graph."), *FromRef, *ToRef));
+	}
+	if (FromPin.IsEmpty())
+	{
+		const TArray<TObjectPtr<UPCGPin>>& OutPins = From->GetOutputPins();
+		if (OutPins.Num() > 0 && OutPins[0]) { FromPin = OutPins[0]->Properties.Label.ToString(); }
+	}
+	if (ToPin.IsEmpty())
+	{
+		const TArray<TObjectPtr<UPCGPin>>& InPins = To->GetInputPins();
+		if (InPins.Num() > 0 && InPins[0]) { ToPin = InPins[0]->Properties.Label.ToString(); }
+	}
+
+	const bool bRemoved = Graph->RemoveEdge(From, FName(*FromPin), To, FName(*ToPin));
+	if (!bRemoved)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("No edge to remove: %s.%s -> %s.%s"), *FromRef, *FromPin, *ToRef, *ToPin));
+	}
+	Graph->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("disconnected"), true);
+	Data->SetStringField(TEXT("from_node"), FromRef);
+	Data->SetStringField(TEXT("from_pin"), FromPin);
+	Data->SetStringField(TEXT("to_node"), ToRef);
+	Data->SetStringField(TEXT("to_pin"), ToPin);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleRemovePcgNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("node") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath, NodeRef;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("node"), NodeRef);
+
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+	if (NodeRef.Equals(TEXT("input"), ESearchCase::IgnoreCase) || NodeRef.Equals(TEXT("output"), ESearchCase::IgnoreCase))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Cannot remove the graph 'input'/'output' nodes"));
+	}
+	UPCGNode* Node = ResolvePcgNode(Graph, NodeRef);
+	if (!Node)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Could not resolve node '%s'. Use an inner node index from read_pcg_graph."), *NodeRef));
+	}
+	const FString RemovedTitle = Node->GetNodeTitle(EPCGNodeTitleType::ListView).ToString();
+	Graph->RemoveNode(Node);
+	Graph->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("removed"), true);
+	Data->SetStringField(TEXT("node"), NodeRef);
+	Data->SetStringField(TEXT("title"), RemovedTitle);
+	Data->SetNumberField(TEXT("node_count"), Graph->GetNodes().Num());
+	Data->SetStringField(TEXT("note"), TEXT("Node + its edges removed. Inner node indices shift after removal."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
