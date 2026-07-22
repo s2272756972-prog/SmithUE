@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **283 tools** across **28 domains**.
+> Generated from `/api/v1/tools`. Total: **285 tools** across **28 domains**.
 
 ---
 
@@ -821,6 +821,25 @@ Set editor-facing flags/metadata on an existing Blueprint member variable: insta
 - `expose_on_spawn` (bool): Expose as a SpawnActor pin (needs instance_editable)
 - `category` (string): Variable category
 - `tooltip` (string): Variable tooltip
+
+### `bp_add_event_dispatcher`
+
+Create an Event Dispatcher (multicast delegate) on a Blueprint — the core event-communication primitive. Other graphs Bind/Assign to it and Call it to broadcast. Optionally give it a typed signature via params (array of {name, type}, e.g. [{"name":"NewHealth","type":"float"}]). Recompiles the Blueprint.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `dispatcher_name` (string, required): Event dispatcher name (convention: On*)
+- `params` (array): Optional signature params: array of {name, type} (type like float/int/bool/string/vector/object:<Class>)
+
+### `bp_remove_event_dispatcher`
+
+Remove an Event Dispatcher (and its signature graph) from a Blueprint by name. Recompiles the Blueprint.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `dispatcher_name` (string, required): Event dispatcher name to remove
 
 ### `bp_add_component`
 

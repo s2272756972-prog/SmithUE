@@ -39,6 +39,7 @@
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphUtilities.h"
 #include "EdGraphSchema_K2.h"
+#include "BlueprintEditorLibrary.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/InheritableComponentHandler.h"
@@ -1733,6 +1734,8 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_variable"), TEXT("Blueprint"), TEXT("Remove a Blueprint member variable by name"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name to remove"), true) }), &HandleBpRemoveVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_rename_variable"), TEXT("Blueprint"), TEXT("Rename a Blueprint member variable and fix up all graph references (via FBlueprintEditorUtils::RenameMemberVariable). Recompiles the Blueprint."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Current variable name"), true), FSmithUEToolParam(TEXT("new_name"), TEXT("string"), TEXT("New variable name"), true) }), &HandleBpRenameVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_variable_flags"), TEXT("Blueprint"), TEXT("Set editor-facing flags/metadata on an existing Blueprint member variable: instance_editable (shows in the Details panel of instances), blueprint_read_only, expose_on_spawn (requires instance_editable), category, tooltip. Only the provided fields are changed."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("instance_editable"), TEXT("bool"), TEXT("Editable per-instance (not Blueprint-only)"), false), FSmithUEToolParam(TEXT("blueprint_read_only"), TEXT("bool"), TEXT("Read-only in Blueprint graphs"), false), FSmithUEToolParam(TEXT("expose_on_spawn"), TEXT("bool"), TEXT("Expose as a SpawnActor pin (needs instance_editable)"), false), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Variable category"), false), FSmithUEToolParam(TEXT("tooltip"), TEXT("string"), TEXT("Variable tooltip"), false) }), &HandleBpSetVariableFlags);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_event_dispatcher"), TEXT("Blueprint"), TEXT("Create an Event Dispatcher (multicast delegate) on a Blueprint — the core event-communication primitive. Other graphs Bind/Assign to it and Call it to broadcast. Optionally give it a typed signature via params (array of {name, type}, e.g. [{\"name\":\"NewHealth\",\"type\":\"float\"}]). Recompiles the Blueprint."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("dispatcher_name"), TEXT("string"), TEXT("Event dispatcher name (convention: On*)"), true), FSmithUEToolParam(TEXT("params"), TEXT("array"), TEXT("Optional signature params: array of {name, type} (type like float/int/bool/string/vector/object:<Class>)"), false) }), &HandleBpAddEventDispatcher);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_event_dispatcher"), TEXT("Blueprint"), TEXT("Remove an Event Dispatcher (and its signature graph) from a Blueprint by name. Recompiles the Blueprint."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("dispatcher_name"), TEXT("string"), TEXT("Event dispatcher name to remove"), true) }), &HandleBpRemoveEventDispatcher);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), BpAddComponentClassParam, FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_rename_component"), TEXT("Blueprint"), TEXT("Rename a Blueprint SCS component variable (updates all graph references)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Current component name"), true), FSmithUEToolParam(TEXT("new_name"), TEXT("string"), TEXT("New component name"), true) }), &HandleBpRenameComponent);
@@ -2962,6 +2965,96 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetVariableFlags(const TSha
 	Data->SetStringField(TEXT("var_name"), VarName);
 	Data->SetObjectField(TEXT("applied"), Applied);
 	Data->SetStringField(TEXT("note"), TEXT("Flags applied + recompiled. Call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpAddEventDispatcher(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("dispatcher_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, DispName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("dispatcher_name"), DispName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	const FName DispF(*DispName);
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpAddEventDispatcher", "SmithUE: Add Event Dispatcher"));
+	if (!UBlueprintEditorLibrary::AddEventDispatcher(Blueprint, DispF))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to add event dispatcher '%s' (name may already be in use)"), *DispName));
+	}
+
+	// Optional typed signature parameters.
+	TArray<TSharedPtr<FJsonValue>> ParamsOut;
+	const TArray<TSharedPtr<FJsonValue>>* SigParams = nullptr;
+	if (Params->TryGetArrayField(TEXT("params"), SigParams) && SigParams)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *SigParams)
+		{
+			const TSharedPtr<FJsonObject>* Obj = nullptr;
+			if (!V.IsValid() || !V->TryGetObject(Obj) || !Obj) { continue; }
+			FString PName, PType;
+			(*Obj)->TryGetStringField(TEXT("name"), PName);
+			(*Obj)->TryGetStringField(TEXT("type"), PType);
+			if (PName.IsEmpty() || PType.IsEmpty()) { continue; }
+			FEdGraphPinType PinType;
+			if (!ResolvePinType(PType, PinType))
+			{
+				UBlueprintEditorLibrary::RemoveEventDispatcher(Blueprint, DispF); // roll back — keep the op atomic
+				return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unsupported param type '%s' for '%s'"), *PType, *PName));
+			}
+			if (!UBlueprintEditorLibrary::AddEventDispatcherParameter(Blueprint, DispF, FName(*PName), PinType))
+			{
+				UBlueprintEditorLibrary::RemoveEventDispatcher(Blueprint, DispF); // roll back
+				return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to add param '%s' to dispatcher '%s'"), *PName, *DispName));
+			}
+			TSharedPtr<FJsonObject> P = MakeShared<FJsonObject>();
+			P->SetStringField(TEXT("name"), PName);
+			P->SetStringField(TEXT("type"), PType);
+			ParamsOut.Add(MakeShared<FJsonValueObject>(P));
+		}
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("dispatcher_name"), DispName);
+	Data->SetNumberField(TEXT("param_count"), ParamsOut.Num());
+	Data->SetArrayField(TEXT("params"), ParamsOut);
+	Data->SetStringField(TEXT("note"), TEXT("Event dispatcher created + recompiled. Bind/Assign/Call it from graphs; call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveEventDispatcher(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("dispatcher_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, DispName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("dispatcher_name"), DispName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpRemoveEventDispatcher", "SmithUE: Remove Event Dispatcher"));
+	if (!UBlueprintEditorLibrary::RemoveEventDispatcher(Blueprint, FName(*DispName)))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Event dispatcher '%s' not found"), *DispName));
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("dispatcher_name"), DispName);
+	Data->SetBoolField(TEXT("removed"), true);
+	Data->SetStringField(TEXT("note"), TEXT("Event dispatcher removed + recompiled. Call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

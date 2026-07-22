@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 283 工具 / 28 域）
+### 新增域与工具（→ 285 工具 / 28 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -23,6 +23,10 @@
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
+- **Blueprint 事件通信补齐(2 工具)— 事件分发器**:填补此前"只能读、不能建/删事件分发器"的核心缺失。
+  - `bp_add_event_dispatcher {bp_path, dispatcher_name, params?}`:创建事件分发器(多播委托),可选带类型化签名参数(`params` = `[{name,type}]`,如 `OnHealthChanged(float NewHealth)`);基于引擎 `UBlueprintEditorLibrary::AddEventDispatcher` + `AddEventDispatcherParameter`。**参数失败原子回滚**(不残留半成品分发器)。
+  - `bp_remove_event_dispatcher {bp_path, dispatcher_name}`:删分发器 + 其签名图。
+  - 实测:建无参/带参分发器、重名拦截、坏类型拦截并回滚(delegates 计数正确)、删除、缺失拦截、编译零错。绑定/调用节点用现有 `bp_create_node`。
 - **Blueprint 变量补强(2 工具)**：
   - `bp_rename_variable {bp_path, var_name, new_name}`：`FBlueprintEditorUtils::RenameMemberVariable` 改名并**自动 fixup 所有图引用** + 重编译;拦截改名到已存在名 / 源变量不存在。
   - `bp_set_variable_flags {bp_path, var_name, instance_editable?, blueprint_read_only?, expose_on_spawn?, category?, tooltip?}`：改**已有变量**的编辑器面板标志/元数据(instance editable / 只读 / 暴露到 SpawnActor 引脚 / 类别 / tooltip),只改传入的字段。填补了"变量创建后不能改元数据"的缺口。
