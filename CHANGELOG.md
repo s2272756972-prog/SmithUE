@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 275 工具 / 27 域）
+### 新增域与工具（→ 279 工具 / 28 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -23,6 +23,10 @@
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
+- **新域 Insights(4 工具)— Unreal Insights trace 采集 + 离线分析**：
+  - `insights_start_trace {path?, channels?}`/`insights_stop_trace`/`insights_trace_status`：用 `FTraceAuxiliary` 录 `.utrace`(默认 channels `default,stat,counter`,默认落 Saved/Profiling)。
+  - `analyze_trace {path, hitch_ms?, counters?}`：`TraceServices::IAnalysisService::Analyze` 离线解析,输出 session 时长 + Game/Rendering 线程帧时分布(count、avg/min/max/median/p95/p99 ms、avg FPS、hitch_count)+ 可选 stat counters(min/max/avg/last)。实测 79s/67MB trace → 游戏线程 1721 帧 avg 8.34ms(119.9fps)。Top CPU timers(瓶颈拆解)后续补。
+  - Build.cs 加 `TraceServices` 依赖;修复未闭合帧 EndTime 哨兵值导致 `inf`(非法 JSON)的问题(帧时 >60s 视为无效丢弃)。
 - **视觉/坏资产自动化(2 工具)**：
   - **`capture_asset_thumbnail`(Asset)**：用引擎缩略图渲染器把任意 /Game 资产(材质/纹理/网格/蓝图/粒子…)渲成 PNG,**无需打开编辑器**;适中方形尺寸(默认 256,夹取 64–1024,适配 AI 视觉解析)。对材质/纹理编辑做视觉回归最直接。
   - **`find_broken_assets`(Analysis)**:文件夹/全库扫描坏资产——(1)缺失硬引用(依赖的 /Game 包已不存在的悬空引用)、(2)redirector;基于 Asset Registry 图**免加载**,`load_check=true` 额外加载以捕获加载失败。返回坏资产清单 + 逐项原因 + 具体缺失包。实测 /Game 447 资产查出 14 坏(5 redirector + 9 缺失引用)。

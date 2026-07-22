@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **275 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **279 tools** across **28 domains**.
 
 ---
 
@@ -1501,6 +1501,36 @@ Delete an InputAction or InputMappingContext asset by name or path
 
 - `name` (string): Asset name to search and delete
 - `path` (string): Full asset path to delete directly
+
+## Insights
+
+### `insights_start_trace`
+
+Start capturing an Unreal Insights trace to a .utrace file (FTraceAuxiliary). Enable channels to control what is recorded; default 'default,stat,counter' covers frames + CPU + stats + counters (good for perf-triage). If path is omitted the file goes to the project's Saved/Profiling with a timestamped name. Only one trace can be active — call insights_stop_trace first. Analyze the result with analyze_trace.
+
+**Parameters:**
+
+- `path` (string): Output .utrace path (default: Saved/Profiling/SmithUE_<timestamp>.utrace)
+- `channels` (string): Comma-separated trace channels (default 'default,stat,counter'; e.g. add 'gpu','loadtime','memory')
+
+### `insights_stop_trace`
+
+Stop the active Unreal Insights trace and flush the .utrace file. Returns the file path + size. Then run analyze_trace on it.
+
+### `insights_trace_status`
+
+Report whether an Insights trace is currently active/paused and the last destination path started by this plugin. Read-only.
+
+### `analyze_trace`
+
+Analyze a .utrace file offline (TraceServices) into a perf summary: session duration, and for the Game and Rendering threads the frame-time distribution (count, avg/min/max/median/p95/p99 ms, avg FPS, hitch_count over hitch_ms). Optionally summarize stat counters (min/max/avg/last). This is the primary perf-triage readout; top CPU timers are not yet included.
+
+**Parameters:**
+
+- `path` (string, required): .utrace file path to analyze
+- `hitch_ms` (number): Frame time (ms) above which a frame counts as a hitch (default 33.3)
+- `counters` (bool): Also summarize stat counters (default false)
+- `max_counters` (int): Max counters to report when counters=true (default 40)
 
 ## Interaction
 
