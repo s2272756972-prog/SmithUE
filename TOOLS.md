@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **256 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **260 tools** across **27 domains**.
 
 ---
 
@@ -70,6 +70,26 @@ Add a composite or task node to a Behavior Tree and connect it under the root (o
 - `node_type` (string, required): Selector/Sequence/SimpleParallel or a task name (Wait, MoveTo, ...)
 - `parent` (string): Parent composite node index (default: root). Tasks cannot be parents.
 
+### `bt_read_node`
+
+Read a Behavior Tree graph node's runtime instance: class + editable properties (name/type/value). node_index from bt_add_node / the graph. Read-only.
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+- `node_index` (int, required): Graph node index
+
+### `bt_set_node_property`
+
+Set a property on a Behavior Tree node's runtime instance (e.g. a Wait task's WaitTime, a MoveTo's AcceptableRadius). Use bt_read_node to list editable properties. MUTATES; call save_asset to persist.
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+- `node_index` (int, required): Graph node index (from bt_add_node)
+- `property` (string, required): Property name on the node (see bt_read_node)
+- `value` (string, required): Value as string (property-reflection import, e.g. '2.5', 'true')
+
 ### `create_eqs`
 
 Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests.
@@ -86,6 +106,15 @@ Read an EQS asset: option/generator count. Read-only.
 **Parameters:**
 
 - `eqs_path` (string, required): EQS asset path
+
+### `eqs_add_option`
+
+Add a generator option to an EQS asset (builds the editor graph + rebuilds runtime Options). generator = fuzzy name of a UEnvQueryGenerator subclass (SimpleGrid, ActorsOfClass, OnCircle, Donut, Cone, CurrentLocation, ...). MUTATES; call save_asset to persist.
+
+**Parameters:**
+
+- `eqs_path` (string, required): EQS asset path
+- `generator` (string, required): Generator class (fuzzy), e.g. SimpleGrid / ActorsOfClass / OnCircle
 
 ### `create_state_tree`
 
@@ -113,6 +142,17 @@ Add a child state to a State Tree (under the given parent state name, or the fir
 - `state_tree_path` (string, required): State Tree asset path
 - `state_name` (string, required): New state name
 - `parent` (string): Parent state name (default: first root state)
+
+### `state_tree_add_transition`
+
+Add a transition from one state to another (GotoState) and recompile. from_state/to_state are state names. trigger: OnStateCompleted (default) / OnStateSucceeded / OnStateFailed. MUTATES + recompiles; call save_asset to persist.
+
+**Parameters:**
+
+- `state_tree_path` (string, required): State Tree asset path
+- `from_state` (string, required): Source state name
+- `to_state` (string, required): Target state name
+- `trigger` (string): Transition trigger (default OnStateCompleted)
 
 ## Analysis
 

@@ -40,6 +40,12 @@
 #include "UObject/UObjectIterator.h"
 // EQS
 #include "EnvironmentQuery/EnvQuery.h"
+#include "EnvironmentQuery/EnvQueryOption.h"
+#include "EnvironmentQuery/EnvQueryGenerator.h"
+#include "EnvironmentQueryGraph.h"
+#include "EnvironmentQueryGraphNode_Root.h"
+#include "EnvironmentQueryGraphNode_Option.h"
+#include "EdGraphSchema_EnvironmentQuery.h"
 // State Tree
 #include "StateTree.h"
 #include "StateTreeEditorData.h"
@@ -126,6 +132,20 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		  FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Parent composite node index (default: root). Tasks cannot be parents."), false) }),
 		&FSmithUEAICommands::HandleBtAddNode);
 
+	Registry.Register(FSmithUEToolSchema(TEXT("bt_read_node"), TEXT("AI"),
+		TEXT("Read a Behavior Tree graph node's runtime instance: class + editable properties (name/type/value). node_index from bt_add_node / the graph. Read-only."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("node_index"), TEXT("int"), TEXT("Graph node index"), true) }),
+		&FSmithUEAICommands::HandleBtReadNode);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("bt_set_node_property"), TEXT("AI"),
+		TEXT("Set a property on a Behavior Tree node's runtime instance (e.g. a Wait task's WaitTime, a MoveTo's AcceptableRadius). Use bt_read_node to list editable properties. MUTATES; call save_asset to persist."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("node_index"), TEXT("int"), TEXT("Graph node index (from bt_add_node)"), true),
+		  FSmithUEToolParam(TEXT("property"), TEXT("string"), TEXT("Property name on the node (see bt_read_node)"), true),
+		  FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value as string (property-reflection import, e.g. '2.5', 'true')"), true) }),
+		&FSmithUEAICommands::HandleBtSetNodeProperty);
+
 	// ---- EQS ----
 	Registry.Register(FSmithUEToolSchema(TEXT("create_eqs"), TEXT("AI"),
 		TEXT("Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests."),
@@ -137,6 +157,12 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		TEXT("Read an EQS asset: option/generator count. Read-only."),
 		{ FSmithUEToolParam(TEXT("eqs_path"), TEXT("string"), TEXT("EQS asset path"), true) }),
 		&FSmithUEAICommands::HandleReadEqs);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("eqs_add_option"), TEXT("AI"),
+		TEXT("Add a generator option to an EQS asset (builds the editor graph + rebuilds runtime Options). generator = fuzzy name of a UEnvQueryGenerator subclass (SimpleGrid, ActorsOfClass, OnCircle, Donut, Cone, CurrentLocation, ...). MUTATES; call save_asset to persist."),
+		{ FSmithUEToolParam(TEXT("eqs_path"), TEXT("string"), TEXT("EQS asset path"), true),
+		  FSmithUEToolParam(TEXT("generator"), TEXT("string"), TEXT("Generator class (fuzzy), e.g. SimpleGrid / ActorsOfClass / OnCircle"), true).SetExample(TEXT("SimpleGrid")) }),
+		&FSmithUEAICommands::HandleEqsAddOption);
 
 	// ---- State Tree ----
 	Registry.Register(FSmithUEToolSchema(TEXT("create_state_tree"), TEXT("AI"),
@@ -156,6 +182,15 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		  FSmithUEToolParam(TEXT("state_name"), TEXT("string"), TEXT("New state name"), true),
 		  FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Parent state name (default: first root state)"), false) }),
 		&FSmithUEAICommands::HandleStateTreeAddState);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("state_tree_add_transition"), TEXT("AI"),
+		TEXT("Add a transition from one state to another (GotoState) and recompile. from_state/to_state are state names. trigger: OnStateCompleted (default) / OnStateSucceeded / OnStateFailed. MUTATES + recompiles; call save_asset to persist."),
+		{ FSmithUEToolParam(TEXT("state_tree_path"), TEXT("string"), TEXT("State Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("from_state"), TEXT("string"), TEXT("Source state name"), true),
+		  FSmithUEToolParam(TEXT("to_state"), TEXT("string"), TEXT("Target state name"), true),
+		  FSmithUEToolParam(TEXT("trigger"), TEXT("string"), TEXT("Transition trigger (default OnStateCompleted)"), false)
+			.SetAllowedValues({ TEXT("OnStateCompleted"), TEXT("OnStateSucceeded"), TEXT("OnStateFailed") }) }),
+		&FSmithUEAICommands::HandleStateTreeAddTransition);
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +440,81 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtAddNode(const TSharedPtr<FJs
 // ---------------------------------------------------------------------------
 // EQS
 // ---------------------------------------------------------------------------
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtReadNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path"), TEXT("node_index") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath; int32 NodeIndex = -1;
+	Params->TryGetStringField(TEXT("bt_path"), BtPath); Params->TryGetNumberField(TEXT("node_index"), NodeIndex);
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+	UBehaviorTreeGraph* Graph = Cast<UBehaviorTreeGraph>(BT->BTGraph);
+	if (!Graph || !Graph->Nodes.IsValidIndex(NodeIndex)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid node_index (open/author the BT graph first)")); }
+	UBehaviorTreeGraphNode* GN = Cast<UBehaviorTreeGraphNode>(Graph->Nodes[NodeIndex]);
+	UObject* Instance = GN ? GN->NodeInstance : nullptr;
+	if (!Instance) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph node has no runtime instance")); }
+
+	TArray<TSharedPtr<FJsonValue>> PropsArr;
+	for (TFieldIterator<FProperty> It(Instance->GetClass()); It; ++It)
+	{
+		FProperty* Prop = *It;
+		if (!Prop || !Prop->HasAnyPropertyFlags(CPF_Edit)) { continue; }
+		FString ValueStr;
+		Prop->ExportTextItem_Direct(ValueStr, Prop->ContainerPtrToValuePtr<void>(Instance), nullptr, Instance, PPF_None);
+		TSharedPtr<FJsonObject> P = MakeShared<FJsonObject>();
+		P->SetStringField(TEXT("name"), Prop->GetName());
+		P->SetStringField(TEXT("type"), Prop->GetCPPType());
+		P->SetStringField(TEXT("value"), ValueStr);
+		PropsArr.Add(MakeShared<FJsonValueObject>(P));
+	}
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("node_index"), NodeIndex);
+	Data->SetStringField(TEXT("class"), Instance->GetClass()->GetName());
+	Data->SetNumberField(TEXT("property_count"), PropsArr.Num());
+	Data->SetArrayField(TEXT("properties"), PropsArr);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtSetNodeProperty(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path"), TEXT("node_index"), TEXT("property"), TEXT("value") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath, PropertyName, Value; int32 NodeIndex = -1;
+	Params->TryGetStringField(TEXT("bt_path"), BtPath); Params->TryGetNumberField(TEXT("node_index"), NodeIndex);
+	Params->TryGetStringField(TEXT("property"), PropertyName); Params->TryGetStringField(TEXT("value"), Value);
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+	UBehaviorTreeGraph* Graph = Cast<UBehaviorTreeGraph>(BT->BTGraph);
+	if (!Graph || !Graph->Nodes.IsValidIndex(NodeIndex)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid node_index")); }
+	UBehaviorTreeGraphNode* GN = Cast<UBehaviorTreeGraphNode>(Graph->Nodes[NodeIndex]);
+	UObject* Instance = GN ? GN->NodeInstance : nullptr;
+	if (!Instance) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph node has no runtime instance")); }
+
+	FProperty* Prop = Instance->GetClass()->FindPropertyByName(FName(*PropertyName));
+	if (!Prop)
+	{
+		TArray<FString> Editable;
+		for (TFieldIterator<FProperty> It(Instance->GetClass()); It; ++It) { if (It->HasAnyPropertyFlags(CPF_Edit)) { Editable.Add(It->GetName()); } }
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Property '%s' not found on %s. Editable: %s"), *PropertyName, *Instance->GetClass()->GetName(), *FString::Join(Editable, TEXT(", "))));
+	}
+	void* Addr = Prop->ContainerPtrToValuePtr<void>(Instance);
+	Instance->Modify();
+	const TCHAR* Result = Prop->ImportText_Direct(*Value, Addr, Instance, PPF_None);
+	if (!Result) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to set '%s' to '%s'"), *PropertyName, *Value)); }
+	Graph->UpdateAsset(UBehaviorTreeGraph::ClearDebuggerFlags | UBehaviorTreeGraph::KeepRebuildCounter);
+	BT->MarkPackageDirty();
+
+	FString After; Prop->ExportTextItem_Direct(After, Addr, nullptr, Instance, PPF_None);
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("node_index"), NodeIndex);
+	Data->SetStringField(TEXT("property"), PropertyName);
+	Data->SetStringField(TEXT("value"), After);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// EQS impl
+// ---------------------------------------------------------------------------
 TSharedPtr<FJsonObject> FSmithUEAICommands::HandleCreateEqs(const TSharedPtr<FJsonObject>& Params)
 {
 	FString Error;
@@ -431,6 +541,81 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleReadEqs(const TSharedPtr<FJson
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("name"), Query->GetName());
 	Data->SetNumberField(TEXT("option_count"), Query->GetOptions().Num());
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleEqsAddOption(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("eqs_path"), TEXT("generator") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString EqsPath, GeneratorName;
+	Params->TryGetStringField(TEXT("eqs_path"), EqsPath); Params->TryGetStringField(TEXT("generator"), GeneratorName);
+	UEnvQuery* Query = LoadObject<UEnvQuery>(nullptr, *EqsPath);
+	if (!Query) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("EQS not found: '%s'"), *EqsPath)); }
+
+	// Resolve generator class (UEnvQueryGenerator subclass, fuzzy name).
+	UClass* GenClass = nullptr;
+	const TArray<FString> Cands = { GeneratorName, FString::Printf(TEXT("EnvQueryGenerator_%s"), *GeneratorName), FString::Printf(TEXT("UEnvQueryGenerator_%s"), *GeneratorName) };
+	for (TObjectIterator<UClass> It; It && !GenClass; ++It)
+	{
+		UClass* C = *It;
+		if (!C->IsChildOf(UEnvQueryGenerator::StaticClass()) || C->HasAnyClassFlags(CLASS_Abstract)) { continue; }
+		for (const FString& Cand : Cands) { if (C->GetName().Equals(Cand, ESearchCase::IgnoreCase)) { GenClass = C; break; } }
+	}
+	if (!GenClass)
+	{
+		for (TObjectIterator<UClass> It; It && !GenClass; ++It)
+		{
+			UClass* C = *It;
+			if (C->IsChildOf(UEnvQueryGenerator::StaticClass()) && !C->HasAnyClassFlags(CLASS_Abstract) && C->GetName().Contains(GeneratorName, ESearchCase::IgnoreCase)) { GenClass = C; }
+		}
+	}
+	if (!GenClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown generator '%s' (try SimpleGrid/ActorsOfClass/OnCircle/Donut/Cone)"), *GeneratorName)); }
+
+	// Ensure the EQS editor graph exists with a Root node.
+	UEnvironmentQueryGraph* Graph = Cast<UEnvironmentQueryGraph>(Query->EdGraph);
+	if (!Graph)
+	{
+		Query->EdGraph = FBlueprintEditorUtils::CreateNewGraph(Query, TEXT("EnvQuery"), UEnvironmentQueryGraph::StaticClass(), UEdGraphSchema_EnvironmentQuery::StaticClass());
+		Graph = Cast<UEnvironmentQueryGraph>(Query->EdGraph);
+		if (Graph)
+		{
+			const UEdGraphSchema* Schema = Graph->GetSchema();
+			if (Schema) { Schema->CreateDefaultNodesForGraph(*Graph); }
+			Graph->OnCreated();
+		}
+	}
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create/get the EQS graph")); }
+
+	UEnvironmentQueryGraphNode_Root* Root = nullptr;
+	for (UEdGraphNode* N : Graph->Nodes) { if ((Root = Cast<UEnvironmentQueryGraphNode_Root>(N)) != nullptr) { break; } }
+
+	FGraphNodeCreator<UEnvironmentQueryGraphNode_Option> Creator(*Graph);
+	UEnvironmentQueryGraphNode_Option* OptNode = Creator.CreateNode();
+	// The option graph node's NodeInstance is a UEnvQueryOption wrapping the generator
+	// (UEnvironmentQueryGraph::UpdateAsset reads OptionInstance->Generator).
+	UEnvQueryOption* Option = NewObject<UEnvQueryOption>(Query);
+	Option->Generator = NewObject<UEnvQueryGenerator>(Query, GenClass);
+	Option->Generator->UpdateNodeVersion();
+	Option->Generator->SetFlags(RF_Transactional);
+	OptNode->NodeInstance = Option;
+	if (Root) { OptNode->NodePosX = Root->NodePosX; OptNode->NodePosY = Root->NodePosY + 150 + (Graph->Nodes.Num() % 5) * 30; }
+	Creator.Finalize();
+
+	if (Root)
+	{
+		UEdGraphPin* RootOut = Root->GetOutputPin();
+		UEdGraphPin* OptIn = OptNode->GetInputPin();
+		if (RootOut && OptIn) { RootOut->MakeLinkTo(OptIn); }
+	}
+
+	Graph->UpdateAsset();
+	Query->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("generator"), GenClass->GetName());
+	Data->SetNumberField(TEXT("option_count"), Query->GetOptions().Num());
+	Data->SetStringField(TEXT("note"), TEXT("Option added + runtime rebuilt; call save_asset. Author tests on the option in the editor."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -536,5 +721,47 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleStateTreeAddState(const TShare
 	Data->SetStringField(TEXT("parent"), Parent->Name.ToString());
 	Data->SetBoolField(TEXT("compiled"), bCompiled);
 	Data->SetStringField(TEXT("note"), TEXT("State added + recompiled in-memory; call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleStateTreeAddTransition(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("state_tree_path"), TEXT("from_state"), TEXT("to_state") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString StPath, FromName, ToName, TriggerStr;
+	Params->TryGetStringField(TEXT("state_tree_path"), StPath); Params->TryGetStringField(TEXT("from_state"), FromName);
+	Params->TryGetStringField(TEXT("to_state"), ToName); Params->TryGetStringField(TEXT("trigger"), TriggerStr);
+	UStateTree* ST = LoadObject<UStateTree>(nullptr, *StPath);
+	if (!ST) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("State Tree not found: '%s'"), *StPath)); }
+	UStateTreeEditorData* EditorData = Cast<UStateTreeEditorData>(ST->EditorData);
+	if (!EditorData) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("State Tree has no EditorData")); }
+
+	UStateTreeState* From = nullptr; UStateTreeState* To = nullptr;
+	const FName FromF(*FromName), ToF(*ToName);
+	for (UStateTreeState* Root : EditorData->SubTrees)
+	{
+		if (!From) { From = FindStateByName(Root, FromF); }
+		if (!To)   { To   = FindStateByName(Root, ToF); }
+	}
+	if (!From) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Source state '%s' not found"), *FromName)); }
+	if (!To)   { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Target state '%s' not found"), *ToName)); }
+
+	EStateTreeTransitionTrigger Trigger = EStateTreeTransitionTrigger::OnStateCompleted;
+	if (TriggerStr.Equals(TEXT("OnStateSucceeded"), ESearchCase::IgnoreCase)) { Trigger = EStateTreeTransitionTrigger::OnStateSucceeded; }
+	else if (TriggerStr.Equals(TEXT("OnStateFailed"), ESearchCase::IgnoreCase)) { Trigger = EStateTreeTransitionTrigger::OnStateFailed; }
+
+	From->Modify();
+	From->AddTransition(Trigger, EStateTreeTransitionType::GotoState, To);
+
+	FStateTreeCompilerLog Log;
+	const bool bCompiled = UStateTreeEditingSubsystem::CompileStateTree(ST, Log);
+	ST->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("from_state"), FromName);
+	Data->SetStringField(TEXT("to_state"), ToName);
+	Data->SetStringField(TEXT("trigger"), TriggerStr.IsEmpty() ? TEXT("OnStateCompleted") : TriggerStr);
+	Data->SetBoolField(TEXT("compiled"), bCompiled);
+	Data->SetStringField(TEXT("note"), TEXT("Transition added + recompiled; call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
