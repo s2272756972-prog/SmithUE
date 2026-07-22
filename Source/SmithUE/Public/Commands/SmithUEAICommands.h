@@ -22,6 +22,7 @@ private:
 	// Behavior Tree
 	static TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBtSetBlackboard(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBtAddNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadBehaviorTree(const TSharedPtr<FJsonObject>& Params);
 	// EQS
 	static TSharedPtr<FJsonObject> HandleCreateEqs(const TSharedPtr<FJsonObject>& Params);

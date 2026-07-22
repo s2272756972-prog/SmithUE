@@ -170,6 +170,30 @@ void FSmithUEPCGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 
 	Registry.Register(
 		FSmithUEToolSchema(
+			TEXT("set_pcg_node_property"),
+			TEXT("PCG"),
+			TEXT("Set a property on a PCG node's Settings (e.g. SurfaceSampler PointsPerSquaredMeter, StaticMeshSpawner mesh). node = 'input'/'output' or an inner node index from read_pcg_graph. Use read_pcg_node to list settable properties + current values. MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("node"), TEXT("string"), TEXT("Node ref: inner node index (from read_pcg_graph)"), /*required*/ true),
+				FSmithUEToolParam(TEXT("property"), TEXT("string"), TEXT("Property name on the node's Settings (see read_pcg_node)"), /*required*/ true),
+				FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value as string (imported via property reflection, e.g. '250', 'true', '(X=100,Y=100,Z=50)')"), /*required*/ true)
+			}),
+		&FSmithUEPCGCommands::HandleSetPcgNodeProperty);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("read_pcg_node"),
+			TEXT("PCG"),
+			TEXT("Read a PCG node's Settings details: node class + all EditAnywhere properties (name, type, current value). node = 'input'/'output' or an inner node index. Read-only."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("node"), TEXT("string"), TEXT("Node ref: 'input'/'output' or an inner node index"), /*required*/ true)
+			}),
+		&FSmithUEPCGCommands::HandleReadPcgNode);
+
+	Registry.Register(
+		FSmithUEToolSchema(
 			TEXT("connect_pcg_nodes"),
 			TEXT("PCG"),
 			TEXT("Connect two nodes in a PCG Graph. Node refs are 'input'/'output' (the graph's I/O nodes) or an inner node INDEX from read_pcg_graph. Pin labels default to the source's first output pin and the target's first input pin (usually 'Out'->'In'); the graph input node's output pin is 'Input' and the output node's input pin is 'Output'. MUTATES the asset."),
@@ -409,6 +433,97 @@ TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleAddPcgNode(const TSharedPtr<F
 	Data->SetArrayField(TEXT("output_pins"), PinLabels(Node->GetOutputPins()));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleSetPcgNodeProperty(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("node"), TEXT("property"), TEXT("value") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath, NodeRef, PropertyName, Value;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("node"), NodeRef);
+	Params->TryGetStringField(TEXT("property"), PropertyName);
+	Params->TryGetStringField(TEXT("value"), Value);
+
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+	UPCGNode* Node = ResolvePcgNode(Graph, NodeRef);
+	if (!Node) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Could not resolve node '%s' (use 'input'/'output' or an inner node index)"), *NodeRef)); }
+	UPCGSettings* Settings = Node->GetSettings();
+	if (!Settings) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Node has no Settings object")); }
+
+	FProperty* Prop = Settings->GetClass()->FindPropertyByName(FName(*PropertyName));
+	if (!Prop)
+	{
+		TArray<FString> Editable;
+		for (TFieldIterator<FProperty> It(Settings->GetClass()); It; ++It) { if (It->HasAnyPropertyFlags(CPF_Edit)) { Editable.Add(It->GetName()); } }
+		return FSmithUECommonUtils::CreateErrorResponse(
+			FString::Printf(TEXT("Property '%s' not found on %s. Editable properties: %s"), *PropertyName, *Settings->GetClass()->GetName(), *FString::Join(Editable, TEXT(", "))));
+	}
+
+	void* Addr = Prop->ContainerPtrToValuePtr<void>(Settings);
+	Settings->Modify();
+	const TCHAR* Result = Prop->ImportText_Direct(*Value, Addr, Settings, PPF_None);
+	if (!Result)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to set '%s' to '%s' (check value format)"), *PropertyName, *Value));
+	}
+	// Value is applied on the settings object; persist via save_asset. (PostEditChangeProperty
+	// is protected on UPCGSettings; PCG re-reads settings on generate.)
+	Graph->MarkPackageDirty();
+
+	FString After;
+	Prop->ExportTextItem_Direct(After, Addr, nullptr, Settings, PPF_None);
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("node"), NodeRef);
+	Data->SetStringField(TEXT("property"), PropertyName);
+	Data->SetStringField(TEXT("value"), After);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleReadPcgNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("node") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath, NodeRef;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("node"), NodeRef);
+
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+	UPCGNode* Node = ResolvePcgNode(Graph, NodeRef);
+	if (!Node) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Could not resolve node '%s'"), *NodeRef)); }
+	UPCGSettings* Settings = Node->GetSettings();
+	if (!Settings) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Node has no Settings object")); }
+
+	TArray<TSharedPtr<FJsonValue>> PropsArr;
+	for (TFieldIterator<FProperty> It(Settings->GetClass()); It; ++It)
+	{
+		FProperty* Prop = *It;
+		if (!Prop || !Prop->HasAnyPropertyFlags(CPF_Edit)) { continue; }
+		FString ValueStr;
+		Prop->ExportTextItem_Direct(ValueStr, Prop->ContainerPtrToValuePtr<void>(Settings), nullptr, Settings, PPF_None);
+		TSharedPtr<FJsonObject> P = MakeShared<FJsonObject>();
+		P->SetStringField(TEXT("name"), Prop->GetName());
+		P->SetStringField(TEXT("type"), Prop->GetCPPType());
+		P->SetStringField(TEXT("value"), ValueStr);
+		PropsArr.Add(MakeShared<FJsonValueObject>(P));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("node"), NodeRef);
+	Data->SetStringField(TEXT("class"), Settings->GetClass()->GetName());
+	Data->SetStringField(TEXT("title"), Node->GetNodeTitle(EPCGNodeTitleType::ListView).ToString());
+	Data->SetNumberField(TEXT("property_count"), PropsArr.Num());
+	Data->SetArrayField(TEXT("properties"), PropsArr);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
 
 TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleConnectPcgNodes(const TSharedPtr<FJsonObject>& Params)
 {

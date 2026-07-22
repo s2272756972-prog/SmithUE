@@ -24,6 +24,20 @@
 // Behavior Tree
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BTCompositeNode.h"
+#include "BehaviorTree/BTTaskNode.h"
+#include "BehaviorTree/Composites/BTComposite_Selector.h"
+#include "BehaviorTree/Composites/BTComposite_Sequence.h"
+#include "BehaviorTree/Composites/BTComposite_SimpleParallel.h"
+#include "BehaviorTreeGraph.h"
+#include "BehaviorTreeGraphNode_Root.h"
+#include "BehaviorTreeGraphNode_Composite.h"
+#include "BehaviorTreeGraphNode_Task.h"
+#include "EdGraphSchema_BehaviorTree.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphPin.h"
+#include "EdGraph/EdGraphSchema.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "UObject/UObjectIterator.h"
 // EQS
 #include "EnvironmentQuery/EnvQuery.h"
 // State Tree
@@ -104,6 +118,13 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		TEXT("Read a Behavior Tree asset: linked blackboard + root node class. Read-only."),
 		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true) }),
 		&FSmithUEAICommands::HandleReadBehaviorTree);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("bt_add_node"), TEXT("AI"),
+		TEXT("Add a composite or task node to a Behavior Tree and connect it under the root (or a parent composite node index). node_type: 'Selector'/'Sequence'/'SimpleParallel' (composite) or a task name ('Wait','MoveTo','RunEQSQuery',... resolves UBTTask_* by name). Builds the editor graph + rebuilds the runtime tree. MUTATES; call save_asset to persist. Returns the new node's graph index (use as parent for further nodes)."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("node_type"), TEXT("string"), TEXT("Selector/Sequence/SimpleParallel or a task name (Wait, MoveTo, ...)"), true).SetExample(TEXT("Sequence")),
+		  FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Parent composite node index (default: root). Tasks cannot be parents."), false) }),
+		&FSmithUEAICommands::HandleBtAddNode);
 
 	// ---- EQS ----
 	Registry.Register(FSmithUEToolSchema(TEXT("create_eqs"), TEXT("AI"),
@@ -260,6 +281,124 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleReadBehaviorTree(const TShared
 	Data->SetStringField(TEXT("name"), BT->GetName());
 	Data->SetStringField(TEXT("blackboard"), BT->BlackboardAsset ? BT->BlackboardAsset->GetPathName() : FString());
 	Data->SetStringField(TEXT("root_node"), BT->RootNode ? BT->RootNode->GetClass()->GetName() : TEXT("None (author in editor)"));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+namespace
+{
+	UClass* ResolveBTNodeClass(const FString& Name, bool& bOutComposite)
+	{
+		const FString L = Name.ToLower();
+		if (L == TEXT("selector")) { bOutComposite = true; return UBTComposite_Selector::StaticClass(); }
+		if (L == TEXT("sequence")) { bOutComposite = true; return UBTComposite_Sequence::StaticClass(); }
+		if (L == TEXT("simpleparallel") || L == TEXT("parallel")) { bOutComposite = true; return UBTComposite_SimpleParallel::StaticClass(); }
+		// Task: resolve a concrete UBTTaskNode subclass by fuzzy name.
+		const TArray<FString> Cands = { Name, FString::Printf(TEXT("BTTask_%s"), *Name), FString::Printf(TEXT("UBTTask_%s"), *Name) };
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			UClass* C = *It;
+			if (!C->IsChildOf(UBTTaskNode::StaticClass()) || C->HasAnyClassFlags(CLASS_Abstract)) { continue; }
+			for (const FString& Cand : Cands) { if (C->GetName().Equals(Cand, ESearchCase::IgnoreCase)) { bOutComposite = false; return C; } }
+		}
+		return nullptr;
+	}
+
+	UBehaviorTreeGraph* EnsureBTGraph(UBehaviorTree* BT)
+	{
+		UBehaviorTreeGraph* Graph = Cast<UBehaviorTreeGraph>(BT->BTGraph);
+		if (!Graph)
+		{
+			BT->BTGraph = FBlueprintEditorUtils::CreateNewGraph(BT, TEXT("Behavior Tree"), UBehaviorTreeGraph::StaticClass(), UEdGraphSchema_BehaviorTree::StaticClass());
+			Graph = Cast<UBehaviorTreeGraph>(BT->BTGraph);
+			if (Graph)
+			{
+				const UEdGraphSchema* Schema = Graph->GetSchema();
+				if (Schema) { Schema->CreateDefaultNodesForGraph(*Graph); } // spawns the Root node
+				Graph->OnCreated();
+			}
+		}
+		return Graph;
+	}
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtAddNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path"), TEXT("node_type") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath, NodeType, ParentRef;
+	Params->TryGetStringField(TEXT("bt_path"), BtPath); Params->TryGetStringField(TEXT("node_type"), NodeType); Params->TryGetStringField(TEXT("parent"), ParentRef);
+
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+
+	bool bIsComposite = false;
+	UClass* NodeClass = ResolveBTNodeClass(NodeType, bIsComposite);
+	if (!NodeClass) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown node_type '%s' (use Selector/Sequence/SimpleParallel, or a task name like Wait/MoveTo)"), *NodeType)); }
+
+	UBehaviorTreeGraph* Graph = EnsureBTGraph(BT);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create/get the Behavior Tree graph")); }
+
+	// Resolve parent graph node: by index, else the Root node.
+	UBehaviorTreeGraphNode* ParentNode = nullptr;
+	if (!ParentRef.IsEmpty() && ParentRef.IsNumeric())
+	{
+		const int32 Idx = FCString::Atoi(*ParentRef);
+		if (Graph->Nodes.IsValidIndex(Idx)) { ParentNode = Cast<UBehaviorTreeGraphNode>(Graph->Nodes[Idx]); }
+	}
+	if (!ParentNode)
+	{
+		for (UEdGraphNode* N : Graph->Nodes) { if (UBehaviorTreeGraphNode_Root* Root = Cast<UBehaviorTreeGraphNode_Root>(N)) { ParentNode = Root; break; } }
+	}
+	if (!ParentNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Could not resolve a parent graph node (no root?)")); }
+
+	// Create the graph node + its runtime NodeInstance.
+	UBehaviorTreeGraphNode* NewGraphNode = nullptr;
+	if (bIsComposite)
+	{
+		FGraphNodeCreator<UBehaviorTreeGraphNode_Composite> Creator(*Graph);
+		UBehaviorTreeGraphNode_Composite* GN = Creator.CreateNode();
+		GN->NodeInstance = NewObject<UBTCompositeNode>(BT, NodeClass);
+		NewGraphNode = GN;
+		Creator.Finalize();
+	}
+	else
+	{
+		FGraphNodeCreator<UBehaviorTreeGraphNode_Task> Creator(*Graph);
+		UBehaviorTreeGraphNode_Task* GN = Creator.CreateNode();
+		GN->NodeInstance = NewObject<UBTTaskNode>(BT, NodeClass);
+		NewGraphNode = GN;
+		Creator.Finalize();
+	}
+	if (!NewGraphNode) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to create graph node")); }
+
+	// Cascade position below the parent.
+	NewGraphNode->NodePosX = ParentNode->NodePosX + (Graph->Nodes.Num() % 5) * 40;
+	NewGraphNode->NodePosY = ParentNode->NodePosY + 150;
+
+	// Connect parent output -> new node input.
+	UEdGraphPin* ParentOut = ParentNode->GetOutputPin();
+	UEdGraphPin* ChildIn = NewGraphNode->GetInputPin();
+	if (ParentOut && ChildIn)
+	{
+		ParentOut->MakeLinkTo(ChildIn);
+	}
+	else
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Parent has no output pin or child has no input pin (task nodes cannot be parents)"));
+	}
+
+	// Rebuild the runtime tree from the graph.
+	Graph->UpdateAsset(UBehaviorTreeGraph::ClearDebuggerFlags | UBehaviorTreeGraph::KeepRebuildCounter);
+	Graph->MarkPackageDirty();
+	BT->MarkPackageDirty();
+
+	const int32 NewIndex = Graph->Nodes.IndexOfByKey(NewGraphNode);
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("node_index"), NewIndex);
+	Data->SetStringField(TEXT("node_class"), NodeClass->GetName());
+	Data->SetBoolField(TEXT("is_composite"), bIsComposite);
+	Data->SetStringField(TEXT("parent"), ParentRef.IsEmpty() ? TEXT("root") : ParentRef);
+	Data->SetStringField(TEXT("note"), TEXT("Node added + runtime tree rebuilt; call save_asset to persist. Use node_index as parent for children (composites only)."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

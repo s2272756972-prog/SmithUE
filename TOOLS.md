@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **253 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **256 tools** across **27 domains**.
 
 ---
 
@@ -59,6 +59,16 @@ Read a Behavior Tree asset: linked blackboard + root node class. Read-only.
 **Parameters:**
 
 - `bt_path` (string, required): Behavior Tree asset path
+
+### `bt_add_node`
+
+Add a composite or task node to a Behavior Tree and connect it under the root (or a parent composite node index). node_type: 'Selector'/'Sequence'/'SimpleParallel' (composite) or a task name ('Wait','MoveTo','RunEQSQuery',... resolves UBTTask_* by name). Builds the editor graph + rebuilds the runtime tree. MUTATES; call save_asset to persist. Returns the new node's graph index (use as parent for further nodes).
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+- `node_type` (string, required): Selector/Sequence/SimpleParallel or a task name (Wait, MoveTo, ...)
+- `parent` (string): Parent composite node index (default: root). Tasks cannot be parents.
 
 ### `create_eqs`
 
@@ -1996,6 +2006,26 @@ Add an inner node to a PCG Graph by settings class (fuzzy name, e.g. 'SurfaceSam
 
 - `graph_path` (string, required): PCG Graph asset path
 - `settings_class` (string, required): PCG settings class (fuzzy), e.g. SurfaceSampler / TransformPoints / StaticMeshSpawner / DensityFilter
+
+### `set_pcg_node_property`
+
+Set a property on a PCG node's Settings (e.g. SurfaceSampler PointsPerSquaredMeter, StaticMeshSpawner mesh). node = 'input'/'output' or an inner node index from read_pcg_graph. Use read_pcg_node to list settable properties + current values. MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `node` (string, required): Node ref: inner node index (from read_pcg_graph)
+- `property` (string, required): Property name on the node's Settings (see read_pcg_node)
+- `value` (string, required): Value as string (imported via property reflection, e.g. '250', 'true', '(X=100,Y=100,Z=50)')
+
+### `read_pcg_node`
+
+Read a PCG node's Settings details: node class + all EditAnywhere properties (name, type, current value). node = 'input'/'output' or an inner node index. Read-only.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `node` (string, required): Node ref: 'input'/'output' or an inner node index
 
 ### `connect_pcg_nodes`
 
