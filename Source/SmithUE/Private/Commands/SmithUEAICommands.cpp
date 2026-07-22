@@ -32,6 +32,8 @@
 #include "StateTreeState.h"
 #include "StateTreeFactory.h"
 #include "Components/StateTreeComponentSchema.h"
+#include "StateTreeEditingSubsystem.h"
+#include "StateTreeCompilerLog.h"
 
 // ---------------------------------------------------------------------------
 namespace
@@ -126,6 +128,13 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		TEXT("Read a State Tree asset: schema + root/sub states. Read-only."),
 		{ FSmithUEToolParam(TEXT("state_tree_path"), TEXT("string"), TEXT("State Tree asset path"), true) }),
 		&FSmithUEAICommands::HandleReadStateTree);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("state_tree_add_state"), TEXT("AI"),
+		TEXT("Add a child state to a State Tree (under the given parent state name, or the first root if omitted), then recompile. MUTATES + recompiles; call save_asset to persist."),
+		{ FSmithUEToolParam(TEXT("state_tree_path"), TEXT("string"), TEXT("State Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("state_name"), TEXT("string"), TEXT("New state name"), true),
+		  FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Parent state name (default: first root state)"), false) }),
+		&FSmithUEAICommands::HandleStateTreeAddState);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,5 +343,59 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleReadStateTree(const TSharedPtr
 		}
 	}
 	Data->SetArrayField(TEXT("root_states"), States);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+namespace
+{
+	UStateTreeState* FindStateByName(UStateTreeState* State, const FName& Name)
+	{
+		if (!State) { return nullptr; }
+		if (State->Name == Name) { return State; }
+		for (UStateTreeState* Child : State->Children)
+		{
+			if (UStateTreeState* Found = FindStateByName(Child, Name)) { return Found; }
+		}
+		return nullptr;
+	}
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleStateTreeAddState(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("state_tree_path"), TEXT("state_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString StPath, StateName, ParentName;
+	Params->TryGetStringField(TEXT("state_tree_path"), StPath); Params->TryGetStringField(TEXT("state_name"), StateName); Params->TryGetStringField(TEXT("parent"), ParentName);
+	UStateTree* ST = LoadObject<UStateTree>(nullptr, *StPath);
+	if (!ST) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("State Tree not found: '%s'"), *StPath)); }
+	UStateTreeEditorData* EditorData = Cast<UStateTreeEditorData>(ST->EditorData);
+	if (!EditorData) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("State Tree has no EditorData")); }
+
+	// Resolve parent: named state (searched under all roots) or the first root.
+	UStateTreeState* Parent = nullptr;
+	if (!ParentName.IsEmpty())
+	{
+		const FName PName(*ParentName);
+		for (UStateTreeState* Root : EditorData->SubTrees) { if ((Parent = FindStateByName(Root, PName)) != nullptr) { break; } }
+		if (!Parent) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parent state '%s' not found"), *ParentName)); }
+	}
+	else
+	{
+		if (EditorData->SubTrees.Num() > 0) { Parent = EditorData->SubTrees[0]; }
+		else { Parent = &EditorData->AddRootState(); }
+	}
+
+	EditorData->Modify();
+	UStateTreeState& NewState = Parent->AddChildState(FName(*StateName));
+
+	FStateTreeCompilerLog Log;
+	const bool bCompiled = UStateTreeEditingSubsystem::CompileStateTree(ST, Log);
+	ST->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("state_name"), NewState.Name.ToString());
+	Data->SetStringField(TEXT("parent"), Parent->Name.ToString());
+	Data->SetBoolField(TEXT("compiled"), bCompiled);
+	Data->SetStringField(TEXT("note"), TEXT("State added + recompiled in-memory; call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

@@ -82,6 +82,7 @@ public class SmithUE : ModuleRules
 					"StateTreeModule",
 					"StateTreeEditorModule",
 					"GameplayStateTreeModule",
+					"PropertyBindingUtils",
 					"GameplayTags"
 			}
 			);

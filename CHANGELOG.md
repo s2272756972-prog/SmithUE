@@ -11,11 +11,12 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 251 工具 / 27 域）
-- **AI 域（10）**：`create_blackboard`/`blackboard_add_key`/`read_blackboard`、`create_behavior_tree`/`bt_set_blackboard`/`read_behavior_tree`、`create_eqs`/`read_eqs`、`create_state_tree`/`read_state_tree`。
+### 新增域与工具（→ 253 工具 / 27 域）
+- **AI 域（11）**：`create_blackboard`/`blackboard_add_key`/`read_blackboard`、`create_behavior_tree`/`bt_set_blackboard`/`read_behavior_tree`、`create_eqs`/`read_eqs`、`create_state_tree`/`state_tree_add_state`（EditorData builder + 重编译）/`read_state_tree`。
 - **PCG 域（7）**：`create_pcg_graph`/`read_pcg_graph`/`add_pcg_node`/`connect_pcg_nodes`/`find_pcg_graphs`/`spawn_pcg_volume`/`pcg_generate`。
 - **Dialog 域（3，worker-safe）**：`get_active_dialog`/`dismiss_active_dialog`/`set_dialog_auto_response`——基于 `FSlateApplication::OnModalLoopTickEvent`，模态框卡死 game thread 期间仍能识别与关闭弹窗；`/ready` 加 `modal_active`。
 - **蓝图接口**：`create_blueprint_interface` + `bp_implement_interface`。
+- **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
 - **节点防重叠**：Material/MaterialFunction 表达式、PCG 节点、Blueprint 节点无显式坐标时自动错开；`bp_describe_graph` 加 `pos_x/pos_y`，`get_material_info` 加连线 `edges`；`auto_layout_graph` 新增 PCGGraph 分支。

@@ -28,5 +28,6 @@ private:
 	static TSharedPtr<FJsonObject> HandleReadEqs(const TSharedPtr<FJsonObject>& Params);
 	// State Tree
 	static TSharedPtr<FJsonObject> HandleCreateStateTree(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleStateTreeAddState(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadStateTree(const TSharedPtr<FJsonObject>& Params);
 };

@@ -28,6 +28,9 @@
 #include "Components/ScrollBox.h"
 #include "Components/Border.h"
 #include "Components/SizeBox.h"
+#include "Components/Widget.h"
+#include "WidgetBlueprintOperationUtils.h"
+#include "UObject/UObjectIterator.h"
 
 namespace SmithUEUMG
 {
@@ -44,6 +47,18 @@ namespace SmithUEUMG
         if (Lower == TEXT("scrollbox")) return UScrollBox::StaticClass();
         if (Lower == TEXT("border")) return UBorder::StaticClass();
         if (Lower == TEXT("sizebox")) return USizeBox::StaticClass();
+        // Reflection fallback: any concrete UWidget subclass by name (with/without 'U' prefix),
+        // so ProgressBar/Slider/CheckBox/ComboBoxString/EditableTextBox/WidgetSwitcher/etc. all work.
+        const TArray<FString> Candidates = { ClassName, FString(TEXT("U")) + ClassName };
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* C = *It;
+            if (!C->IsChildOf(UWidget::StaticClass()) || C->HasAnyClassFlags(CLASS_Abstract)) { continue; }
+            for (const FString& Cand : Candidates)
+            {
+                if (C->GetName().Equals(Cand, ESearchCase::IgnoreCase)) { return C; }
+            }
+        }
         return UUserWidget::StaticClass();
     }
 }
@@ -101,6 +116,18 @@ void FSmithUEUMGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value as string (imported via property reflection)"), true)
             }),
         &HandleSetWidgetProperty);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("bind_widget_event"),
+            TEXT("UMG"),
+            TEXT("Bind a widget's multicast-delegate event (e.g. a Button's OnClicked) to a new event node in the Widget Blueprint's graph — creating the handler if absent. The widget is promoted to a variable automatically. Then author the handler with bp_create_node/bp_batch_op on the widget blueprint's EventGraph."),
+            {
+                FSmithUEToolParam(TEXT("blueprint"), TEXT("string"), TEXT("Full asset path to the Widget Blueprint"), true),
+                FSmithUEToolParam(TEXT("widget"), TEXT("string"), TEXT("Widget name inside the blueprint (e.g. PlayBtn)"), true),
+                FSmithUEToolParam(TEXT("event"), TEXT("string"), TEXT("Delegate/event name on the widget (e.g. OnClicked, OnHovered, OnValueChanged)"), true)
+            }),
+        &HandleBindWidgetEvent);
 }
 
 // ---------------------------------------------------------------------------
@@ -369,5 +396,59 @@ TSharedPtr<FJsonObject> FSmithUEUMGCommands::HandleSetWidgetProperty(const TShar
     Data->SetStringField(TEXT("widget"), WidgetName);
     Data->SetStringField(TEXT("property"), PropertyName);
     Data->SetStringField(TEXT("value"), Value);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEUMGCommands::HandleBindWidgetEvent(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("blueprint"), TEXT("widget"), TEXT("event") }, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+    FString BlueprintPath, WidgetName, EventName;
+    Params->TryGetStringField(TEXT("blueprint"), BlueprintPath);
+    Params->TryGetStringField(TEXT("widget"), WidgetName);
+    Params->TryGetStringField(TEXT("event"), EventName);
+
+    UWidgetBlueprint* WidgetBP = LoadObject<UWidgetBlueprint>(nullptr, *BlueprintPath);
+    if (!WidgetBP) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget Blueprint not found: '%s'"), *BlueprintPath)); }
+
+    UWidget* Widget = WidgetBP->WidgetTree ? WidgetBP->WidgetTree->FindWidget(FName(*WidgetName)) : nullptr;
+    if (!Widget) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget '%s' not found in blueprint"), *WidgetName)); }
+
+    UClass* WidgetClass = Widget->GetClass();
+    // The delegate must exist on the widget class and be a multicast delegate.
+    FMulticastDelegateProperty* DelegateProp = FindFProperty<FMulticastDelegateProperty>(WidgetClass, FName(*EventName));
+    if (!DelegateProp)
+    {
+        // List available events to make the error actionable.
+        TArray<FString> Events;
+        for (TFieldIterator<FMulticastDelegateProperty> It(WidgetClass); It; ++It) { Events.Add(It->GetName()); }
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Widget '%s' (%s) has no event '%s'. Available events: %s"), *WidgetName, *WidgetClass->GetName(), *EventName, *FString::Join(Events, TEXT(", "))));
+    }
+
+    // BindToEventProperty requires the widget to already exist as a variable on the
+    // Skeleton class. Promote it and do a full compile so the skeleton is regenerated.
+    Widget->bIsVariable = true;
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+    FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+
+    FText BindError;
+    const bool bBound = FWidgetBlueprintOperationUtils::BindToEventProperty(WidgetBP, FName(*EventName), FName(*WidgetName), WidgetClass, /*bShouldJumpToNode*/ false, BindError);
+    if (!bBound)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to bind '%s.%s': %s"), *WidgetName, *EventName, *BindError.ToString()));
+    }
+    FKismetEditorUtilities::CompileBlueprint(WidgetBP, EBlueprintCompileOptions::SkipGarbageCollection);
+    WidgetBP->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("widget"), WidgetName);
+    Data->SetStringField(TEXT("event"), EventName);
+    Data->SetBoolField(TEXT("bound"), true);
+    Data->SetStringField(TEXT("note"), TEXT("Event handler node created in the widget EventGraph; author it with bp_create_node/bp_batch_op. Call save_asset to persist."));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

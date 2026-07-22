@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **251 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **253 tools** across **27 domains**.
 
 ---
 
@@ -93,6 +93,16 @@ Read a State Tree asset: schema + root/sub states. Read-only.
 **Parameters:**
 
 - `state_tree_path` (string, required): State Tree asset path
+
+### `state_tree_add_state`
+
+Add a child state to a State Tree (under the given parent state name, or the first root if omitted), then recompile. MUTATES + recompiles; call save_asset to persist.
+
+**Parameters:**
+
+- `state_tree_path` (string, required): State Tree asset path
+- `state_name` (string, required): New state name
+- `parent` (string): Parent state name (default: first root state)
 
 ## Analysis
 
@@ -2311,6 +2321,16 @@ Set a property on a widget inside a Widget Blueprint via reflection
 - `widget` (string, required): Widget name inside the blueprint
 - `property` (string, required): Property name
 - `value` (string, required): Value as string (imported via property reflection)
+
+### `bind_widget_event`
+
+Bind a widget's multicast-delegate event (e.g. a Button's OnClicked) to a new event node in the Widget Blueprint's graph — creating the handler if absent. The widget is promoted to a variable automatically. Then author the handler with bp_create_node/bp_batch_op on the widget blueprint's EventGraph.
+
+**Parameters:**
+
+- `blueprint` (string, required): Full asset path to the Widget Blueprint
+- `widget` (string, required): Widget name inside the blueprint (e.g. PlayBtn)
+- `event` (string, required): Delegate/event name on the widget (e.g. OnClicked, OnHovered, OnValueChanged)
 
 ## Viewport
 
