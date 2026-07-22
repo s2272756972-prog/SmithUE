@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **271 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **273 tools** across **27 domains**.
 
 ---
 
@@ -1859,6 +1859,25 @@ Connect material expression pins within a material function
 - `source_output_index` (number): Output pin index on source expression
 - `dest_expression_index` (number, required): Index of dest expression
 - `dest_input_index` (number): Input pin index on dest expression
+
+### `disconnect_mf_pins`
+
+Break a connection at a destination input pin inside a material function. Clears whatever expression was feeding dest_expression_index's input pin (material functions have no material output; connect a FunctionOutput node's input instead).
+
+**Parameters:**
+
+- `function_path` (string, required): Full asset path
+- `dest_expression_index` (number, required): Index of dest expression in FunctionExpressions array
+- `dest_input_index` (number): Input pin index on dest expression
+
+### `remove_mf_expression`
+
+Remove an expression node from a material function by its index in the FunctionExpressions array (from get_material_function_info). Also clears any input pins on other expressions that were fed by it, so no dangling wires remain. Expression indices shift after removal. MUTATES the asset.
+
+**Parameters:**
+
+- `function_path` (string, required): Full asset path
+- `expression_index` (number, required): Index of expression in FunctionExpressions array
 
 ### `set_mf_expression_property`
 

@@ -180,6 +180,37 @@ void FSmithUEMaterialFunctionCommands::RegisterTools(FSmithUEToolRegistry& Regis
             return FSmithUEMaterialFunctionCommands::HandleConnectMfPins(Params);
         });
 
+    // disconnect_mf_pins
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("disconnect_mf_pins"),
+            TEXT("Material"),
+            TEXT("Break a connection at a destination input pin inside a material function. Clears whatever expression was feeding dest_expression_index's input pin (material functions have no material output; connect a FunctionOutput node's input instead)."),
+            {
+                FSmithUEToolParam(TEXT("function_path"), TEXT("string"), TEXT("Full asset path"), true),
+                FSmithUEToolParam(TEXT("dest_expression_index"), TEXT("number"), TEXT("Index of dest expression in FunctionExpressions array"), true),
+                FSmithUEToolParam(TEXT("dest_input_index"), TEXT("number"), TEXT("Input pin index on dest expression"), false, TEXT("0"))
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialFunctionCommands::HandleDisconnectMfPins(Params);
+        });
+
+    // remove_mf_expression
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("remove_mf_expression"),
+            TEXT("Material"),
+            TEXT("Remove an expression node from a material function by its index in the FunctionExpressions array (from get_material_function_info). Also clears any input pins on other expressions that were fed by it, so no dangling wires remain. Expression indices shift after removal. MUTATES the asset."),
+            {
+                FSmithUEToolParam(TEXT("function_path"), TEXT("string"), TEXT("Full asset path"), true),
+                FSmithUEToolParam(TEXT("expression_index"), TEXT("number"), TEXT("Index of expression in FunctionExpressions array"), true)
+            }),
+        [](const TSharedPtr<FJsonObject>& Params) -> TSharedPtr<FJsonObject>
+        {
+            return FSmithUEMaterialFunctionCommands::HandleRemoveMfExpression(Params);
+        });
+
     // set_mf_expression_property
     Registry.Register(
         FSmithUEToolSchema(
@@ -482,6 +513,99 @@ TSharedPtr<FJsonObject> FSmithUEMaterialFunctionCommands::HandleConnectMfPins(co
     Data->SetBoolField(TEXT("connected"), true);
     Data->SetNumberField(TEXT("source_expression_index"), SourceIndex);
     Data->SetNumberField(TEXT("dest_expression_index"), DestIndex);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialFunctionCommands::HandleDisconnectMfPins(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid()) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params")); }
+    FString FunctionPath;
+    if (!Params->TryGetStringField(TEXT("function_path"), FunctionPath) || FunctionPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: function_path"));
+    }
+    double DestIndexD = -1.0;
+    if (!Params->TryGetNumberField(TEXT("dest_expression_index"), DestIndexD))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: dest_expression_index"));
+    }
+    double DestInputD = 0.0;
+    Params->TryGetNumberField(TEXT("dest_input_index"), DestInputD);
+    const int32 DestIndex = static_cast<int32>(DestIndexD);
+    const int32 DestInputIndex = static_cast<int32>(DestInputD);
+
+    TSharedPtr<IMaterialEditor> ActiveEditor;
+    UMaterialFunction* Func = LoadMfForEditing(FunctionPath, &ActiveEditor);
+    if (!Func) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material function not found: %s"), *FunctionPath)); }
+    if (DestIndex < 0 || DestIndex >= Func->GetExpressions().Num())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("dest_expression_index %d out of range (0..%d)"), DestIndex, Func->GetExpressions().Num() - 1));
+    }
+    UMaterialExpression* DestExpr = Func->GetExpressionCollection().Expressions[DestIndex];
+    if (!DestExpr) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Dest expression at index %d is null"), DestIndex)); }
+    FExpressionInput* Input = DestExpr->GetInput(DestInputIndex);
+    if (!Input) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("dest_input_index %d is invalid for expression %s"), DestInputIndex, *DestExpr->GetClass()->GetName())); }
+
+    const bool bWasConnected = Input->Expression != nullptr;
+    Input->Expression = nullptr;
+    Input->OutputIndex = 0;
+    NotifyMaterialFunctionModified(Func, ActiveEditor);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("disconnected"), bWasConnected);
+    Data->SetNumberField(TEXT("dest_expression_index"), DestIndex);
+    Data->SetNumberField(TEXT("dest_input_index"), DestInputIndex);
+    if (!bWasConnected) { Data->SetStringField(TEXT("note"), TEXT("That input pin was already empty.")); }
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEMaterialFunctionCommands::HandleRemoveMfExpression(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!Params.IsValid()) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid params")); }
+    FString FunctionPath;
+    if (!Params->TryGetStringField(TEXT("function_path"), FunctionPath) || FunctionPath.IsEmpty())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: function_path"));
+    }
+    double ExprIndexD = -1.0;
+    if (!Params->TryGetNumberField(TEXT("expression_index"), ExprIndexD))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Missing required parameter: expression_index"));
+    }
+    const int32 ExprIndex = static_cast<int32>(ExprIndexD);
+
+    TSharedPtr<IMaterialEditor> ActiveEditor;
+    UMaterialFunction* Func = LoadMfForEditing(FunctionPath, &ActiveEditor);
+    if (!Func) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material function not found: %s"), *FunctionPath)); }
+    if (ExprIndex < 0 || ExprIndex >= Func->GetExpressions().Num())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("expression_index %d out of range (0..%d)"), ExprIndex, Func->GetExpressions().Num() - 1));
+    }
+    UMaterialExpression* Target = Func->GetExpressionCollection().Expressions[ExprIndex];
+    if (!Target) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Expression at index %d is null"), ExprIndex)); }
+    const FString RemovedClass = Target->GetClass()->GetName();
+
+    int32 ClearedRefs = 0;
+    for (UMaterialExpression* Expr : Func->GetExpressions())
+    {
+        if (!Expr || Expr == Target) { continue; }
+        for (int32 i = 0; i < Expr->CountInputs(); ++i)
+        {
+            FExpressionInput* In = Expr->GetInput(i);
+            if (In && In->Expression == Target) { In->Expression = nullptr; In->OutputIndex = 0; ++ClearedRefs; }
+        }
+    }
+
+    Func->GetExpressionCollection().RemoveExpression(Target);
+    NotifyMaterialFunctionModified(Func, ActiveEditor);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("removed"), true);
+    Data->SetNumberField(TEXT("expression_index"), ExprIndex);
+    Data->SetStringField(TEXT("class"), RemovedClass);
+    Data->SetNumberField(TEXT("cleared_references"), ClearedRefs);
+    Data->SetNumberField(TEXT("expression_count"), Func->GetExpressions().Num());
+    Data->SetStringField(TEXT("note"), TEXT("Expression removed + dangling wires cleared. Indices shift after removal."));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

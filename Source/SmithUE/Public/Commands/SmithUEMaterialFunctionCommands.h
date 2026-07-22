@@ -15,5 +15,7 @@ private:
     static TSharedPtr<FJsonObject> HandleGetMaterialFunctionInfo(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleAddMfExpression(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleConnectMfPins(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleDisconnectMfPins(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleRemoveMfExpression(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleSetMfExpressionProperty(const TSharedPtr<FJsonObject>& Params);
 };

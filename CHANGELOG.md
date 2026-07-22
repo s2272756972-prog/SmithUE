@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 271 工具 / 27 域）
+### 新增域与工具（→ 273 工具 / 27 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -26,6 +26,7 @@
 - **图域 CRUD 对齐（删除/断连）**：
   - **Material（22）**：`disconnect_material_pins`（断开目标输入引脚,含材质输出 -1）、`remove_material_expression`（按索引删表达式,并清理其它节点/材质输出上指向它的悬空连线,返回 `cleared_references`）。
   - **PCG（11）**：`disconnect_pcg_nodes`（`RemoveEdge`,无边时报错)、`remove_pcg_node`（`RemoveNode` 连带删边,护 input/output 节点）。
+  - **Material Function（24 含 Material）**：`disconnect_mf_pins`（断开目标输入引脚)、`remove_mf_expression`（按索引删表达式 + 清悬空连线,返回 `cleared_references`)。
   - 均自描述索引删除后位移；删除后跑 `compile_material` / `read_pcg_graph` 复核。
 - **节点防重叠**：Material/MaterialFunction 表达式、PCG 节点、Blueprint 节点无显式坐标时自动错开；`bp_describe_graph` 加 `pos_x/pos_y`，`get_material_info` 加连线 `edges`；`auto_layout_graph` 新增 PCGGraph 分支。
 - **5.8 Substrate**：可创建 `UMaterialExpressionSubstrate*` 节点；`connect_material_pins` `dest_input_index=8` → `FrontMaterial`（项目 `r.Substrate=1` 时生效）。
