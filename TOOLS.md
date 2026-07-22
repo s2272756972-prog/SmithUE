@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **285 tools** across **28 domains**.
+> Generated from `/api/v1/tools`. Total: **288 tools** across **28 domains**.
 
 ---
 
@@ -2340,6 +2340,34 @@ Read what a PCG Volume actor's generation actually produced — the assertion to
 **Parameters:**
 
 - `actor` (string, required): PCG Volume actor label (as used by spawn_pcg_volume / pcg_generate)
+
+### `read_pcg_params`
+
+Read a PCG Graph's user parameters (the graph-level exposed inputs shown in its Details/Instance panel). Returns each parameter's name, type, and current value. Read-only.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+
+### `add_pcg_param`
+
+Add a user parameter (graph-level exposed input) to a PCG Graph. type = bool/int/int64/float/double/name/string/vector/rotator. Set its value with set_pcg_param. MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `name` (string, required): New parameter name
+- `type` (string, required): bool/int/int64/float/double/name/string/vector/rotator
+
+### `set_pcg_param`
+
+Set a PCG Graph user parameter's value by name (property-reflection import, e.g. '2.5', 'true', '(X=100,Y=0,Z=0)', or an asset path for object params). Use read_pcg_params to list parameters + types. MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): PCG Graph asset path
+- `name` (string, required): Parameter name (from read_pcg_params)
+- `value` (string, required): Value as string
 
 ## PIE
 

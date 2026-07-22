@@ -28,6 +28,8 @@
 #include "Data/PCGBasePointData.h"
 #include "PCGData.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "StructUtils/PropertyBag.h"
+#include "StructUtils/StructView.h"
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -290,6 +292,40 @@ void FSmithUEPCGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 				FSmithUEToolParam(TEXT("actor"), TEXT("string"), TEXT("PCG Volume actor label (as used by spawn_pcg_volume / pcg_generate)"), /*required*/ true)
 			}),
 		&FSmithUEPCGCommands::HandlePcgGetStats);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("read_pcg_params"),
+			TEXT("PCG"),
+			TEXT("Read a PCG Graph's user parameters (the graph-level exposed inputs shown in its Details/Instance panel). Returns each parameter's name, type, and current value. Read-only."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true)
+			}),
+		&FSmithUEPCGCommands::HandleReadPcgParams);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("add_pcg_param"),
+			TEXT("PCG"),
+			TEXT("Add a user parameter (graph-level exposed input) to a PCG Graph. type = bool/int/int64/float/double/name/string/vector/rotator. Set its value with set_pcg_param. MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("New parameter name"), /*required*/ true),
+				FSmithUEToolParam(TEXT("type"), TEXT("string"), TEXT("bool/int/int64/float/double/name/string/vector/rotator"), /*required*/ true).SetExample(TEXT("float"))
+			}),
+		&FSmithUEPCGCommands::HandleAddPcgParam);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("set_pcg_param"),
+			TEXT("PCG"),
+			TEXT("Set a PCG Graph user parameter's value by name (property-reflection import, e.g. '2.5', 'true', '(X=100,Y=0,Z=0)', or an asset path for object params). Use read_pcg_params to list parameters + types. MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("name"), TEXT("string"), TEXT("Parameter name (from read_pcg_params)"), /*required*/ true),
+				FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value as string"), /*required*/ true)
+			}),
+		&FSmithUEPCGCommands::HandleSetPcgParam);
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,5 +1044,153 @@ TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandlePcgGetStats(const TSharedPtr<
 	{
 		Data->SetStringField(TEXT("note"), TEXT("Still generating (async) — poll pcg_get_stats until is_generating=false for final counts."));
 	}
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleReadPcgParams(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+
+	TArray<TSharedPtr<FJsonValue>> ParamArr;
+	const FInstancedPropertyBag* Bag = Graph->GetUserParametersStruct();
+	const UPropertyBag* BagStruct = Bag ? Bag->GetPropertyBagStruct() : nullptr;
+	if (BagStruct)
+	{
+		const uint8* Memory = Bag->GetValue().GetMemory();
+		for (const FPropertyBagPropertyDesc& Desc : BagStruct->GetPropertyDescs())
+		{
+			const FProperty* Prop = Desc.CachedProperty;
+			TSharedPtr<FJsonObject> P = MakeShared<FJsonObject>();
+			P->SetStringField(TEXT("name"), Desc.Name.ToString());
+			P->SetStringField(TEXT("type"), Prop ? Prop->GetCPPType() : TEXT("None"));
+			if (Prop && Memory)
+			{
+				FString ValueStr;
+				Prop->ExportTextItem_Direct(ValueStr, Prop->ContainerPtrToValuePtr<void>(Memory), nullptr, nullptr, PPF_None);
+				P->SetStringField(TEXT("value"), ValueStr);
+			}
+			ParamArr.Add(MakeShared<FJsonValueObject>(P));
+		}
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("graph_path"), GraphPath);
+	Data->SetNumberField(TEXT("param_count"), ParamArr.Num());
+	Data->SetArrayField(TEXT("params"), ParamArr);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleAddPcgParam(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("name"), TEXT("type") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath, Name, TypeStr;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("name"), Name);
+	Params->TryGetStringField(TEXT("type"), TypeStr);
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+
+	const FString T = TypeStr.ToLower();
+	EPropertyBagPropertyType BagType = EPropertyBagPropertyType::None;
+	UObject* TypeObject = nullptr;
+	if (T == TEXT("bool")) { BagType = EPropertyBagPropertyType::Bool; }
+	else if (T == TEXT("int") || T == TEXT("int32")) { BagType = EPropertyBagPropertyType::Int32; }
+	else if (T == TEXT("int64")) { BagType = EPropertyBagPropertyType::Int64; }
+	else if (T == TEXT("float")) { BagType = EPropertyBagPropertyType::Float; }
+	else if (T == TEXT("double")) { BagType = EPropertyBagPropertyType::Double; }
+	else if (T == TEXT("name")) { BagType = EPropertyBagPropertyType::Name; }
+	else if (T == TEXT("string")) { BagType = EPropertyBagPropertyType::String; }
+	else if (T == TEXT("vector")) { BagType = EPropertyBagPropertyType::Struct; TypeObject = TBaseStructure<FVector>::Get(); }
+	else if (T == TEXT("rotator")) { BagType = EPropertyBagPropertyType::Struct; TypeObject = TBaseStructure<FRotator>::Get(); }
+	else { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unsupported type '%s' (bool/int/int64/float/double/name/string/vector/rotator)"), *TypeStr)); }
+
+	FInstancedPropertyBag* Bag = Graph->GetMutableUserParametersStruct_Unsafe();
+	if (!Bag) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph has no user-parameter storage")); }
+
+	const FName ParamF(*Name);
+	if (const UPropertyBag* Existing = Bag->GetPropertyBagStruct())
+	{
+		for (const FPropertyBagPropertyDesc& Desc : Existing->GetPropertyDescs())
+		{
+			if (Desc.Name == ParamF) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parameter '%s' already exists"), *Name)); }
+		}
+	}
+
+	Graph->Modify();
+	Bag->AddProperty(ParamF, BagType, TypeObject);
+	Graph->MarkPackageDirty();
+
+	const UPropertyBag* BagStruct = Bag->GetPropertyBagStruct();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("name"), Name);
+	Data->SetStringField(TEXT("type"), TypeStr);
+	Data->SetNumberField(TEXT("param_count"), BagStruct ? BagStruct->GetPropertyDescs().Num() : 0);
+	Data->SetStringField(TEXT("note"), TEXT("Parameter added; set its value with set_pcg_param. call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleSetPcgParam(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("name"), TEXT("value") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath, Name, Value;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("name"), Name);
+	Params->TryGetStringField(TEXT("value"), Value);
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+
+	FInstancedPropertyBag* Bag = Graph->GetMutableUserParametersStruct_Unsafe();
+	const UPropertyBag* BagStruct = Bag ? Bag->GetPropertyBagStruct() : nullptr;
+	if (!BagStruct)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("Graph has no user parameters"));
+	}
+
+	const FName ParamF(*Name);
+	const FPropertyBagPropertyDesc* Found = nullptr;
+	for (const FPropertyBagPropertyDesc& Desc : BagStruct->GetPropertyDescs())
+	{
+		if (Desc.Name == ParamF) { Found = &Desc; break; }
+	}
+	if (!Found || !Found->CachedProperty)
+	{
+		TArray<FString> Names;
+		for (const FPropertyBagPropertyDesc& Desc : BagStruct->GetPropertyDescs()) { Names.Add(Desc.Name.ToString()); }
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parameter '%s' not found. Available: %s"), *Name, *FString::Join(Names, TEXT(", "))));
+	}
+
+	uint8* Memory = Bag->GetMutableValue().GetMemory();
+	if (!Memory) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Parameter storage unavailable")); }
+	void* Addr = Found->CachedProperty->ContainerPtrToValuePtr<void>(Memory);
+	Graph->Modify();
+	const TCHAR* Result = Found->CachedProperty->ImportText_Direct(*Value, Addr, nullptr, PPF_None);
+	if (!Result)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to set '%s' to '%s'"), *Name, *Value));
+	}
+	Graph->MarkPackageDirty();
+
+	FString After;
+	Found->CachedProperty->ExportTextItem_Direct(After, Addr, nullptr, nullptr, PPF_None);
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("name"), Name);
+	Data->SetStringField(TEXT("value"), After);
+	Data->SetStringField(TEXT("note"), TEXT("Parameter set; call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }

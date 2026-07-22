@@ -27,4 +27,7 @@ private:
 	static TSharedPtr<FJsonObject> HandleSpawnPcgVolume(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandlePcgGenerate(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandlePcgGetStats(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleReadPcgParams(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleAddPcgParam(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleSetPcgParam(const TSharedPtr<FJsonObject>& Params);
 };

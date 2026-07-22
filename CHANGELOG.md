@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 285 工具 / 28 域）
+### 新增域与工具（→ 288 工具 / 28 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -23,6 +23,11 @@
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
+- **PCG 图级用户参数(3 工具)— 完整生命周期**:补齐图暴露参数的脚本化编辑(此前只能在编辑器 UI 手动加)。
+  - `add_pcg_param {graph_path, name, type}`：给图加用户参数(bool/int/int64/float/double/name/string/vector/rotator),基于 `FInstancedPropertyBag::AddProperty`。
+  - `read_pcg_params {graph_path}`：列出所有用户参数(name/type/当前值,反射 ExportText)。
+  - `set_pcg_param {graph_path, name, value}`：按名设值(反射 ImportText),缺参数报错并列出可用名。
+  - 实测 add(float/int/vector)→read→set(2.5/42/vector)→read 往返一致,重名/坏类型/缺参数均拦截。
 - **Blueprint 事件通信补齐(2 工具)— 事件分发器**:填补此前"只能读、不能建/删事件分发器"的核心缺失。
   - `bp_add_event_dispatcher {bp_path, dispatcher_name, params?}`:创建事件分发器(多播委托),可选带类型化签名参数(`params` = `[{name,type}]`,如 `OnHealthChanged(float NewHealth)`);基于引擎 `UBlueprintEditorLibrary::AddEventDispatcher` + `AddEventDispatcherParameter`。**参数失败原子回滚**(不残留半成品分发器)。
   - `bp_remove_event_dispatcher {bp_path, dispatcher_name}`:删分发器 + 其签名图。
