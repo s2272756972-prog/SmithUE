@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 292 工具 / 28 域）
+### 新增域与工具（→ 297 工具 / 29 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -21,6 +21,15 @@
 - **Dialog 域（3，worker-safe）**：`get_active_dialog`/`dismiss_active_dialog`/`set_dialog_auto_response`——基于 `FSlateApplication::OnModalLoopTickEvent`，模态框卡死 game thread 期间仍能识别与关闭弹窗；`/ready` 加 `modal_active`。
 - **蓝图接口**：`create_blueprint_interface` + `bp_implement_interface`。
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
+
+### 新增域与工具
+- **新域 Mesh(5 工具)— 静态网格构建操作**(`set_asset_property` 反射覆盖不到的构建类,基于 `UStaticMeshEditorSubsystem`)：
+  - `read_mesh_info {mesh_path}`：读构建状态(LOD 数 + screen sizes、材质槽数、简单碰撞体数、Nanite 开关、LOD0 顶点数)——网格构建工具的断言companion。
+  - `mesh_add_collision {mesh_path, shape}`：加简单碰撞体(box/sphere/capsule/ndop10x/ndop18/ndop26,自动贴合包围盒)。
+  - `mesh_remove_collision {mesh_path}`：清空所有简单碰撞体。
+  - `mesh_set_nanite {mesh_path, enabled}`：开/关 Nanite(重建网格)。
+  - `mesh_generate_lods {mesh_path, lod_count}`：自动生成 N 级 LOD(逐级三角形减半,screen size 自动)。
+  - 实测(SM_Door 副本):read→加 box+sphere 碰撞(0→1→2)→清空(→0)→Nanite 开/关→生成 4 级 LOD(screen sizes [2,0.75,0.56,0.42]),错误均拦截。Build.cs 加 `StaticMeshEditor` 依赖。
 
 ### 优化与修复
 - **Blueprint 函数签名 / 局部变量 / Timeline(4 工具)**:补齐"函数创建后改签名、加局部变量、加 Timeline"缺口。

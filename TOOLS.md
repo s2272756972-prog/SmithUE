@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **292 tools** across **28 domains**.
+> Generated from `/api/v1/tools`. Total: **297 tools** across **29 domains**.
 
 ---
 
@@ -2024,6 +2024,51 @@ Set properties on a material function expression node (Custom HLSL code, constan
 - `function_path` (string, required): Full asset path
 - `expression_index` (number, required): Index of expression in FunctionExpressions array
 - `properties` (object, required): Key-value pairs. Custom: code, output_type, description, inputs. FunctionInput: input_name, input_type, preview_value. FunctionOutput: output_name
+
+## Mesh
+
+### `read_mesh_info`
+
+Read a Static Mesh's build state: LOD count + screen sizes, material slot count, simple-collision primitive count, Nanite enabled flag, and LOD0 vertex count. The assertion companion for mesh build tools. Read-only.
+
+**Parameters:**
+
+- `mesh_path` (string, required): Static Mesh asset path
+
+### `mesh_add_collision`
+
+Add a simple collision primitive to a Static Mesh (auto-fits the mesh bounds). shape = box/sphere/capsule/ndop10x/ndop10y/ndop10z/ndop18/ndop26. Adds to any existing collision. Returns the new collision primitive count. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `mesh_path` (string, required): Static Mesh asset path
+- `shape` (string, required): box/sphere/capsule/ndop10x/ndop18/ndop26
+
+### `mesh_remove_collision`
+
+Remove ALL simple collision primitives from a Static Mesh. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `mesh_path` (string, required): Static Mesh asset path
+
+### `mesh_set_nanite`
+
+Enable or disable Nanite on a Static Mesh (rebuilds the mesh). MUTATES; call save_asset.
+
+**Parameters:**
+
+- `mesh_path` (string, required): Static Mesh asset path
+- `enabled` (bool, required): true to enable Nanite, false to disable
+
+### `mesh_generate_lods`
+
+Auto-generate reduction LODs for a Static Mesh. lod_count is the total number of LODs (incl. LOD0). Each successive LOD halves the triangle percentage (LOD0=100%, LOD1=50%, ...); screen sizes are auto-computed. Replaces existing LODs. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `mesh_path` (string, required): Static Mesh asset path
+- `lod_count` (int, required): Total LOD count incl. LOD0 (1-8)
 
 ## Niagara
 
