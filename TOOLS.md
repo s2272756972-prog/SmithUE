@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **279 tools** across **28 domains**.
+> Generated from `/api/v1/tools`. Total: **281 tools** across **28 domains**.
 
 ---
 
@@ -2201,6 +2201,15 @@ Add an inner node to a PCG Graph by settings class (fuzzy name, e.g. 'SurfaceSam
 - `graph_path` (string, required): PCG Graph asset path
 - `settings_class` (string, required): PCG settings class (fuzzy), e.g. SurfaceSampler / TransformPoints / StaticMeshSpawner / DensityFilter
 
+### `add_pcg_subgraph_node`
+
+Add a Subgraph node to a PCG Graph that executes another PCG Graph (composition/reuse). subgraph_path is the /Game PCG Graph to embed. Rejects self-reference. Returns the new node index + its input/output pins (mirrored from the subgraph's input/output nodes). MUTATES the asset.
+
+**Parameters:**
+
+- `graph_path` (string, required): Host PCG Graph asset path
+- `subgraph_path` (string, required): PCG Graph to embed as a subgraph
+
 ### `set_pcg_node_property`
 
 Set a property on a PCG node's Settings (e.g. SurfaceSampler PointsPerSquaredMeter, StaticMeshSpawner mesh). node = 'input'/'output' or an inner node index from read_pcg_graph. Use read_pcg_node to list settable properties + current values. MUTATES the asset.
@@ -2280,6 +2289,14 @@ Force-regenerate PCG on an existing PCG Volume actor (by label) in the current e
 **Parameters:**
 
 - `actor` (string, required): Actor label of the PCG Volume
+
+### `pcg_get_stats`
+
+Read what a PCG Volume actor's generation actually produced — the assertion tool for PCG automation. Reports is_generating (Generate() is async: poll until false), the linked graph, output data (total point count + per-data breakdown), and spawned managed resources (spawned_actors, spawned_components, spawned_instances from ISM/HISM). Use after spawn_pcg_volume / pcg_generate. Read-only; needs an editor world.
+
+**Parameters:**
+
+- `actor` (string, required): PCG Volume actor label (as used by spawn_pcg_volume / pcg_generate)
 
 ## PIE
 

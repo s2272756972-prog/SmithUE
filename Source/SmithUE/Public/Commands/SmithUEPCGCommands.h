@@ -17,6 +17,7 @@ private:
 	static TSharedPtr<FJsonObject> HandleCreatePcgGraph(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadPcgGraph(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleAddPcgNode(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleAddPcgSubgraphNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleSetPcgNodeProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadPcgNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleConnectPcgNodes(const TSharedPtr<FJsonObject>& Params);
@@ -25,4 +26,5 @@ private:
 	static TSharedPtr<FJsonObject> HandleFindPcgGraphs(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleSpawnPcgVolume(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandlePcgGenerate(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandlePcgGetStats(const TSharedPtr<FJsonObject>& Params);
 };

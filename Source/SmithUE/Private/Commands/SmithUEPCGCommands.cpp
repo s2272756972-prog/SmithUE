@@ -22,6 +22,12 @@
 #include "PCGCommon.h"
 #include "PCGVolume.h"
 #include "PCGComponent.h"
+#include "PCGSubgraph.h"
+#include "PCGManagedResource.h"
+#include "Data/PCGPointData.h"
+#include "Data/PCGBasePointData.h"
+#include "PCGData.h"
+#include "Components/InstancedStaticMeshComponent.h"
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -170,6 +176,17 @@ void FSmithUEPCGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 
 	Registry.Register(
 		FSmithUEToolSchema(
+			TEXT("add_pcg_subgraph_node"),
+			TEXT("PCG"),
+			TEXT("Add a Subgraph node to a PCG Graph that executes another PCG Graph (composition/reuse). subgraph_path is the /Game PCG Graph to embed. Rejects self-reference. Returns the new node index + its input/output pins (mirrored from the subgraph's input/output nodes). MUTATES the asset."),
+			{
+				FSmithUEToolParam(TEXT("graph_path"), TEXT("string"), TEXT("Host PCG Graph asset path"), /*required*/ true),
+				FSmithUEToolParam(TEXT("subgraph_path"), TEXT("string"), TEXT("PCG Graph to embed as a subgraph"), /*required*/ true)
+			}),
+		&FSmithUEPCGCommands::HandleAddPcgSubgraphNode);
+
+	Registry.Register(
+		FSmithUEToolSchema(
 			TEXT("set_pcg_node_property"),
 			TEXT("PCG"),
 			TEXT("Set a property on a PCG node's Settings (e.g. SurfaceSampler PointsPerSquaredMeter, StaticMeshSpawner mesh). node = 'input'/'output' or an inner node index from read_pcg_graph. Use read_pcg_node to list settable properties + current values. MUTATES the asset."),
@@ -263,6 +280,16 @@ void FSmithUEPCGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 				FSmithUEToolParam(TEXT("actor"), TEXT("string"), TEXT("Actor label of the PCG Volume"), /*required*/ true)
 			}),
 		&FSmithUEPCGCommands::HandlePcgGenerate);
+
+	Registry.Register(
+		FSmithUEToolSchema(
+			TEXT("pcg_get_stats"),
+			TEXT("PCG"),
+			TEXT("Read what a PCG Volume actor's generation actually produced — the assertion tool for PCG automation. Reports is_generating (Generate() is async: poll until false), the linked graph, output data (total point count + per-data breakdown), and spawned managed resources (spawned_actors, spawned_components, spawned_instances from ISM/HISM). Use after spawn_pcg_volume / pcg_generate. Read-only; needs an editor world."),
+			{
+				FSmithUEToolParam(TEXT("actor"), TEXT("string"), TEXT("PCG Volume actor label (as used by spawn_pcg_volume / pcg_generate)"), /*required*/ true)
+			}),
+		&FSmithUEPCGCommands::HandlePcgGetStats);
 }
 
 // ---------------------------------------------------------------------------
@@ -851,5 +878,135 @@ TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandlePcgGenerate(const TSharedPtr<
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("result"), TEXT("generated"));
 	Data->SetNumberField(TEXT("regenerated"), Hits);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandleAddPcgSubgraphNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("graph_path"), TEXT("subgraph_path") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString GraphPath, SubgraphPath;
+	Params->TryGetStringField(TEXT("graph_path"), GraphPath);
+	Params->TryGetStringField(TEXT("subgraph_path"), SubgraphPath);
+
+	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("PCG graph not found: '%s'"), *GraphPath)); }
+	UPCGGraph* Subgraph = LoadObject<UPCGGraph>(nullptr, *SubgraphPath);
+	if (!Subgraph) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Subgraph PCG graph not found: '%s'"), *SubgraphPath)); }
+	if (Subgraph == Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("A graph cannot reference itself as a subgraph (cycle)")); }
+
+	UPCGSettings* DefaultSettings = nullptr;
+	UPCGNode* Node = Graph->AddNodeOfType(UPCGSubgraphSettings::StaticClass(), DefaultSettings);
+	if (!Node) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Failed to add subgraph node")); }
+
+	UPCGSubgraphSettings* SubSettings = Cast<UPCGSubgraphSettings>(Node->GetSettings());
+	if (!SubSettings)
+	{
+		Graph->RemoveNode(Node);
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("New node is not a subgraph settings node"));
+	}
+	SubSettings->SetSubgraph(Subgraph);
+	Graph->MarkPackageDirty();
+
+	const int32 NewIndex = Graph->GetNodes().IndexOfByKey(Node);
+#if WITH_EDITOR
+	Node->SetNodePosition(300 + (NewIndex / 6) * 420, -200 + (NewIndex % 6) * 160);
+#endif
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("index"), NewIndex);
+	Data->SetStringField(TEXT("subgraph"), Subgraph->GetPathName());
+	Data->SetStringField(TEXT("title"), Node->GetNodeTitle(EPCGNodeTitleType::ListView).ToString());
+	Data->SetArrayField(TEXT("input_pins"), PinLabels(Node->GetInputPins()));
+	Data->SetArrayField(TEXT("output_pins"), PinLabels(Node->GetOutputPins()));
+	Data->SetStringField(TEXT("note"), TEXT("Subgraph node added; connect it like any node. call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEPCGCommands::HandlePcgGetStats(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("actor") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString TargetLabel;
+	Params->TryGetStringField(TEXT("actor"), TargetLabel);
+
+	UWorld* World = GetPcgEditorWorld();
+	if (!World) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("No editor world available (not during PIE)")); }
+
+	UPCGComponent* Comp = nullptr;
+	for (TActorIterator<APCGVolume> It(World); It; ++It)
+	{
+		APCGVolume* Vol = *It;
+		if (Vol && Vol->GetActorLabel().Equals(TargetLabel, ESearchCase::IgnoreCase))
+		{
+			Comp = Vol->FindComponentByClass<UPCGComponent>();
+			break;
+		}
+	}
+	if (!Comp)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("No PCG Volume actor with label '%s' (spawn one with spawn_pcg_volume)"), *TargetLabel));
+	}
+
+	// Output data: sum point counts across the generated graph output.
+	int64 TotalPoints = 0;
+	TArray<TSharedPtr<FJsonValue>> OutputArr;
+	const FPCGDataCollection& Output = Comp->GetGeneratedGraphOutput();
+	for (const FPCGTaggedData& Tagged : Output.TaggedData)
+	{
+		const UPCGData* D = Tagged.Data.Get();
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("pin"), Tagged.Pin.ToString());
+		O->SetStringField(TEXT("type"), D ? D->GetClass()->GetName() : TEXT("None"));
+		if (const UPCGBasePointData* PointData = Cast<UPCGBasePointData>(D))
+		{
+			const int32 NumPoints = PointData->GetNumPoints();
+			O->SetNumberField(TEXT("num_points"), NumPoints);
+			TotalPoints += NumPoints;
+		}
+		OutputArr.Add(MakeShared<FJsonValueObject>(O));
+	}
+
+	// Managed resources: spawned actors + components (ISM/HISM instance counts).
+	int32 SpawnedActors = 0, SpawnedComponents = 0;
+	int64 SpawnedInstances = 0;
+	Comp->ForEachManagedResource([&](UPCGManagedResource* Resource)
+	{
+		if (UPCGManagedActors* Actors = Cast<UPCGManagedActors>(Resource))
+		{
+			SpawnedActors += Actors->GetConstGeneratedActors().Num();
+		}
+		else if (UPCGManagedComponent* ManagedComp = Cast<UPCGManagedComponent>(Resource))
+		{
+			if (UActorComponent* AC = ManagedComp->GeneratedComponent.Get())
+			{
+				++SpawnedComponents;
+				if (UInstancedStaticMeshComponent* ISM = Cast<UInstancedStaticMeshComponent>(AC))
+				{
+					SpawnedInstances += ISM->GetInstanceCount();
+				}
+			}
+		}
+	});
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("actor"), TargetLabel);
+	Data->SetBoolField(TEXT("is_generating"), Comp->IsGenerating());
+	Data->SetStringField(TEXT("graph"), Comp->GetGraph() ? Comp->GetGraph()->GetPathName() : FString());
+	Data->SetNumberField(TEXT("total_points"), static_cast<double>(TotalPoints));
+	Data->SetNumberField(TEXT("output_data_count"), OutputArr.Num());
+	Data->SetArrayField(TEXT("output_data"), OutputArr);
+	Data->SetNumberField(TEXT("spawned_actors"), SpawnedActors);
+	Data->SetNumberField(TEXT("spawned_components"), SpawnedComponents);
+	Data->SetNumberField(TEXT("spawned_instances"), static_cast<double>(SpawnedInstances));
+	if (Comp->IsGenerating())
+	{
+		Data->SetStringField(TEXT("note"), TEXT("Still generating (async) — poll pcg_get_stats until is_generating=false for final counts."));
+	}
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
