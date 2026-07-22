@@ -18,6 +18,7 @@ private:
 	// Blackboard
 	static TSharedPtr<FJsonObject> HandleCreateBlackboard(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBlackboardAddKey(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBlackboardRemoveKey(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadBlackboard(const TSharedPtr<FJsonObject>& Params);
 	// Behavior Tree
 	static TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& Params);
@@ -27,15 +28,18 @@ private:
 	static TSharedPtr<FJsonObject> HandleBtSetNodeProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBtAddDecorator(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleBtAddService(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleBtRemoveNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadBehaviorTree(const TSharedPtr<FJsonObject>& Params);
 	// EQS
 	static TSharedPtr<FJsonObject> HandleCreateEqs(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleEqsAddOption(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleEqsAddTest(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleEqsRemoveOption(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadEqs(const TSharedPtr<FJsonObject>& Params);
 	// State Tree
 	static TSharedPtr<FJsonObject> HandleCreateStateTree(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleStateTreeAddState(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleStateTreeAddTransition(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonObject> HandleStateTreeRemoveState(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonObject> HandleReadStateTree(const TSharedPtr<FJsonObject>& Params);
 };

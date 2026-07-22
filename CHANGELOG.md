@@ -11,8 +11,12 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 263 工具 / 27 域）
-- **AI 域（12，含 bt_add_node）**：`create_blackboard`/`blackboard_add_key`/`read_blackboard`、`create_behavior_tree`/`bt_set_blackboard`/`read_behavior_tree`、`create_eqs`/`read_eqs`、`create_state_tree`/`state_tree_add_state`（EditorData builder + 重编译）/`read_state_tree`。
+### 新增域与工具（→ 267 工具 / 27 域）
+- **AI 域（23，全链路编排 + CRUD）**：
+  - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
+  - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
+  - **EQS**：`create_eqs`/`eqs_add_option`（生成器）/`eqs_add_test`（UEnvQueryTest 子节点，挂 UEnvQueryOption）/`eqs_remove_option`/`read_eqs`。
+  - **状态树**：`create_state_tree`/`state_tree_add_state`（EditorData builder + 重编译）/`state_tree_add_transition`/`state_tree_remove_state`/`read_state_tree`。
 - **PCG 域（9，含 set_pcg_node_property/read_pcg_node）**：`create_pcg_graph`/`read_pcg_graph`/`add_pcg_node`/`connect_pcg_nodes`/`find_pcg_graphs`/`spawn_pcg_volume`/`pcg_generate`。
 - **Dialog 域（3，worker-safe）**：`get_active_dialog`/`dismiss_active_dialog`/`set_dialog_auto_response`——基于 `FSlateApplication::OnModalLoopTickEvent`，模态框卡死 game thread 期间仍能识别与关闭弹窗；`/ready` 加 `modal_active`。
 - **蓝图接口**：`create_blueprint_interface` + `bp_implement_interface`。

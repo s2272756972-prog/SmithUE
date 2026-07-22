@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **263 tools** across **27 domains**.
+> Generated from `/api/v1/tools`. Total: **267 tools** across **27 domains**.
 
 ---
 
@@ -24,6 +24,15 @@ Add a typed key to a Blackboard Data asset. MUTATES the asset; call save_asset t
 - `blackboard_path` (string, required): Blackboard asset path
 - `key_name` (string, required): Key name
 - `key_type` (string, required): Key type
+
+### `blackboard_remove_key`
+
+Remove a key (by name) from a Blackboard Data asset. MUTATES; call save_asset to persist.
+
+**Parameters:**
+
+- `blackboard_path` (string, required): Blackboard asset path
+- `key_name` (string, required): Key name to remove
 
 ### `read_blackboard`
 
@@ -110,6 +119,15 @@ Attach a service (periodic tick) to a Behavior Tree composite node. service = fu
 - `node_index` (int, required): Composite graph node index to attach the service to
 - `service` (string, required): Service class (fuzzy), e.g. DefaultFocus / RunEQS
 
+### `bt_remove_node`
+
+Remove a node (task/composite) from a Behavior Tree graph by index, break its links, and rebuild the runtime tree. Cannot remove the Root node. node_index from bt_add_node / the graph. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `bt_path` (string, required): Behavior Tree asset path
+- `node_index` (int, required): Graph node index to remove
+
 ### `create_eqs`
 
 Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests.
@@ -145,6 +163,15 @@ Add a scoring/filtering test to an EQS option (generator). test = fuzzy UEnvQuer
 - `eqs_path` (string, required): EQS asset path
 - `test` (string, required): Test class (fuzzy), e.g. Distance / Dot / Trace / Pathfinding
 - `option` (int): Option index to add the test to (default: last)
+
+### `eqs_remove_option`
+
+Remove a generator option (and its tests) from an EQS asset by 0-based option index, then rebuild the runtime Options. MUTATES; call save_asset.
+
+**Parameters:**
+
+- `eqs_path` (string, required): EQS asset path
+- `option` (int, required): Option index to remove (from read_eqs order)
 
 ### `create_state_tree`
 
@@ -183,6 +210,15 @@ Add a transition from one state to another (GotoState) and recompile. from_state
 - `from_state` (string, required): Source state name
 - `to_state` (string, required): Target state name
 - `trigger` (string): Transition trigger (default OnStateCompleted)
+
+### `state_tree_remove_state`
+
+Remove a state (by name, with its child states) from a State Tree and recompile. Cannot remove the last remaining root state. MUTATES + recompiles; call save_asset.
+
+**Parameters:**
+
+- `state_tree_path` (string, required): State Tree asset path
+- `state_name` (string, required): State name to remove
 
 ## Analysis
 

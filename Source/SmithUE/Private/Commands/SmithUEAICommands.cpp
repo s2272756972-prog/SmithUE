@@ -127,6 +127,12 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 			.SetAllowedValues({ TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("vector"), TEXT("rotator"), TEXT("object"), TEXT("class"), TEXT("string"), TEXT("name") }) }),
 		&FSmithUEAICommands::HandleBlackboardAddKey);
 
+	Registry.Register(FSmithUEToolSchema(TEXT("blackboard_remove_key"), TEXT("AI"),
+		TEXT("Remove a key (by name) from a Blackboard Data asset. MUTATES; call save_asset to persist."),
+		{ FSmithUEToolParam(TEXT("blackboard_path"), TEXT("string"), TEXT("Blackboard asset path"), true),
+		  FSmithUEToolParam(TEXT("key_name"), TEXT("string"), TEXT("Key name to remove"), true) }),
+		&FSmithUEAICommands::HandleBlackboardRemoveKey);
+
 	Registry.Register(FSmithUEToolSchema(TEXT("read_blackboard"), TEXT("AI"),
 		TEXT("Read a Blackboard Data asset: its keys (name + type) and parent. Read-only."),
 		{ FSmithUEToolParam(TEXT("blackboard_path"), TEXT("string"), TEXT("Blackboard asset path"), true) }),
@@ -186,6 +192,12 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		  FSmithUEToolParam(TEXT("service"), TEXT("string"), TEXT("Service class (fuzzy), e.g. DefaultFocus / RunEQS"), true).SetExample(TEXT("DefaultFocus")) }),
 		&FSmithUEAICommands::HandleBtAddService);
 
+	Registry.Register(FSmithUEToolSchema(TEXT("bt_remove_node"), TEXT("AI"),
+		TEXT("Remove a node (task/composite) from a Behavior Tree graph by index, break its links, and rebuild the runtime tree. Cannot remove the Root node. node_index from bt_add_node / the graph. MUTATES; call save_asset."),
+		{ FSmithUEToolParam(TEXT("bt_path"), TEXT("string"), TEXT("Behavior Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("node_index"), TEXT("int"), TEXT("Graph node index to remove"), true) }),
+		&FSmithUEAICommands::HandleBtRemoveNode);
+
 	// ---- EQS ----
 	Registry.Register(FSmithUEToolSchema(TEXT("create_eqs"), TEXT("AI"),
 		TEXT("Create an Environment Query (EQS) asset (UEnvQuery). Open it in the editor to add generators/tests."),
@@ -210,6 +222,12 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		  FSmithUEToolParam(TEXT("test"), TEXT("string"), TEXT("Test class (fuzzy), e.g. Distance / Dot / Trace / Pathfinding"), true).SetExample(TEXT("Distance")),
 		  FSmithUEToolParam(TEXT("option"), TEXT("int"), TEXT("Option index to add the test to (default: last)"), false) }),
 		&FSmithUEAICommands::HandleEqsAddTest);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("eqs_remove_option"), TEXT("AI"),
+		TEXT("Remove a generator option (and its tests) from an EQS asset by 0-based option index, then rebuild the runtime Options. MUTATES; call save_asset."),
+		{ FSmithUEToolParam(TEXT("eqs_path"), TEXT("string"), TEXT("EQS asset path"), true),
+		  FSmithUEToolParam(TEXT("option"), TEXT("int"), TEXT("Option index to remove (from read_eqs order)"), true) }),
+		&FSmithUEAICommands::HandleEqsRemoveOption);
 
 	// ---- State Tree ----
 	Registry.Register(FSmithUEToolSchema(TEXT("create_state_tree"), TEXT("AI"),
@@ -238,6 +256,12 @@ void FSmithUEAICommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		  FSmithUEToolParam(TEXT("trigger"), TEXT("string"), TEXT("Transition trigger (default OnStateCompleted)"), false)
 			.SetAllowedValues({ TEXT("OnStateCompleted"), TEXT("OnStateSucceeded"), TEXT("OnStateFailed") }) }),
 		&FSmithUEAICommands::HandleStateTreeAddTransition);
+
+	Registry.Register(FSmithUEToolSchema(TEXT("state_tree_remove_state"), TEXT("AI"),
+		TEXT("Remove a state (by name, with its child states) from a State Tree and recompile. Cannot remove the last remaining root state. MUTATES + recompiles; call save_asset."),
+		{ FSmithUEToolParam(TEXT("state_tree_path"), TEXT("string"), TEXT("State Tree asset path"), true),
+		  FSmithUEToolParam(TEXT("state_name"), TEXT("string"), TEXT("State name to remove"), true) }),
+		&FSmithUEAICommands::HandleStateTreeRemoveState);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +308,26 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBlackboardAddKey(const TShared
 	Data->SetStringField(TEXT("key_type"), KeyClass->GetName());
 	Data->SetNumberField(TEXT("key_count"), BB->Keys.Num());
 	Data->SetStringField(TEXT("note"), TEXT("Key added in-memory; call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBlackboardRemoveKey(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("blackboard_path"), TEXT("key_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BbPath, KeyName;
+	Params->TryGetStringField(TEXT("blackboard_path"), BbPath); Params->TryGetStringField(TEXT("key_name"), KeyName);
+	UBlackboardData* BB = LoadObject<UBlackboardData>(nullptr, *BbPath);
+	if (!BB) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blackboard not found: '%s'"), *BbPath)); }
+	const FName KeyFName(*KeyName);
+	const int32 Removed = BB->Keys.RemoveAll([&](const FBlackboardEntry& E) { return E.EntryName == KeyFName; });
+	if (Removed == 0) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Key '%s' not found"), *KeyName)); }
+	BB->MarkPackageDirty();
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("key_name"), KeyName);
+	Data->SetNumberField(TEXT("removed"), Removed);
+	Data->SetNumberField(TEXT("key_count"), BB->Keys.Num());
+	Data->SetStringField(TEXT("note"), TEXT("Key removed in-memory; call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -616,6 +660,34 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtAddService(const TSharedPtr<
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleBtRemoveNode(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bt_path"), TEXT("node_index") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString BtPath; int32 NodeIndex = -1;
+	Params->TryGetStringField(TEXT("bt_path"), BtPath); Params->TryGetNumberField(TEXT("node_index"), NodeIndex);
+	UBehaviorTree* BT = LoadObject<UBehaviorTree>(nullptr, *BtPath);
+	if (!BT) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Behavior Tree not found: '%s'"), *BtPath)); }
+	UBehaviorTreeGraph* Graph = Cast<UBehaviorTreeGraph>(BT->BTGraph);
+	if (!Graph || !Graph->Nodes.IsValidIndex(NodeIndex)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid node_index")); }
+	UEdGraphNode* Node = Graph->Nodes[NodeIndex];
+	if (Cast<UBehaviorTreeGraphNode_Root>(Node)) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Cannot remove the Root node")); }
+	const FString RemovedClass = Cast<UBehaviorTreeGraphNode>(Node) && Cast<UBehaviorTreeGraphNode>(Node)->NodeInstance
+		? Cast<UBehaviorTreeGraphNode>(Node)->NodeInstance->GetClass()->GetName() : Node->GetClass()->GetName();
+	Graph->Modify();
+	Graph->RemoveNode(Node);
+	Graph->UpdateAsset(UBehaviorTreeGraph::ClearDebuggerFlags | UBehaviorTreeGraph::KeepRebuildCounter);
+	Graph->MarkPackageDirty();
+	BT->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("removed_index"), NodeIndex);
+	Data->SetStringField(TEXT("removed_class"), RemovedClass);
+	Data->SetNumberField(TEXT("node_count"), Graph->Nodes.Num());
+	Data->SetStringField(TEXT("note"), TEXT("Node removed + runtime tree rebuilt; call save_asset. Indices shift after removal."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
 // ---------------------------------------------------------------------------
 // EQS impl
 // ---------------------------------------------------------------------------
@@ -755,6 +827,33 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleEqsAddTest(const TSharedPtr<FJ
 	Data->SetNumberField(TEXT("option"), Options.IndexOfByKey(Option));
 	Data->SetNumberField(TEXT("test_count"), Option->SubNodes.Num());
 	Data->SetStringField(TEXT("note"), TEXT("Test added to the option + runtime rebuilt; call save_asset."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleEqsRemoveOption(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("eqs_path"), TEXT("option") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString EqsPath; int32 OptionIndex = -1;
+	Params->TryGetStringField(TEXT("eqs_path"), EqsPath); Params->TryGetNumberField(TEXT("option"), OptionIndex);
+	UEnvQuery* Query = LoadObject<UEnvQuery>(nullptr, *EqsPath);
+	if (!Query) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("EQS not found: '%s'"), *EqsPath)); }
+	UEnvironmentQueryGraph* Graph = Cast<UEnvironmentQueryGraph>(Query->EdGraph);
+	if (!Graph) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("EQS has no graph (no options to remove)")); }
+
+	TArray<UEnvironmentQueryGraphNode_Option*> Options;
+	for (UEdGraphNode* N : Graph->Nodes) { if (UEnvironmentQueryGraphNode_Option* O = Cast<UEnvironmentQueryGraphNode_Option>(N)) { Options.Add(O); } }
+	if (!Options.IsValidIndex(OptionIndex)) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Invalid option index %d (have %d options)"), OptionIndex, Options.Num())); }
+
+	Graph->Modify();
+	Graph->RemoveNode(Options[OptionIndex]);
+	Graph->UpdateAsset();
+	Query->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("removed_option"), OptionIndex);
+	Data->SetNumberField(TEXT("option_count"), Query->GetOptions().Num());
+	Data->SetStringField(TEXT("note"), TEXT("Option removed + runtime rebuilt; call save_asset. Indices shift after removal."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -902,5 +1001,40 @@ TSharedPtr<FJsonObject> FSmithUEAICommands::HandleStateTreeAddTransition(const T
 	Data->SetStringField(TEXT("trigger"), TriggerStr.IsEmpty() ? TEXT("OnStateCompleted") : TriggerStr);
 	Data->SetBoolField(TEXT("compiled"), bCompiled);
 	Data->SetStringField(TEXT("note"), TEXT("Transition added + recompiled; call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEAICommands::HandleStateTreeRemoveState(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("state_tree_path"), TEXT("state_name") }, Error)) { return FSmithUECommonUtils::CreateErrorResponse(Error); }
+	FString StPath, StateName;
+	Params->TryGetStringField(TEXT("state_tree_path"), StPath); Params->TryGetStringField(TEXT("state_name"), StateName);
+	UStateTree* ST = LoadObject<UStateTree>(nullptr, *StPath);
+	if (!ST) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("State Tree not found: '%s'"), *StPath)); }
+	UStateTreeEditorData* EditorData = Cast<UStateTreeEditorData>(ST->EditorData);
+	if (!EditorData) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("State Tree has no EditorData")); }
+
+	const FName Target(*StateName);
+	UStateTreeState* State = nullptr;
+	for (UStateTreeState* Root : EditorData->SubTrees) { if ((State = FindStateByName(Root, Target)) != nullptr) { break; } }
+	if (!State) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("State '%s' not found"), *StateName)); }
+
+	UStateTreeState* Parent = State->Parent;
+	if (!Parent && EditorData->SubTrees.Num() <= 1) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Cannot remove the last remaining root state")); }
+
+	EditorData->Modify();
+	if (Parent) { Parent->Modify(); Parent->Children.Remove(State); }
+	else { EditorData->SubTrees.Remove(State); }
+
+	FStateTreeCompilerLog Log;
+	const bool bCompiled = UStateTreeEditingSubsystem::CompileStateTree(ST, Log);
+	ST->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("removed_state"), StateName);
+	Data->SetStringField(TEXT("parent"), Parent ? Parent->Name.ToString() : TEXT("(root)"));
+	Data->SetBoolField(TEXT("compiled"), bCompiled);
+	Data->SetStringField(TEXT("note"), TEXT("State removed + recompiled; call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
