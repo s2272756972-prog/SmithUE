@@ -1731,6 +1731,8 @@ void FSmithUEBpAtomicAPI::RegisterTools(FSmithUEToolRegistry& Registry)
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_delete_node"), TEXT("Blueprint"), TEXT("Delete a node from a Blueprint graph Returns node ids that become stale after any graph mutation — re-run bp_describe_graph before reusing them."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path, or 'level:current' / 'level:/Game/Maps/MyMap' for Level Blueprints"), true), FSmithUEToolParam(TEXT("graph_name"), TEXT("string"), TEXT("Target graph name"), true), FSmithUEToolParam(TEXT("node_id"), TEXT("string"), TEXT("Node GUID"), true) }), &HandleBpDeleteNode);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_add_variable"), TEXT("Blueprint"), TEXT("Add a Blueprint member variable"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("var_type"), TEXT("string"), TEXT("Variable type name"), true), FSmithUEToolParam(TEXT("default_value"), TEXT("string"), TEXT("Optional default value")), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Optional category name")) }), &HandleBpAddVariable);
 	Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_variable"), TEXT("Blueprint"), TEXT("Remove a Blueprint member variable by name"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name to remove"), true) }), &HandleBpRemoveVariable);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_rename_variable"), TEXT("Blueprint"), TEXT("Rename a Blueprint member variable and fix up all graph references (via FBlueprintEditorUtils::RenameMemberVariable). Recompiles the Blueprint."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Current variable name"), true), FSmithUEToolParam(TEXT("new_name"), TEXT("string"), TEXT("New variable name"), true) }), &HandleBpRenameVariable);
+	Registry.Register(FSmithUEToolSchema(TEXT("bp_set_variable_flags"), TEXT("Blueprint"), TEXT("Set editor-facing flags/metadata on an existing Blueprint member variable: instance_editable (shows in the Details panel of instances), blueprint_read_only, expose_on_spawn (requires instance_editable), category, tooltip. Only the provided fields are changed."), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("var_name"), TEXT("string"), TEXT("Variable name"), true), FSmithUEToolParam(TEXT("instance_editable"), TEXT("bool"), TEXT("Editable per-instance (not Blueprint-only)"), false), FSmithUEToolParam(TEXT("blueprint_read_only"), TEXT("bool"), TEXT("Read-only in Blueprint graphs"), false), FSmithUEToolParam(TEXT("expose_on_spawn"), TEXT("bool"), TEXT("Expose as a SpawnActor pin (needs instance_editable)"), false), FSmithUEToolParam(TEXT("category"), TEXT("string"), TEXT("Variable category"), false), FSmithUEToolParam(TEXT("tooltip"), TEXT("string"), TEXT("Variable tooltip"), false) }), &HandleBpSetVariableFlags);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_add_component"), TEXT("Blueprint"), TEXT("Add a component to a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), BpAddComponentClassParam, FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name"), true), FSmithUEToolParam(TEXT("static_mesh"), TEXT("string"), TEXT("Optional StaticMesh asset path for StaticMeshComponent"), false), FSmithUEToolParam(TEXT("parent"), TEXT("string"), TEXT("Optional parent component name to attach to"), false) }), &HandleBpAddComponent);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_remove_component"), TEXT("Blueprint"), TEXT("Remove a component from a Blueprint SCS"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Component instance name to remove"), true) }), &HandleBpRemoveComponent);
 	  Registry.Register(FSmithUEToolSchema(TEXT("bp_rename_component"), TEXT("Blueprint"), TEXT("Rename a Blueprint SCS component variable (updates all graph references)"), { FSmithUEToolParam(TEXT("bp_path"), TEXT("string"), TEXT("Blueprint asset path"), true), FSmithUEToolParam(TEXT("component"), TEXT("string"), TEXT("Current component name"), true), FSmithUEToolParam(TEXT("new_name"), TEXT("string"), TEXT("New component name"), true) }), &HandleBpRenameComponent);
@@ -2855,6 +2857,111 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRemoveVariable(const TShare
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("var_name"), VarName);
 	Data->SetBoolField(TEXT("removed"), true);
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+static int32 FindBpVariableIndex(UBlueprint* Blueprint, const FName& VarName)
+{
+	for (int32 i = 0; i < Blueprint->NewVariables.Num(); ++i)
+	{
+		if (Blueprint->NewVariables[i].VarName == VarName) { return i; }
+	}
+	return INDEX_NONE;
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpRenameVariable(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("var_name"), TEXT("new_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, VarName, NewName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("var_name"), VarName);
+	Params->TryGetStringField(TEXT("new_name"), NewName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	const FName OldF(*VarName), NewF(*NewName);
+	if (FindBpVariableIndex(Blueprint, OldF) == INDEX_NONE)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Variable not found: '%s'"), *VarName));
+	}
+	if (FindBpVariableIndex(Blueprint, NewF) != INDEX_NONE)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("A variable named '%s' already exists"), *NewName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpRenameVariable", "SmithUE: Rename Blueprint Variable"));
+	FBlueprintEditorUtils::RenameMemberVariable(Blueprint, OldF, NewF);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("var_name"), NewName);
+	Data->SetStringField(TEXT("old_name"), VarName);
+	Data->SetBoolField(TEXT("renamed"), FindBpVariableIndex(Blueprint, NewF) != INDEX_NONE);
+	Data->SetStringField(TEXT("note"), TEXT("Renamed + references fixed up + recompiled. Call save_asset to persist."));
+	return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpSetVariableFlags(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Error;
+	if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("bp_path"), TEXT("var_name") }, Error))
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(Error);
+	}
+	FString BpPath, VarName;
+	Params->TryGetStringField(TEXT("bp_path"), BpPath);
+	Params->TryGetStringField(TEXT("var_name"), VarName);
+
+	UBlueprint* Blueprint = LoadBlueprint(BpPath);
+	if (!Blueprint) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Invalid bp_path")); }
+	const FName VarF(*VarName);
+	if (FindBpVariableIndex(Blueprint, VarF) == INDEX_NONE)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Variable not found: '%s'"), *VarName));
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SmithUE", "BpSetVariableFlags", "SmithUE: Set Blueprint Variable Flags"));
+	TSharedPtr<FJsonObject> Applied = MakeShared<FJsonObject>();
+
+	bool bBoolVal = false;
+	if (Params->TryGetBoolField(TEXT("instance_editable"), bBoolVal))
+	{
+		// "Blueprint only editable" is the inverse of instance-editable.
+		FBlueprintEditorUtils::SetBlueprintOnlyEditableFlag(Blueprint, VarF, !bBoolVal);
+		Applied->SetBoolField(TEXT("instance_editable"), bBoolVal);
+	}
+	if (Params->TryGetBoolField(TEXT("blueprint_read_only"), bBoolVal))
+	{
+		FBlueprintEditorUtils::SetBlueprintPropertyReadOnlyFlag(Blueprint, VarF, bBoolVal);
+		Applied->SetBoolField(TEXT("blueprint_read_only"), bBoolVal);
+	}
+	if (Params->TryGetBoolField(TEXT("expose_on_spawn"), bBoolVal))
+	{
+		FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint, VarF, nullptr, FName(TEXT("ExposeOnSpawn")), bBoolVal ? TEXT("true") : TEXT("false"));
+		Applied->SetBoolField(TEXT("expose_on_spawn"), bBoolVal);
+	}
+	FString StrVal;
+	if (Params->TryGetStringField(TEXT("category"), StrVal))
+	{
+		FBlueprintEditorUtils::SetBlueprintVariableCategory(Blueprint, VarF, nullptr, FText::FromString(StrVal));
+		Applied->SetStringField(TEXT("category"), StrVal);
+	}
+	if (Params->TryGetStringField(TEXT("tooltip"), StrVal))
+	{
+		FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint, VarF, nullptr, FName(TEXT("tooltip")), StrVal);
+		Applied->SetStringField(TEXT("tooltip"), StrVal);
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("var_name"), VarName);
+	Data->SetObjectField(TEXT("applied"), Applied);
+	Data->SetStringField(TEXT("note"), TEXT("Flags applied + recompiled. Call save_asset to persist."));
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

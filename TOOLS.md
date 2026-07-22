@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **281 tools** across **28 domains**.
+> Generated from `/api/v1/tools`. Total: **283 tools** across **28 domains**.
 
 ---
 
@@ -797,6 +797,30 @@ Remove a Blueprint member variable by name
 
 - `bp_path` (string, required): Blueprint asset path
 - `var_name` (string, required): Variable name to remove
+
+### `bp_rename_variable`
+
+Rename a Blueprint member variable and fix up all graph references (via FBlueprintEditorUtils::RenameMemberVariable). Recompiles the Blueprint.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `var_name` (string, required): Current variable name
+- `new_name` (string, required): New variable name
+
+### `bp_set_variable_flags`
+
+Set editor-facing flags/metadata on an existing Blueprint member variable: instance_editable (shows in the Details panel of instances), blueprint_read_only, expose_on_spawn (requires instance_editable), category, tooltip. Only the provided fields are changed.
+
+**Parameters:**
+
+- `bp_path` (string, required): Blueprint asset path
+- `var_name` (string, required): Variable name
+- `instance_editable` (bool): Editable per-instance (not Blueprint-only)
+- `blueprint_read_only` (bool): Read-only in Blueprint graphs
+- `expose_on_spawn` (bool): Expose as a SpawnActor pin (needs instance_editable)
+- `category` (string): Variable category
+- `tooltip` (string): Variable tooltip
 
 ### `bp_add_component`
 

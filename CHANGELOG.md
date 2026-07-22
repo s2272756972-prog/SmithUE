@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 281 工具 / 28 域）
+### 新增域与工具（→ 283 工具 / 28 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -23,6 +23,9 @@
 - **UMG**：`bind_widget_event`（绑定 Button.OnClicked 等委托事件，自动提升控件为变量并建事件节点）；`ResolveWidgetClass` 加反射兜底（支持 ProgressBar/Slider/CheckBox/ComboBoxString 等任意 `UWidget` 子类）。
 
 ### 优化与修复
+- **Blueprint 变量补强(2 工具)**：
+  - `bp_rename_variable {bp_path, var_name, new_name}`：`FBlueprintEditorUtils::RenameMemberVariable` 改名并**自动 fixup 所有图引用** + 重编译;拦截改名到已存在名 / 源变量不存在。
+  - `bp_set_variable_flags {bp_path, var_name, instance_editable?, blueprint_read_only?, expose_on_spawn?, category?, tooltip?}`：改**已有变量**的编辑器面板标志/元数据(instance editable / 只读 / 暴露到 SpawnActor 引脚 / 类别 / tooltip),只改传入的字段。填补了"变量创建后不能改元数据"的缺口。
 - **PCG 补强(2 工具)— 生成结果断言 + 图组合**：
   - `pcg_get_stats {actor}`：读某 PCG Volume 生成后**实际产出**——`is_generating`(Generate 异步,轮询至 false)、linked graph、输出数据(total_points + 逐项 pin/type/num_points)、spawned 托管资源(spawned_actors / spawned_components / spawned_instances 来自 ISM/HISM)。这是 PCG 自动化测试的**断言工具**。实测正确读出输出数据类型 `PCGPointArrayData` + 点数,坏 actor 报错。
   - `add_pcg_subgraph_node {graph_path, subgraph_path}`:加 `UPCGSubgraphSettings` 节点执行另一张 PCG 图(组合/复用),`SetSubgraph` 绑定,拦截自引用成环;返回镜像自子图 I/O 的输入输出引脚。
