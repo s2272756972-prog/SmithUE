@@ -11,7 +11,7 @@
   - `EAutomationTestFlags` scoped 化（`ApplicationContextMask` → `EAutomationTestFlags_ApplicationContextMask`）；`.uplugin` `WhitelistPlatforms` → `PlatformAllowList`；`ue_version` 5.2 → 5.8。
 - **弃用告警清零**：`SetMaterialUsage` 虚函数、`BL_*` 重命名、`ForEachObjectWithOuter` `EGetObjectsFlags`、`UE::IsSavingPackage()`、移除 `REN_ForceNoResetLoaders`、Sequencer `GetBindings` const + `FMovieScenePossessable/Spawnable` 取名（顺带修 5.8 binding 名字返回空的功能回归）。
 
-### 新增域与工具（→ 299 工具 / 29 域）
+### 新增域与工具（→ 301 工具 / 29 域）
 - **AI 域（23，全链路编排 + CRUD）**：
   - **黑板**：`create_blackboard`/`blackboard_add_key`/`blackboard_remove_key`/`read_blackboard`。
   - **行为树**：`create_behavior_tree`/`bt_set_blackboard`/`bt_add_node`/`bt_read_node`/`bt_set_node_property`/`bt_add_decorator`（UBTDecorator 子节点）/`bt_add_service`（UBTService 子节点）/`bt_remove_node`（RemoveNode + 运行时重建，护 Root）/`read_behavior_tree`。
@@ -32,6 +32,10 @@
   - 实测(SM_Door 副本):read→加 box+sphere 碰撞(0→1→2)→清空(→0)→Nanite 开/关→生成 4 级 LOD(screen sizes [2,0.75,0.56,0.42]),错误均拦截。Build.cs 加 `StaticMeshEditor` 依赖。
 
 ### 优化与修复
+- **UMG 补强(2 工具)— 布局(Slot)属性 + 删除**：填补"能加控件但改不了布局、删不了控件"的缺口(Niagara 域 17 工具已较完整)。
+  - `set_widget_slot_property {blueprint, widget, property, value}`：改控件 **Slot** 上的布局属性(布局在 Slot 上,不在控件上)。Canvas 用 `LayoutData`(内含 Offsets 位置/大小、Anchors、Alignment)/`ZOrder`;Box 用 `Padding`/`HorizontalAlignment`/`Size` 等。属性不存在时报错并列出该 Slot 类的可编辑属性名。
+  - `remove_widget {blueprint, widget}`：从控件树删控件(连子级),护根控件。
+  - 实测:VerticalBox slot(Padding/HAlign)、CanvasPanel slot(LayoutData 位置+大小+锚点+对齐 / ZOrder)、删除+缺失/根拦截,全通。
 - **Mesh 域补强(2 工具)— 材质槽 assign + 骨骼网格读取**：
   - `mesh_set_material {mesh_path, slot, material_path}`：给静态或骨骼网格的材质槽赋材质(slot 支持索引或槽名);静态用 `UStaticMesh::SetMaterial`,骨骼改 `GetMaterials()[i].MaterialInterface`。实测静态槽0 + 骨骼按槽名 `M_HeadLegs`,坏 slot/材质拦截。
   - `read_skeletal_mesh_info {mesh_path}`：读骨骼网格状态(材质槽 name+材质、skeleton、physics asset、LOD 数、socket 数)。实测 SKM_Manny_Simple → skeleton SK_Mannequin / physics PA_Mannequin / LOD 3 / 5 sockets / 2 槽。

@@ -1,6 +1,6 @@
 # SmithUE Tools Reference
 
-> Generated from `/api/v1/tools`. Total: **299 tools** across **29 domains**.
+> Generated from `/api/v1/tools`. Total: **301 tools** across **29 domains**.
 
 ---
 
@@ -2760,6 +2760,26 @@ Set a property on a widget inside a Widget Blueprint via reflection
 - `widget` (string, required): Widget name inside the blueprint
 - `property` (string, required): Property name
 - `value` (string, required): Value as string (imported via property reflection)
+
+### `set_widget_slot_property`
+
+Set a LAYOUT property on a widget's Slot (how the parent panel arranges it) via reflection. This is where layout lives — NOT on the widget itself. Examples: on a Canvas Panel slot set 'Offsets'='(Left=100,Top=50,Right=200,Bottom=80)', 'Anchors'='(Minimum=(X=0,Y=0),Maximum=(X=0,Y=0))', 'Alignment'='(X=0.5,Y=0.5)', 'ZOrder'; on a HorizontalBox/VerticalBox slot set 'Padding'='(Left=8,Top=4,Right=8,Bottom=4)', 'HorizontalAlignment'='HAlign_Center', 'Size'='(SizeRule=Fill,Value=1.0)'. The widget must already be parented (has a slot).
+
+**Parameters:**
+
+- `blueprint` (string, required): Full asset path to the Widget Blueprint
+- `widget` (string, required): Widget name inside the blueprint
+- `property` (string, required): Slot property name (Offsets/Anchors/Alignment/ZOrder/Padding/HorizontalAlignment/...)
+- `value` (string, required): Value as string (property-reflection import)
+
+### `remove_widget`
+
+Remove a widget (and its children) from a Widget Blueprint tree by name. Cannot remove the root widget. MUTATES; recompiles on save.
+
+**Parameters:**
+
+- `blueprint` (string, required): Full asset path to the Widget Blueprint
+- `widget` (string, required): Widget name to remove
 
 ### `bind_widget_event`
 

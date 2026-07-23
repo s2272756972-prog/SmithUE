@@ -19,6 +19,8 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
+#include "Components/PanelWidget.h"
+#include "Components/PanelSlot.h"
 #include "Components/Image.h"
 #include "Components/CanvasPanel.h"
 #include "Components/PanelWidget.h"
@@ -116,6 +118,30 @@ void FSmithUEUMGCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value as string (imported via property reflection)"), true)
             }),
         &HandleSetWidgetProperty);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("set_widget_slot_property"),
+            TEXT("UMG"),
+            TEXT("Set a LAYOUT property on a widget's Slot (how the parent panel arranges it) via reflection. This is where layout lives — NOT on the widget itself. Examples: on a Canvas Panel slot set 'Offsets'='(Left=100,Top=50,Right=200,Bottom=80)', 'Anchors'='(Minimum=(X=0,Y=0),Maximum=(X=0,Y=0))', 'Alignment'='(X=0.5,Y=0.5)', 'ZOrder'; on a HorizontalBox/VerticalBox slot set 'Padding'='(Left=8,Top=4,Right=8,Bottom=4)', 'HorizontalAlignment'='HAlign_Center', 'Size'='(SizeRule=Fill,Value=1.0)'. The widget must already be parented (has a slot)."),
+            {
+                FSmithUEToolParam(TEXT("blueprint"), TEXT("string"), TEXT("Full asset path to the Widget Blueprint"), true),
+                FSmithUEToolParam(TEXT("widget"), TEXT("string"), TEXT("Widget name inside the blueprint"), true),
+                FSmithUEToolParam(TEXT("property"), TEXT("string"), TEXT("Slot property name (Offsets/Anchors/Alignment/ZOrder/Padding/HorizontalAlignment/...)"), true),
+                FSmithUEToolParam(TEXT("value"), TEXT("string"), TEXT("Value as string (property-reflection import)"), true)
+            }),
+        &HandleSetWidgetSlotProperty);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("remove_widget"),
+            TEXT("UMG"),
+            TEXT("Remove a widget (and its children) from a Widget Blueprint tree by name. Cannot remove the root widget. MUTATES; recompiles on save."),
+            {
+                FSmithUEToolParam(TEXT("blueprint"), TEXT("string"), TEXT("Full asset path to the Widget Blueprint"), true),
+                FSmithUEToolParam(TEXT("widget"), TEXT("string"), TEXT("Widget name to remove"), true)
+            }),
+        &HandleRemoveWidget);
 
     Registry.Register(
         FSmithUEToolSchema(
@@ -396,6 +422,81 @@ TSharedPtr<FJsonObject> FSmithUEUMGCommands::HandleSetWidgetProperty(const TShar
     Data->SetStringField(TEXT("widget"), WidgetName);
     Data->SetStringField(TEXT("property"), PropertyName);
     Data->SetStringField(TEXT("value"), Value);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEUMGCommands::HandleSetWidgetSlotProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("blueprint"), TEXT("widget"), TEXT("property"), TEXT("value") }, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+    FString BlueprintPath, WidgetName, PropertyName, Value;
+    Params->TryGetStringField(TEXT("blueprint"), BlueprintPath);
+    Params->TryGetStringField(TEXT("widget"), WidgetName);
+    Params->TryGetStringField(TEXT("property"), PropertyName);
+    Params->TryGetStringField(TEXT("value"), Value);
+
+    UWidgetBlueprint* WidgetBP = LoadObject<UWidgetBlueprint>(nullptr, *BlueprintPath);
+    if (!WidgetBP) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("WidgetBlueprint not found: %s"), *BlueprintPath)); }
+    UWidget* Widget = WidgetBP->WidgetTree ? WidgetBP->WidgetTree->FindWidget(FName(*WidgetName)) : nullptr;
+    if (!Widget) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget not found: %s"), *WidgetName)); }
+
+    UPanelSlot* Slot = Widget->Slot;
+    if (!Slot) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget '%s' has no slot (not parented to a panel)"), *WidgetName)); }
+
+    FProperty* Prop = FindFProperty<FProperty>(Slot->GetClass(), *PropertyName);
+    if (!Prop)
+    {
+        TArray<FString> Editable;
+        for (TFieldIterator<FProperty> It(Slot->GetClass()); It; ++It) { if (It->HasAnyPropertyFlags(CPF_Edit)) { Editable.Add(It->GetName()); } }
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Slot property '%s' not found on %s. Editable: %s"), *PropertyName, *Slot->GetClass()->GetName(), *FString::Join(Editable, TEXT(", "))));
+    }
+
+    Slot->Modify();
+    void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Slot);
+    const TCHAR* Result = Prop->ImportText_Direct(*Value, ValuePtr, Slot, PPF_None);
+    if (!Result) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to set slot property '%s' to '%s'"), *PropertyName, *Value)); }
+    Slot->SynchronizeProperties();
+    WidgetBP->MarkPackageDirty();
+
+    FString After; Prop->ExportTextItem_Direct(After, ValuePtr, nullptr, Slot, PPF_None);
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("widget"), WidgetName);
+    Data->SetStringField(TEXT("slot_class"), Slot->GetClass()->GetName());
+    Data->SetStringField(TEXT("property"), PropertyName);
+    Data->SetStringField(TEXT("value"), After);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+TSharedPtr<FJsonObject> FSmithUEUMGCommands::HandleRemoveWidget(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, { TEXT("blueprint"), TEXT("widget") }, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+    FString BlueprintPath, WidgetName;
+    Params->TryGetStringField(TEXT("blueprint"), BlueprintPath);
+    Params->TryGetStringField(TEXT("widget"), WidgetName);
+
+    UWidgetBlueprint* WidgetBP = LoadObject<UWidgetBlueprint>(nullptr, *BlueprintPath);
+    if (!WidgetBP || !WidgetBP->WidgetTree) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("WidgetBlueprint not found: %s"), *BlueprintPath)); }
+    UWidget* Widget = WidgetBP->WidgetTree->FindWidget(FName(*WidgetName));
+    if (!Widget) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget not found: %s"), *WidgetName)); }
+    if (Widget == WidgetBP->WidgetTree->RootWidget) { return FSmithUECommonUtils::CreateErrorResponse(TEXT("Cannot remove the root widget")); }
+
+    WidgetBP->WidgetTree->Modify();
+    const bool bRemoved = WidgetBP->WidgetTree->RemoveWidget(Widget);
+    if (!bRemoved) { return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to remove widget '%s'"), *WidgetName)); }
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+    WidgetBP->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("widget"), WidgetName);
+    Data->SetBoolField(TEXT("removed"), true);
+    Data->SetStringField(TEXT("note"), TEXT("Widget removed; call save_asset to persist."));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
