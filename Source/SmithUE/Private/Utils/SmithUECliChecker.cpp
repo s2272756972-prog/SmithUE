@@ -22,7 +22,7 @@
 // Minimum smithue-cli version the plugin recommends. BUMP THIS ON EVERY CLI
 // RELEASE: a higher floor makes machines with an older CLI show "Outdated → 升级",
 // and upgrading the CLI re-runs its postinstall which re-deploys the latest SKILL.
-static constexpr TCHAR kRecommendedCliVersion[] = TEXT("0.13.4");
+static constexpr TCHAR kRecommendedCliVersion[] = TEXT("0.14.0");
 
 /** Last known CLI environment state. Written only on the game thread. */
 static FCliInfo GCachedCliInfo;

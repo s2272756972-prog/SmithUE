@@ -3,6 +3,8 @@
 > 生成环境：宿主工程 `MassDemo`（UE 5.8），插件分支 `UE5.8`，插件版本 `1.16.0`。
 > 引擎：`F:\Program Files\Epic Games\UE_5.8`。CLI：`smithue-cli` v0.13.4。
 > 本文件供人工复测用：**「需人工复测」一节是重点**。
+>
+> _脚注（2026-07 补记）：本报告是 5.2→5.8 升级当时的快照，其中「CLI 无需升级」指 CLI 不因引擎升级而必须改（工具运行时经 `/api/v1/tools` 自描述发现，与引擎版本无关），此结论仍成立。CLI 后续独立升级至 **v0.14.0**（SKILL 重构、`--params-file`/`smithue.ps1` 传参、`charset=utf-8` 修复、CI 自动发布），与本次引擎升级无关；详见插件 `docs/spec/PITFALLS.md` #7/#12 及 CLI 仓库 `docs/RELEASE.md`。_
 
 ---
 

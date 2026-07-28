@@ -48,7 +48,10 @@
 ## 7. PowerShell 向原生程序传 JSON 会吞引号/拆空格
 
 - **现象**:`node cli.js exec cmd '{"a":"b c"}'` → CLI 收到 `{a:b c}`(引号被剥)或被空格拆成多个参数。
-- **正解**:用 `node -e "const {execCommand}=require('./dist/commands/exec.js'); execCommand('cmd', {a:'b c'}, {})..."` —— 参数是 JS 对象字面量,完全绕过 shell 引号。
+- **消费端(已装 npm 包)正解**(smithue-cli ≥ 0.14.0):
+  - 首选 `smithue-cli exec <cmd> --params-file params.json` —— 参数写进文件,绕开 shell 引号解析。**CJK(中文)参数务必走 `--params-file`**:命令行/管道代码页会把中文损坏成 `??`(CLI 自 0.14.0 起 HTTP 请求头带 `charset=utf-8`,但仍需参数以 UTF-8 文件形式进入,才能全链路不坏)。
+  - 若 `--params-file` 仍有格式/编码问题,用 skill 自带脚本(均自动发现端口、UTF-8 直读文件、直发 HTTP,中文往返实测不坏),按此降级:`scripts/smithue.ps1 <cmd> params.json`(纯 PowerShell,`Invoke-RestMethod`,零 node) → 再退到 `node scripts/smithue-exec.mjs <cmd> params.json`。
+- **开发者(仓库内直跑源码)正解**:用 `node -e "const {execCommand}=require('./dist/commands/exec.js'); execCommand('cmd', {a:'b c'}, {})..."` —— 参数是 JS 对象字面量,完全绕过 shell 引号。
 
 ## 8. 编辑器运行时无法编译插件
 
@@ -74,7 +77,9 @@
 
 - **token 过期**:granular token 默认很短(7 天)。建议生成时选 90 天,或用 `npm login` 会话 token 发布。
 - **registry 指向**:本机 registry 可能是 npmmirror(淘宝源),发布要显式 `--registry https://registry.npmjs.org/`。
-- **2FA**:发布需要 2FA 或 bypass-2fa 的 granular token。
+- **2FA**:发布需要 2FA 或 bypass-2fa 的 granular token。email OTP(登录验证码)≠ authenticator TOTP;若账户仅启用 email 验证,`npm publish --otp=` 传 authenticator 码会 403,须用 bypass-2fa 的 granular token 或 web 登录会话。
+- **已配置 CI 自动发布**(2026-07 起):push `main` 且 `package.json` 版本 > registry 时,GitHub Actions(`.github/workflows/release.yml`)自动跑门禁并 `npm publish`;认证走仓库 Secret `NPM_TOKEN`(granular / bypass-2fa / 仅 smithue-cli)。日常发布只需 `npm version` + `git push`,不再手动 OTP。
+- **bypass-2fa token 正在废弃**(npm 公告:账户操作 2026-08、直接发布 2027-01 起受限)。长期宜迁移到 **Trusted Publishing(OIDC)**——GitHub Actions 免 token 直接认证。权威发布流程见 CLI 仓库 [`docs/RELEASE.md`](https://github.com/123dx-svg/smithue-cli/blob/main/docs/RELEASE.md)。
 
 ## 13. 内容浏览器选中文件夹路径带 /All 前缀
 
