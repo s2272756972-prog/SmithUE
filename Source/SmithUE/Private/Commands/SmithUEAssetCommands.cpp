@@ -14,6 +14,9 @@
 #include "IContentBrowserSingleton.h"
 #include "Misc/PackageName.h"
 #include "UObject/ObjectRedirector.h"
+#include "UObject/SavePackage.h"
+#include "Serialization/ArchiveReplaceObjectRef.h"
+#include "Engine/Blueprint.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Dialog/SmithUEDialogWatcher.h"
 #include "ObjectTools.h"
@@ -460,6 +463,45 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("save"), TEXT("boolean"), TEXT("Save modified packages after resolving (default true)"))
             }),
         &HandleResolveRedirectors);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("resave_packages"),
+            TEXT("Asset"),
+            TEXT("Force-load and re-save every package under a folder (or an explicit list),固化引用: hard/soft references are rewritten to the CURRENT real path of the object they resolve to (following redirectors). This is the in-editor equivalent of the 'ResavePackages -fixupredirects' commandlet, but crucially WORKS ON PLUGIN packages (the commandlet's -projectonly / default scope skips plugins). Use after moving assets to固化 references held by plugin assets / FoliageTypes / levels so their /Game redirectors become unreferenced and deletable."),
+            {
+                FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to resave recursively (e.g. /MyPlugin). Provide this OR paths.")),
+                FSmithUEToolParam(TEXT("paths"), TEXT("array"), TEXT("Explicit package/asset paths to resave. Provide this OR folder_path.")),
+                FSmithUEToolParam(TEXT("skip_maps"), TEXT("boolean"), TEXT("Skip World/level packages (default false). Levels are slower and may need the level to be opened; set true to resave only content assets.")),
+                FSmithUEToolParam(TEXT("max"), TEXT("number"), TEXT("Optional cap on packages processed this call (for batching very large sets)"))
+            }),
+        &HandleResavePackages);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("redirect_references"),
+            TEXT("Asset"),
+            TEXT("Explicitly rewrite references (hard AND soft) inside a set of referencer assets: every reference to from_asset is replaced with to_asset via FArchiveReplaceObjectRef, then the referencers are saved. Does NOT use AssetTools::FixupReferencers / ObjectTools::ConsolidateObjects (both crash on World/Blueprint/CDO redirectors in UE5.8). Use to surgically re-point stubborn references (e.g. a level actor still pointing at a /Game BP redirector) at the real asset in the plugin."),
+            {
+                FSmithUEToolParam(TEXT("referencers"), TEXT("array"), TEXT("Asset paths whose references should be rewritten (e.g. the level / FoliageType / material holding the stale ref)"), true),
+                FSmithUEToolParam(TEXT("from_asset"), TEXT("string"), TEXT("The asset currently referenced (usually a redirector or old path)"), true),
+                FSmithUEToolParam(TEXT("to_asset"), TEXT("string"), TEXT("The real asset the references should point at"), true),
+                FSmithUEToolParam(TEXT("save"), TEXT("boolean"), TEXT("Save modified referencers afterwards (default true)"))
+            }),
+        &HandleRedirectReferences);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("plan_migration"),
+            TEXT("Asset"),
+            TEXT("DRY-RUN migration preview. Given a source folder + destination root remap, reports BEFORE moving anything: how many packages would move, how many redirectors that leaves, and — most importantly — classifies each mover's external referencers as auto-fixable (plain asset refs) vs STUBBORN (World/level actor refs & Blueprint-class refs that the engine cannot auto-固化, i.e. will leave hard-to-clean redirectors). Also lists shared assets (referenced from outside the move set). Lets you see the redirector/breakage cost before committing."),
+            {
+                FSmithUEToolParam(TEXT("source_folder"), TEXT("string"), TEXT("Folder whose assets would be moved (e.g. /MyPlugin/Building)"), true),
+                FSmithUEToolParam(TEXT("dest_root"), TEXT("string"), TEXT("Destination root (e.g. /MyPlugin/Shared)"), true),
+                FSmithUEToolParam(TEXT("strip_prefix"), TEXT("string"), TEXT("Prefix stripped before prepending dest_root (default = source_folder's mount, e.g. /MyPlugin)")),
+                FSmithUEToolParam(TEXT("max_list"), TEXT("number"), TEXT("Cap on sample lists returned (counts are exact; default 50)"))
+            }),
+        &HandlePlanMigration);
 
     Registry.Register(
         FSmithUEToolSchema(
@@ -1589,6 +1631,354 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResolveRedirectors(const TS
 
     UE_LOG(LogSmithUE, Log, TEXT("resolve_redirectors: %s (found=%d, resolved=%d, no_dest=%d, load_failed=%d)"),
         *FolderPath, RedirectorAssets.Num(), Resolved, NoDestination, LoadFailed);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: resave_packages
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResavePackages(const TSharedPtr<FJsonObject>& Params)
+{
+    bool bSkipMaps = false; Params->TryGetBoolField(TEXT("skip_maps"), bSkipMaps);
+    int32 MaxCount = MAX_int32;
+    { double Tmp; if (Params->TryGetNumberField(TEXT("max"), Tmp)) { MaxCount = FMath::Max(1, (int32)Tmp); } }
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+    // Collect target package names either from a folder or an explicit list.
+    TSet<FName> PackageNames;
+    FString FolderPath;
+    if (Params->TryGetStringField(TEXT("folder_path"), FolderPath) && !FolderPath.IsEmpty())
+    {
+        while (FolderPath.EndsWith(TEXT("/"))) { FolderPath.LeftChopInline(1); }
+        AssetRegistry.ScanPathsSynchronous({ FolderPath }, /*bForceRescan*/ false);
+        TArray<FAssetData> Assets;
+        AssetRegistry.GetAssetsByPath(FName(*FolderPath), Assets, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
+        for (const FAssetData& A : Assets) { PackageNames.Add(A.PackageName); }
+    }
+    const TArray<TSharedPtr<FJsonValue>>* PathsArr = nullptr;
+    if (Params->TryGetArrayField(TEXT("paths"), PathsArr) && PathsArr)
+    {
+        for (const TSharedPtr<FJsonValue>& V : *PathsArr)
+        {
+            PackageNames.Add(FName(*FPackageName::ObjectPathToPackageName(V->AsString())));
+        }
+    }
+
+    if (PackageNames.Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("Provide folder_path or a non-empty paths array"));
+    }
+
+    TArray<UPackage*> ToSave;
+    int32 Loaded = 0, SkippedMaps = 0, LoadFailed = 0;
+    for (const FName& PkgName : PackageNames)
+    {
+        if (ToSave.Num() >= MaxCount) { break; }
+
+        const FString PkgStr = PkgName.ToString();
+        UPackage* Package = LoadPackage(nullptr, *PkgStr, LOAD_None);
+        if (!Package)
+        {
+            ++LoadFailed;
+            continue;
+        }
+        if (bSkipMaps && Package->ContainsMap())
+        {
+            ++SkippedMaps;
+            continue;
+        }
+
+        // Mark dirty so the package is actually re-serialized (references are then
+        // written using the current resolved object paths -> stale /Game redirector
+        // refs get固化 to the real destination path).
+        Package->SetDirtyFlag(true);
+        ToSave.Add(Package);
+        ++Loaded;
+    }
+
+    int32 Saved = 0;
+    TArray<TSharedPtr<FJsonValue>> FailedList;
+    for (UPackage* Package : ToSave)
+    {
+        const FString PkgStr = Package->GetName();
+        FString Filename;
+        if (!FPackageName::TryConvertLongPackageNameToFilename(
+                PkgStr, Filename,
+                Package->ContainsMap() ? FPackageName::GetMapPackageExtension() : FPackageName::GetAssetPackageExtension()))
+        {
+            if (FailedList.Num() < 100) { FailedList.Add(MakeShared<FJsonValueString>(PkgStr)); }
+            continue;
+        }
+        FSavePackageArgs SaveArgs;
+        SaveArgs.TopLevelFlags = RF_Standalone | RF_Public;
+        SaveArgs.SaveFlags = SAVE_NoError | SAVE_KeepDirty;
+        SaveArgs.Error = GError;
+        const bool bOk = UPackage::SavePackage(Package, nullptr, *Filename, SaveArgs);
+        if (bOk) { ++Saved; }
+        else if (FailedList.Num() < 100) { FailedList.Add(MakeShared<FJsonValueString>(PkgStr)); }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetNumberField(TEXT("targeted_packages"), PackageNames.Num());
+    Data->SetNumberField(TEXT("loaded"), Loaded);
+    Data->SetNumberField(TEXT("saved"), Saved);
+    Data->SetNumberField(TEXT("skipped_maps"), SkippedMaps);
+    Data->SetNumberField(TEXT("load_failed"), LoadFailed);
+    Data->SetArrayField(TEXT("save_failed"), FailedList);
+
+    UE_LOG(LogSmithUE, Log, TEXT("resave_packages: targeted=%d loaded=%d saved=%d skipped_maps=%d"),
+        PackageNames.Num(), Loaded, Saved, SkippedMaps);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: redirect_references
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleRedirectReferences(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("referencers"), TEXT("from_asset"), TEXT("to_asset")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>* RefArr = nullptr;
+    if (!Params->TryGetArrayField(TEXT("referencers"), RefArr) || !RefArr || RefArr->Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("referencers must be a non-empty array"));
+    }
+
+    FString FromPath, ToPath;
+    Params->TryGetStringField(TEXT("from_asset"), FromPath);
+    Params->TryGetStringField(TEXT("to_asset"), ToPath);
+    bool bSave = true; Params->TryGetBoolField(TEXT("save"), bSave);
+
+    UObject* FromObj = UEditorAssetLibrary::LoadAsset(FromPath);
+    UObject* ToObj = UEditorAssetLibrary::LoadAsset(ToPath);
+    if (!FromObj || !ToObj)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Failed to load from_asset (%s) or to_asset (%s)"),
+                FromObj ? TEXT("ok") : *FromPath, ToObj ? TEXT("ok") : *ToPath));
+    }
+    if (FromObj->GetClass() != ToObj->GetClass())
+    {
+        UE_LOG(LogSmithUE, Warning, TEXT("redirect_references: class mismatch from=%s to=%s (proceeding)"),
+            *FromObj->GetClass()->GetName(), *ToObj->GetClass()->GetName());
+    }
+
+    TMap<UObject*, UObject*> ReplacementMap;
+    ReplacementMap.Add(FromObj, ToObj);
+    // Also map the redirector's Blueprint-generated class / CDO when applicable so
+    // level actor class references get repointed too.
+    if (UBlueprint* FromBP = Cast<UBlueprint>(FromObj))
+    {
+        if (UBlueprint* ToBP = Cast<UBlueprint>(ToObj))
+        {
+            if (FromBP->GeneratedClass && ToBP->GeneratedClass)
+            {
+                ReplacementMap.Add(FromBP->GeneratedClass, ToBP->GeneratedClass);
+                if (FromBP->GeneratedClass->GetDefaultObject() && ToBP->GeneratedClass->GetDefaultObject())
+                {
+                    ReplacementMap.Add(FromBP->GeneratedClass->GetDefaultObject(), ToBP->GeneratedClass->GetDefaultObject());
+                }
+            }
+        }
+    }
+
+    int32 Rewritten = 0, LoadFailed = 0;
+    TArray<UPackage*> DirtyPackages;
+    TArray<TSharedPtr<FJsonValue>> RewrittenList;
+
+    for (const TSharedPtr<FJsonValue>& V : *RefArr)
+    {
+        const FString RefPath = V->AsString();
+        UObject* RefObj = UEditorAssetLibrary::LoadAsset(RefPath);
+        if (!RefObj)
+        {
+            ++LoadFailed;
+            continue;
+        }
+
+        // FArchiveReplaceObjectRef walks the object graph and swaps matching refs
+        // (including soft object paths) without touching AssetTools' crashing paths.
+        FArchiveReplaceObjectRef<UObject> ReplaceAr(
+            RefObj, ReplacementMap,
+            EArchiveReplaceObjectFlags::IgnoreOuterRef | EArchiveReplaceObjectFlags::IgnoreArchetypeRef);
+
+        RefObj->MarkPackageDirty();
+        if (UPackage* Pkg = RefObj->GetOutermost())
+        {
+            DirtyPackages.AddUnique(Pkg);
+        }
+        ++Rewritten;
+        if (RewrittenList.Num() < 100) { RewrittenList.Add(MakeShared<FJsonValueString>(RefPath)); }
+    }
+
+    int32 Saved = 0;
+    if (bSave && DirtyPackages.Num() > 0)
+    {
+        for (UPackage* Pkg : DirtyPackages)
+        {
+            FString Filename;
+            if (FPackageName::TryConvertLongPackageNameToFilename(
+                    Pkg->GetName(), Filename,
+                    Pkg->ContainsMap() ? FPackageName::GetMapPackageExtension() : FPackageName::GetAssetPackageExtension()))
+            {
+                FSavePackageArgs SaveArgs;
+                SaveArgs.TopLevelFlags = RF_Standalone | RF_Public;
+                SaveArgs.SaveFlags = SAVE_NoError | SAVE_KeepDirty;
+                SaveArgs.Error = GError;
+                if (UPackage::SavePackage(Pkg, nullptr, *Filename, SaveArgs)) { ++Saved; }
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("from_asset"), FromPath);
+    Data->SetStringField(TEXT("to_asset"), ToPath);
+    Data->SetNumberField(TEXT("referencers_rewritten"), Rewritten);
+    Data->SetNumberField(TEXT("load_failed"), LoadFailed);
+    Data->SetNumberField(TEXT("saved_packages"), Saved);
+    Data->SetArrayField(TEXT("rewritten"), RewrittenList);
+
+    UE_LOG(LogSmithUE, Log, TEXT("redirect_references: %s -> %s (rewritten=%d, saved=%d)"),
+        *FromPath, *ToPath, Rewritten, Saved);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: plan_migration
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandlePlanMigration(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("source_folder"), TEXT("dest_root")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString SourceFolder, DestRoot, StripPrefix;
+    Params->TryGetStringField(TEXT("source_folder"), SourceFolder);
+    Params->TryGetStringField(TEXT("dest_root"), DestRoot);
+    Params->TryGetStringField(TEXT("strip_prefix"), StripPrefix);
+    while (SourceFolder.EndsWith(TEXT("/"))) { SourceFolder.LeftChopInline(1); }
+    while (DestRoot.EndsWith(TEXT("/"))) { DestRoot.LeftChopInline(1); }
+    if (StripPrefix.IsEmpty())
+    {
+        // default: the mount point of source_folder, e.g. /MyPlugin
+        int32 SecondSlash = SourceFolder.Find(TEXT("/"), ESearchCase::IgnoreCase, ESearchDir::FromStart, 1);
+        StripPrefix = (SecondSlash != INDEX_NONE) ? SourceFolder.Left(SecondSlash) : SourceFolder;
+    }
+    while (StripPrefix.EndsWith(TEXT("/"))) { StripPrefix.LeftChopInline(1); }
+
+    int32 MaxList = 50;
+    { double Tmp; if (Params->TryGetNumberField(TEXT("max_list"), Tmp)) { MaxList = FMath::Max(1, (int32)Tmp); } }
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+    AssetRegistry.ScanPathsSynchronous({ SourceFolder }, /*bForceRescan*/ false);
+
+    TArray<FAssetData> Assets;
+    AssetRegistry.GetAssetsByPath(FName(*SourceFolder), Assets, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
+
+    TSet<FName> MoveSet;
+    for (const FAssetData& A : Assets) { MoveSet.Add(A.PackageName); }
+
+    int32 TotalMovers = Assets.Num();
+    int32 WithReferencers = 0;      // will leave a redirector
+    int32 StubbornWorld = 0;        // referenced by a level (actor refs won't固化)
+    int32 StubbornBlueprint = 0;    // referenced by a Blueprint (class/CDO refs)
+    int32 AutoFixable = 0;          // only plain-asset external referencers
+    int32 SharedOutside = 0;        // referenced from OUTSIDE the move set (would break others / need copy)
+
+    TArray<TSharedPtr<FJsonValue>> StubbornList;
+    TArray<TSharedPtr<FJsonValue>> SharedList;
+
+    for (const FAssetData& A : Assets)
+    {
+        TArray<FName> Referencers;
+        AssetRegistry.GetReferencers(A.PackageName, Referencers, UE::AssetRegistry::EDependencyCategory::Package);
+        Referencers.RemoveAll([&A](const FName& R) { return R == A.PackageName; });
+        if (Referencers.Num() == 0) { continue; }
+
+        ++WithReferencers; // any external ref means a redirector remains after move
+
+        bool bWorldRef = false, bBlueprintRef = false, bOutside = false;
+        for (const FName& Ref : Referencers)
+        {
+            if (!MoveSet.Contains(Ref)) { bOutside = true; }
+
+            TArray<FAssetData> RefAssets;
+            AssetRegistry.GetAssetsByPackageName(Ref, RefAssets);
+            for (const FAssetData& RA : RefAssets)
+            {
+                const FString ClassName = RA.AssetClassPath.GetAssetName().ToString();
+                if (ClassName == TEXT("World")) { bWorldRef = true; }
+                else if (ClassName == TEXT("Blueprint") || ClassName.EndsWith(TEXT("Blueprint"))) { bBlueprintRef = true; }
+            }
+        }
+
+        if (bOutside) { ++SharedOutside; if (SharedList.Num() < MaxList) SharedList.Add(MakeShared<FJsonValueString>(A.PackageName.ToString())); }
+
+        if (bWorldRef || bBlueprintRef)
+        {
+            if (bWorldRef) ++StubbornWorld;
+            if (bBlueprintRef) ++StubbornBlueprint;
+            if (StubbornList.Num() < MaxList)
+            {
+                TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+                Item->SetStringField(TEXT("asset"), A.PackageName.ToString());
+                Item->SetStringField(TEXT("reason"), bWorldRef ? TEXT("referenced by World/level (actor ref won't auto-固化)")
+                                                              : TEXT("referenced by Blueprint (class/CDO ref)"));
+                StubbornList.Add(MakeShared<FJsonValueObject>(Item));
+            }
+        }
+        else
+        {
+            ++AutoFixable;
+        }
+    }
+
+    // Sample remap preview
+    TArray<TSharedPtr<FJsonValue>> RemapSample;
+    const FString StripSlash = StripPrefix + TEXT("/");
+    for (const FAssetData& A : Assets)
+    {
+        if (RemapSample.Num() >= 3) break;
+        const FString Pkg = A.PackageName.ToString();
+        if (Pkg.StartsWith(StripSlash))
+        {
+            TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+            Item->SetStringField(TEXT("from"), Pkg);
+            Item->SetStringField(TEXT("to"), DestRoot + Pkg.Mid(StripPrefix.Len()));
+            RemapSample.Add(MakeShared<FJsonValueObject>(Item));
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("source_folder"), SourceFolder);
+    Data->SetStringField(TEXT("dest_root"), DestRoot);
+    Data->SetStringField(TEXT("strip_prefix"), StripPrefix);
+    Data->SetNumberField(TEXT("total_movers"), TotalMovers);
+    Data->SetNumberField(TEXT("redirectors_after_move"), WithReferencers);
+    Data->SetNumberField(TEXT("auto_fixable"), AutoFixable);
+    Data->SetNumberField(TEXT("stubborn_world_refd"), StubbornWorld);
+    Data->SetNumberField(TEXT("stubborn_blueprint_refd"), StubbornBlueprint);
+    Data->SetNumberField(TEXT("shared_outside_moveset"), SharedOutside);
+    Data->SetArrayField(TEXT("stubborn_sample"), StubbornList);
+    Data->SetArrayField(TEXT("shared_sample"), SharedList);
+    Data->SetArrayField(TEXT("remap_sample"), RemapSample);
+    Data->SetStringField(TEXT("advice"),
+        TEXT("redirectors_after_move can be cleared with resave_packages (auto-fixable) + redirect_references (stubborn World/Blueprint). shared_outside_moveset assets would break external content if moved — consider copying instead."));
+
+    UE_LOG(LogSmithUE, Log, TEXT("plan_migration: %s -> %s movers=%d redirectors=%d stubborn(W=%d,BP=%d) shared=%d"),
+        *SourceFolder, *DestRoot, TotalMovers, WithReferencers, StubbornWorld, StubbornBlueprint, SharedOutside);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
