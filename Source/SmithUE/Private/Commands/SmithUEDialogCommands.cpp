@@ -23,10 +23,11 @@ void FSmithUEDialogCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 		FSmithUEToolSchema(
 			TEXT("dismiss_active_dialog"),
 			TEXT("Dialog"),
-			TEXT("Close a modal editor dialog that is blocking the game thread (e.g. an unexpected 'Save As'/confirm prompt). WORKER-SAFE. success = QUEUED, not finished: the close is applied on the next modal-loop tick; poll get_active_dialog (modal_active=false) to confirm. response=cancel (default) reliably destroys/closes the window; response=accept is BEST-EFFORT (focus + Enter = default action) and falls back to close if Enter does not dismiss it."),
+			TEXT("Close a modal editor dialog that is blocking the game thread (e.g. an unexpected 'Save As'/confirm prompt). WORKER-SAFE. success = QUEUED, not finished: the close is applied on the next modal-loop tick; poll get_active_dialog (modal_active=false) to confirm. button_text clicks a SPECIFIC button by its label (case-insensitive; exact then substring; check get_active_dialog 'buttons') — use this for dialogs whose default button is NOT the one you want (e.g. OkCancel confirms that default to Cancel). response=cancel (default) reliably destroys/closes the window; response=accept is BEST-EFFORT (focus + Enter = default action) and falls back to close if Enter does not dismiss it."),
 			{
-				FSmithUEToolParam(TEXT("response"), TEXT("string"), TEXT("How to respond: 'cancel' (default, reliably closes) or 'accept' (best-effort default action)"), /*required*/ false, TEXT("cancel"))
-					.SetAllowedValues({ TEXT("cancel"), TEXT("accept") })
+				FSmithUEToolParam(TEXT("response"), TEXT("string"), TEXT("How to respond: 'cancel' (default, reliably closes) or 'accept' (best-effort default action). Ignored when button_text is provided."), /*required*/ false, TEXT("cancel"))
+					.SetAllowedValues({ TEXT("cancel"), TEXT("accept") }),
+				FSmithUEToolParam(TEXT("button_text"), TEXT("string"), TEXT("Click the button whose label matches this text (case-insensitive; exact match preferred, then substring). See get_active_dialog 'buttons' for available labels."), /*required*/ false)
 			}),
 		&FSmithUEDialogCommands::HandleDismissActiveDialog);
 
@@ -51,6 +52,17 @@ TSharedPtr<FJsonObject> FSmithUEDialogCommands::HandleGetActiveDialog(const TSha
 	Data->SetBoolField(TEXT("modal_active"), bActive);
 	Data->SetStringField(TEXT("title"), bActive ? W.GetActiveTitle() : FString());
 	Data->SetStringField(TEXT("type"), bActive ? W.GetActiveType() : FString());
+	{
+		TArray<TSharedPtr<FJsonValue>> ButtonArray;
+		if (bActive)
+		{
+			for (const FString& Label : W.GetActiveButtons())
+			{
+				ButtonArray.Add(MakeShared<FJsonValueString>(Label));
+			}
+		}
+		Data->SetArrayField(TEXT("buttons"), ButtonArray);
+	}
 	Data->SetStringField(TEXT("auto_response"), FSmithUEDialogWatcher::ResponseToString(W.GetAutoResponse()));
 	Data->SetNumberField(TEXT("dismissed_count"), W.GetDismissedCount());
 	return FSmithUECommonUtils::CreateSuccessResponse(Data);
@@ -59,9 +71,31 @@ TSharedPtr<FJsonObject> FSmithUEDialogCommands::HandleGetActiveDialog(const TSha
 TSharedPtr<FJsonObject> FSmithUEDialogCommands::HandleDismissActiveDialog(const TSharedPtr<FJsonObject>& Params)
 {
 	FString ResponseStr = TEXT("cancel");
+	FString ButtonText;
 	if (Params.IsValid())
 	{
 		Params->TryGetStringField(TEXT("response"), ResponseStr);
+		Params->TryGetStringField(TEXT("button_text"), ButtonText);
+	}
+
+	FSmithUEDialogWatcher& W = FSmithUEDialogWatcher::Get();
+
+	// Click-by-label path takes priority over generic responses.
+	if (!ButtonText.IsEmpty())
+	{
+		const int32 ClickCountBefore = W.GetDismissedCount();
+		const bool bClickActiveNow = W.IsModalActive();
+		W.RequestClickButton(ButtonText);
+
+		TSharedPtr<FJsonObject> ClickData = MakeShared<FJsonObject>();
+		ClickData->SetBoolField(TEXT("queued"), true);
+		ClickData->SetStringField(TEXT("button_text"), ButtonText);
+		ClickData->SetBoolField(TEXT("modal_active"), bClickActiveNow);
+		ClickData->SetNumberField(TEXT("dismissed_count_before"), ClickCountBefore);
+		ClickData->SetStringField(TEXT("note"), bClickActiveNow
+			? TEXT("Button click queued; applied on next modal-loop tick. Poll get_active_dialog until modal_active=false. If no button matches, nothing is clicked (check editor log).")
+			: TEXT("No modal dialog is currently active; the click will apply to the next modal that opens."));
+		return FSmithUECommonUtils::CreateSuccessResponse(ClickData);
 	}
 
 	bool bValid = false;
@@ -72,7 +106,6 @@ TSharedPtr<FJsonObject> FSmithUEDialogCommands::HandleDismissActiveDialog(const 
 			TEXT("Invalid 'response'. Use 'cancel' (reliably close) or 'accept' (best-effort default action)."));
 	}
 
-	FSmithUEDialogWatcher& W = FSmithUEDialogWatcher::Get();
 	const int32 CountBefore = W.GetDismissedCount();
 	const bool bActiveNow = W.IsModalActive();
 	W.RequestDismiss(Response);

@@ -14,6 +14,8 @@
 #include "EngineUtils.h"
 #include "FileHelpers.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "Containers/Ticker.h"
 #include "FoliageType_InstancedStaticMesh.h"
 #include "InstancedFoliageActor.h"
 #include "InstancedFoliage.h"
@@ -421,20 +423,42 @@ TSharedPtr<FJsonObject> FSmithUELevelCommands::HandleLevelOpen(const TSharedPtr<
     FString LevelPath;
     Params->TryGetStringField(TEXT("level_path"), LevelPath);
 
-    // Defer map load to next frame via DeferredCommands.
+    // Convert /Game/... package path to a .umap filename (FEditorFileUtils::LoadMap wants a file path).
+    FString FilePath;
+    if (!FPackageName::TryConvertLongPackageNameToFilename(LevelPath, FilePath, FPackageName::GetMapPackageExtension()))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Invalid level path: %s"), *LevelPath));
+    }
+    if (!FPaths::FileExists(FilePath))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Level file not found: %s (from %s)"), *FilePath, *LevelPath));
+    }
+
+    // Defer map load to next frame via a one-shot ticker.
     // Loading a map during tick processing (AsyncTask picked up by WaitUntilTasksComplete)
     // destroys the world while TickTaskManager still holds tick level references,
     // causing assertion: !LevelList.Contains(TickTaskLevel) in FreeTickTaskLevel.
-    // DeferredCommands execute at the beginning of the next frame in UEngine::TickDeferredCommands,
-    // safely outside any tick group.
-    GEngine->DeferredCommands.Add(FString::Printf(TEXT("MAP LOAD \"%s\""), *LevelPath));
+    // NOTE: the previous implementation used GEngine->DeferredCommands with `MAP LOAD "<pkg>"`,
+    // which silently failed: the exec expects `MAP LOAD FILE="<filename>"` (a disk path).
+    FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateLambda([FilePath](float) -> bool
+        {
+            FEditorFileUtils::LoadMap(FilePath);
+            if (GEditor)
+            {
+                GEditor->RedrawAllViewports();
+            }
+            return false; // one-shot
+        }), 0.0f);
 
     UWorld* World = SmithUELevel::GetEditorWorld();
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("level_path"), LevelPath);
-    Data->SetStringField(TEXT("level_name"), World ? World->GetMapName() : TEXT(""));
-    Data->SetBoolField(TEXT("loaded"), true);
-    Data->SetStringField(TEXT("note"), TEXT("Map load deferred to next frame. Allow ~1s before querying new level state."));
+    Data->SetStringField(TEXT("previous_level_name"), World ? World->GetMapName() : TEXT(""));
+    Data->SetStringField(TEXT("status"), TEXT("pending"));
+    Data->SetStringField(TEXT("note"), TEXT("Map load deferred to next frame. Poll level_get_info until level_path matches."));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

@@ -21,8 +21,14 @@ public:
 		int64 ContentLength = 0;
 	};
 
-	/** Maximum number of concurrent worker threads that can handle HTTP requests. */
-	static constexpr int32 MaxConcurrentWorkers = 4;
+	/** Maximum number of concurrent worker threads that can handle HTTP requests.
+	 *  Kept higher than MaxGameThreadWorkers so worker-safe commands (ping, Dialog domain)
+	 *  still get served while game-thread commands are queued/jammed behind a modal. */
+	static constexpr int32 MaxConcurrentWorkers = 8;
+
+	/** Maximum number of requests allowed to wait on / occupy the game thread at once.
+	 *  The remaining worker slots are effectively reserved for worker-safe commands. */
+	static constexpr int32 MaxGameThreadWorkers = 4;
 
 	FSmithUEHttpServerRunnable(USmithUEHttpServer* InServer, TSharedPtr<FSocket> InListenerSocket);
 	virtual ~FSmithUEHttpServerRunnable();
@@ -43,5 +49,6 @@ private:
 	USmithUEHttpServer* Server;
 	TSharedPtr<FSocket> ListenerSocket;
 	FThreadSafeCounter ActiveWorkerCount;
+	FThreadSafeCounter ActiveGameThreadCount;
 	FThreadSafeBool bStopping;
 };

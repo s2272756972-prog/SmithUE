@@ -702,6 +702,29 @@ uint32 FSmithUEHttpServerRunnable::Run()
 				SmithUEHttpServer::Private::FRouteResult RouteResult;
 				if (IsGameThreadRequired(Request))
 				{
+					// Gate game-thread requests separately so worker-safe commands
+					// (ping, Dialog domain) keep responding while the game thread is
+					// jammed (e.g. blocked behind a modal dialog or a long asset op).
+					if (ActiveGameThreadCount.GetValue() >= MaxGameThreadWorkers)
+					{
+						Response = SmithUEHttpServer::Private::BuildHttpResponse(503, TEXT("Service Unavailable"),
+							FSmithUECommonUtils::SerializeJson(FSmithUECommonUtils::CreateErrorResponse(
+								TEXT("Server busy: too many pending game-thread commands (worker-safe commands like get_active_dialog still work)"), TEXT("INTERNAL_ERROR"))));
+						if (!SmithUEHttpServer::Private::SendAll(*ClientSocket, Response))
+						{
+							UE_LOG(LogSmithUE, Verbose, TEXT("Failed to send HTTP busy response to SmithUE client"));
+						}
+						ClientSocket->Close();
+						return;
+					}
+
+					ActiveGameThreadCount.Increment();
+					struct FGameThreadScope
+					{
+						FThreadSafeCounter& Counter;
+						~FGameThreadScope() { Counter.Decrement(); }
+					} GameThreadScope{ActiveGameThreadCount};
+
 					RouteResult = SmithUEHttpServer::Private::RunOnGameThreadWithTimeContext<SmithUEHttpServer::Private::FRouteResult>(
 						[Request, ServerPtr]() -> SmithUEHttpServer::Private::FRouteResult
 						{

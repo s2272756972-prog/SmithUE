@@ -50,6 +50,7 @@ public:
 	bool IsModalActive() const { return bModalActive; }
 	FString GetActiveTitle() const;
 	FString GetActiveType() const;
+	TArray<FString> GetActiveButtons() const;
 	int32 GetDismissedCount() const { return DismissedCounter.GetValue(); }
 	EResponse GetAutoResponse() const { return static_cast<EResponse>(AutoResponseMode.load()); }
 
@@ -60,6 +61,8 @@ public:
 	{
 		OneShotResponse.store(static_cast<int32>(Response == EResponse::None ? EResponse::Cancel : Response));
 	}
+	/** Queue a one-shot click on the button whose label matches ButtonText (case-insensitive; exact match preferred, then substring). Applied on the next modal-loop tick. */
+	void RequestClickButton(const FString& ButtonText);
 
 	static const TCHAR* ResponseToString(EResponse R);
 	static EResponse ResponseFromString(const FString& S, bool& bOutValid);
@@ -71,11 +74,14 @@ private:
 	FThreadSafeBool bModalActive{ false };
 	std::atomic<int32> AutoResponseMode{ 0 };
 	std::atomic<int32> OneShotResponse{ 0 };
+	std::atomic<bool> bClickRequested{ false };
 	FThreadSafeCounter DismissedCounter;
 
 	mutable FCriticalSection StateLock;
 	FString ActiveTitle;
 	FString ActiveType;
+	TArray<FString> ActiveButtons;
+	FString PendingClickText;
 
 	/** Window we have already actioned this modal session (avoids Enter spam / double count). */
 	TWeakPtr<SWindow> HandledWindow;

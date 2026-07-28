@@ -4,6 +4,8 @@
 
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Text/STextBlock.h"
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
 #include "SmithUEModule.h"
@@ -38,6 +40,47 @@ namespace
 		App.ProcessKeyDownEvent(KeyDown);
 		FKeyEvent KeyUp(EKeys::Enter, FModifierKeysState(), 0, /*bIsRepeat*/ false, EnterCharCode, EnterCharCode);
 		App.ProcessKeyUpEvent(KeyUp);
+	}
+
+	/** Recursively collect the visible text of a widget subtree (first STextBlock found wins per branch). */
+	FString ExtractWidgetText(const TSharedRef<SWidget>& Widget)
+	{
+		if (Widget->GetTypeAsString() == TEXT("STextBlock"))
+		{
+			return StaticCastSharedRef<STextBlock>(Widget)->GetText().ToString();
+		}
+		FChildren* Children = Widget->GetChildren();
+		if (Children)
+		{
+			for (int32 i = 0; i < Children->Num(); ++i)
+			{
+				const FString Text = ExtractWidgetText(Children->GetChildAt(i));
+				if (!Text.IsEmpty())
+				{
+					return Text;
+				}
+			}
+		}
+		return FString();
+	}
+
+	/** Recursively collect all SButtons (with their labels) inside a widget subtree. */
+	void CollectButtons(const TSharedRef<SWidget>& Widget, TArray<TPair<TSharedRef<SButton>, FString>>& OutButtons)
+	{
+		if (Widget->GetTypeAsString() == TEXT("SButton"))
+		{
+			TSharedRef<SButton> Button = StaticCastSharedRef<SButton>(Widget);
+			OutButtons.Emplace(Button, ExtractWidgetText(Widget));
+			return; // buttons rarely nest; treat as leaf
+		}
+		FChildren* Children = Widget->GetChildren();
+		if (Children)
+		{
+			for (int32 i = 0; i < Children->Num(); ++i)
+			{
+				CollectButtons(Children->GetChildAt(i), OutButtons);
+			}
+		}
 	}
 }
 
@@ -103,6 +146,21 @@ FString FSmithUEDialogWatcher::GetActiveType() const
 	return ActiveType;
 }
 
+TArray<FString> FSmithUEDialogWatcher::GetActiveButtons() const
+{
+	FScopeLock Lock(&StateLock);
+	return ActiveButtons;
+}
+
+void FSmithUEDialogWatcher::RequestClickButton(const FString& ButtonText)
+{
+	{
+		FScopeLock Lock(&StateLock);
+		PendingClickText = ButtonText;
+	}
+	bClickRequested.store(true);
+}
+
 void FSmithUEDialogWatcher::OnModalLoopTick(float /*DeltaTime*/)
 {
 	// Runs on the game thread inside the modal message loop.
@@ -123,6 +181,60 @@ void FSmithUEDialogWatcher::OnModalLoopTick(float /*DeltaTime*/)
 		FScopeLock Lock(&StateLock);
 		ActiveTitle = Win->GetTitle().ToString();
 		ActiveType = WindowTypeToString(Win->GetType());
+	}
+
+	// Collect button labels for reporting + click-by-text support.
+	TArray<TPair<TSharedRef<SButton>, FString>> Buttons;
+	CollectButtons(Win.ToSharedRef(), Buttons);
+	{
+		FScopeLock Lock(&StateLock);
+		ActiveButtons.Reset();
+		for (const TPair<TSharedRef<SButton>, FString>& Pair : Buttons)
+		{
+			ActiveButtons.Add(Pair.Value);
+		}
+	}
+
+	// One-shot button click by label takes priority over generic responses.
+	if (bClickRequested.load())
+	{
+		FString ClickText;
+		{
+			FScopeLock Lock(&StateLock);
+			ClickText = PendingClickText;
+		}
+
+		TSharedPtr<SButton> Target;
+		for (const TPair<TSharedRef<SButton>, FString>& Pair : Buttons) // exact match first
+		{
+			if (Pair.Value.Equals(ClickText, ESearchCase::IgnoreCase))
+			{
+				Target = Pair.Key;
+				break;
+			}
+		}
+		if (!Target.IsValid())
+		{
+			for (const TPair<TSharedRef<SButton>, FString>& Pair : Buttons) // then substring
+			{
+				if (Pair.Value.Contains(ClickText, ESearchCase::IgnoreCase))
+				{
+					Target = Pair.Key;
+					break;
+				}
+			}
+		}
+
+		bClickRequested.store(false);
+		if (Target.IsValid())
+		{
+			UE_LOG(LogSmithUE, Log, TEXT("Dialog watcher: clicking button '%s' on modal '%s'."), *ClickText, *Win->GetTitle().ToString());
+			Target->SimulateClick();
+			HandledWindow = Win;
+			DismissedCounter.Increment();
+			return;
+		}
+		UE_LOG(LogSmithUE, Warning, TEXT("Dialog watcher: no button matching '%s' on modal '%s' (available: %d). Falling through."), *ClickText, *Win->GetTitle().ToString(), Buttons.Num());
 	}
 
 	// Determine desired response: one-shot request wins, else persistent auto mode.
@@ -166,6 +278,7 @@ bool FSmithUEDialogWatcher::OnNormalTick(float /*DeltaTime*/)
 		FScopeLock Lock(&StateLock);
 		ActiveTitle.Reset();
 		ActiveType.Reset();
+		ActiveButtons.Reset();
 	}
 	HandledWindow.Reset();
 	return true; // keep ticking
