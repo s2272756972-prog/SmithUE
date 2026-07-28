@@ -13,6 +13,7 @@
 #include "ContentBrowserModule.h"
 #include "IContentBrowserSingleton.h"
 #include "Misc/PackageName.h"
+#include "UObject/ObjectRedirector.h"
 #include "ObjectTools.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "FileHelpers.h"
@@ -395,6 +396,40 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("new_path"), TEXT("string"), TEXT("New full asset path (e.g. /Game/NewFolder/NewName)"), true)
             }),
         &HandleMoveAsset);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("move_folder"),
+            TEXT("Asset"),
+            TEXT("Move all assets under a content folder (recursive) to another mount point/folder, preserving relative structure. Uses batched IAssetTools::RenameAssets, which updates all references and leaves redirectors. Supports dry_run."),
+            {
+                FSmithUEToolParam(TEXT("source_folder"), TEXT("string"), TEXT("Source content folder (e.g. /Game/UltraDynamicSky)"), true),
+                FSmithUEToolParam(TEXT("dest_folder"), TEXT("string"), TEXT("Destination content folder (e.g. /UltraDynamicSky). Mount point must exist."), true),
+                FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview the rename plan without applying (default: false)")),
+                FSmithUEToolParam(TEXT("save"), TEXT("boolean"), TEXT("Save all dirty packages after moving (default: true)"))
+            }),
+        &HandleMoveFolder);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("fixup_redirectors"),
+            TEXT("Asset"),
+            TEXT("Find all ObjectRedirectors under a folder (recursive) and fix up their referencers, then delete the redirectors (same as Content Browser 'Fix Up Redirectors')."),
+            {
+                FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to scan for redirectors (e.g. /Game)"), true)
+            }),
+        &HandleFixupRedirectors);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("consolidate_assets"),
+            TEXT("Asset"),
+            TEXT("Consolidate assets: replace all references to assets_to_merge with asset_to_keep, then delete the merged assets (same as Content Browser 'Replace References'). All assets must be of compatible classes."),
+            {
+                FSmithUEToolParam(TEXT("asset_to_keep"), TEXT("string"), TEXT("Asset path that references will point to after consolidation"), true),
+                FSmithUEToolParam(TEXT("assets_to_merge"), TEXT("array"), TEXT("Array of asset paths to be replaced by asset_to_keep and deleted"), true)
+            }),
+        &HandleConsolidateAssets);
 
     Registry.Register(
         FSmithUEToolSchema(
@@ -909,6 +944,270 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleMoveAsset(const TSharedPtr<
     Data->SetBoolField(TEXT("editors_closed"), bEditorsWereClosed);
 
     UE_LOG(LogSmithUE, Log, TEXT("move_asset: %s -> %s"), *AssetPath, *NewPath);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: move_folder
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleMoveFolder(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("source_folder"), TEXT("dest_folder")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString SourceFolder, DestFolder;
+    Params->TryGetStringField(TEXT("source_folder"), SourceFolder);
+    Params->TryGetStringField(TEXT("dest_folder"), DestFolder);
+
+    bool bDryRun = false;
+    Params->TryGetBoolField(TEXT("dry_run"), bDryRun);
+    bool bSave = true;
+    Params->TryGetBoolField(TEXT("save"), bSave);
+
+    // Normalize: strip trailing slashes
+    while (SourceFolder.EndsWith(TEXT("/"))) { SourceFolder.LeftChopInline(1); }
+    while (DestFolder.EndsWith(TEXT("/"))) { DestFolder.LeftChopInline(1); }
+
+    if (SourceFolder.IsEmpty() || DestFolder.IsEmpty() || !SourceFolder.StartsWith(TEXT("/")) || !DestFolder.StartsWith(TEXT("/")))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("source_folder and dest_folder must be long package paths like /Game/Foo or /PluginName"));
+    }
+
+    if (DestFolder.StartsWith(SourceFolder + TEXT("/")) || DestFolder == SourceFolder)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("dest_folder must not be inside source_folder"));
+    }
+
+    // Destination mount point must exist (e.g. content plugin already loaded)
+    if (FPackageName::GetPackageMountPoint(DestFolder + TEXT("/__probe__")).IsNone())
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Destination mount point does not exist for '%s'. Is the content plugin enabled and mounted?"), *DestFolder));
+    }
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+    AssetRegistry.ScanPathsSynchronous({ SourceFolder }, /*bForceRescan*/ false);
+
+    TArray<FAssetData> Assets;
+    AssetRegistry.GetAssetsByPath(FName(*SourceFolder), Assets, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
+
+    if (Assets.Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("No assets found under %s"), *SourceFolder));
+    }
+
+    TArray<FAssetRenameData> RenameData;
+    RenameData.Reserve(Assets.Num());
+    TArray<TSharedPtr<FJsonValue>> PlanArray;
+    int32 SkippedExisting = 0;
+
+    for (const FAssetData& Asset : Assets)
+    {
+        const FString OldPackageName = Asset.PackageName.ToString();
+        if (!OldPackageName.StartsWith(SourceFolder))
+        {
+            continue;
+        }
+        const FString Relative = OldPackageName.Mid(SourceFolder.Len()); // starts with '/'
+        const FString NewPackageName = DestFolder + Relative;
+        const FString NewPackagePath = FPackageName::GetLongPackagePath(NewPackageName);
+        const FString AssetName = Asset.AssetName.ToString();
+
+        const FString NewObjectPath = NewPackageName + TEXT(".") + AssetName;
+        if (UEditorAssetLibrary::DoesAssetExist(NewObjectPath))
+        {
+            SkippedExisting++;
+            continue;
+        }
+
+        if (bDryRun)
+        {
+            if (PlanArray.Num() < 50)
+            {
+                TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+                Item->SetStringField(TEXT("from"), Asset.GetObjectPathString());
+                Item->SetStringField(TEXT("to"), NewObjectPath);
+                PlanArray.Add(MakeShared<FJsonValueObject>(Item));
+            }
+            continue;
+        }
+
+        UObject* AssetObject = Asset.GetAsset();
+        if (!AssetObject)
+        {
+            continue;
+        }
+        // Close any open editors for this asset before renaming
+        bool bWasDirtyUnused = false;
+        CloseEditorsForAsset(AssetObject, bWasDirtyUnused);
+        RenameData.Add(FAssetRenameData(AssetObject, NewPackagePath, AssetName));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("source_folder"), SourceFolder);
+    Data->SetStringField(TEXT("dest_folder"), DestFolder);
+    Data->SetNumberField(TEXT("total_assets"), Assets.Num());
+    Data->SetNumberField(TEXT("skipped_existing"), SkippedExisting);
+
+    if (bDryRun)
+    {
+        Data->SetBoolField(TEXT("dry_run"), true);
+        Data->SetNumberField(TEXT("planned_moves"), Assets.Num() - SkippedExisting);
+        Data->SetArrayField(TEXT("plan_sample"), PlanArray);
+        return FSmithUECommonUtils::CreateSuccessResponse(Data);
+    }
+
+    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+    const bool bRenameOk = AssetToolsModule.Get().RenameAssets(RenameData);
+
+    int32 SavedCount = 0;
+    if (bSave)
+    {
+        TArray<UPackage*> DirtyPackages;
+        FEditorFileUtils::GetDirtyContentPackages(DirtyPackages);
+        FEditorFileUtils::GetDirtyWorldPackages(DirtyPackages);
+        SavedCount = DirtyPackages.Num();
+        FEditorFileUtils::SaveDirtyPackages(/*bPromptUserToSave*/ false, /*bSaveMapPackages*/ true, /*bSaveContentPackages*/ true);
+    }
+
+    Data->SetBoolField(TEXT("rename_succeeded"), bRenameOk);
+    Data->SetNumberField(TEXT("moved"), RenameData.Num());
+    Data->SetNumberField(TEXT("saved_dirty_packages"), SavedCount);
+
+    UE_LOG(LogSmithUE, Log, TEXT("move_folder: %s -> %s (%d assets, ok=%s)"),
+        *SourceFolder, *DestFolder, RenameData.Num(), bRenameOk ? TEXT("true") : TEXT("false"));
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: fixup_redirectors
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleFixupRedirectors(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("folder_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString FolderPath;
+    Params->TryGetStringField(TEXT("folder_path"), FolderPath);
+    while (FolderPath.EndsWith(TEXT("/"))) { FolderPath.LeftChopInline(1); }
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+
+    FARFilter Filter;
+    Filter.PackagePaths.Add(FName(*FolderPath));
+    Filter.bRecursivePaths = true;
+    Filter.ClassPaths.Add(UObjectRedirector::StaticClass()->GetClassPathName());
+
+    TArray<FAssetData> RedirectorAssets;
+    AssetRegistryModule.Get().GetAssets(Filter, RedirectorAssets);
+
+    TArray<UObjectRedirector*> Redirectors;
+    TArray<TSharedPtr<FJsonValue>> FixedArray;
+    for (const FAssetData& Asset : RedirectorAssets)
+    {
+        if (UObjectRedirector* Redirector = Cast<UObjectRedirector>(Asset.GetAsset()))
+        {
+            Redirectors.Add(Redirector);
+            if (FixedArray.Num() < 100)
+            {
+                FixedArray.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString()));
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("folder_path"), FolderPath);
+    Data->SetNumberField(TEXT("redirectors_found"), Redirectors.Num());
+    Data->SetArrayField(TEXT("redirectors"), FixedArray);
+
+    if (Redirectors.Num() > 0)
+    {
+        // Suppress the blocking "redirector fixup report" dialog and any other
+        // report-style UI the fixup may raise (it has no meaningful cancel semantics).
+        TGuardValue<bool> UnattendedGuard(GIsRunningUnattendedScript, true);
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+        AssetToolsModule.Get().FixupReferencers(Redirectors, /*bCheckoutDialogPrompt*/ false, ERedirectFixupMode::DeleteFixedUpRedirectors);
+    }
+
+    UE_LOG(LogSmithUE, Log, TEXT("fixup_redirectors: %s (%d redirectors)"), *FolderPath, Redirectors.Num());
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: consolidate_assets
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleConsolidateAssets(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("asset_to_keep"), TEXT("assets_to_merge")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+
+    FString KeepPath;
+    Params->TryGetStringField(TEXT("asset_to_keep"), KeepPath);
+
+    const TArray<TSharedPtr<FJsonValue>>* MergeArray = nullptr;
+    if (!Params->TryGetArrayField(TEXT("assets_to_merge"), MergeArray) || !MergeArray || MergeArray->Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("assets_to_merge must be a non-empty array of asset paths"));
+    }
+
+    UObject* KeepAsset = UEditorAssetLibrary::LoadAsset(KeepPath);
+    if (!KeepAsset)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("asset_to_keep not found or failed to load: %s"), *KeepPath));
+    }
+
+    TArray<UObject*> ObjectsToConsolidate;
+    for (const TSharedPtr<FJsonValue>& Value : *MergeArray)
+    {
+        const FString MergePath = Value->AsString();
+        UObject* MergeAsset = UEditorAssetLibrary::LoadAsset(MergePath);
+        if (!MergeAsset)
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(
+                FString::Printf(TEXT("Asset to merge not found or failed to load: %s"), *MergePath));
+        }
+        if (MergeAsset == KeepAsset)
+        {
+            return FSmithUECommonUtils::CreateErrorResponse(TEXT("assets_to_merge must not contain asset_to_keep"));
+        }
+        ObjectsToConsolidate.Add(MergeAsset);
+    }
+
+    ObjectTools::FConsolidationResults Results = ObjectTools::ConsolidateObjects(KeepAsset, ObjectsToConsolidate, /*bShowDeleteConfirmation*/ false);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("asset_to_keep"), KeepPath);
+    Data->SetNumberField(TEXT("requested_merges"), ObjectsToConsolidate.Num());
+    Data->SetNumberField(TEXT("failed_consolidations"), Results.FailedConsolidationObjs.Num());
+    Data->SetNumberField(TEXT("invalid_consolidations"), Results.InvalidConsolidationObjs.Num());
+
+    TArray<TSharedPtr<FJsonValue>> FailedArray;
+    for (const TWeakObjectPtr<UObject>& Failed : Results.FailedConsolidationObjs)
+    {
+        if (Failed.IsValid())
+        {
+            FailedArray.Add(MakeShared<FJsonValueString>(Failed->GetPathName()));
+        }
+    }
+    Data->SetArrayField(TEXT("failed"), FailedArray);
+
+    UE_LOG(LogSmithUE, Log, TEXT("consolidate_assets: keep=%s merged=%d failed=%d"),
+        *KeepPath, ObjectsToConsolidate.Num(), Results.FailedConsolidationObjs.Num());
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
