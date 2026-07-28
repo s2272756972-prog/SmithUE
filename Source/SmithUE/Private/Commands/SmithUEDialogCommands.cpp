@@ -26,7 +26,7 @@ void FSmithUEDialogCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 			TEXT("Close a modal editor dialog that is blocking the game thread (e.g. an unexpected 'Save As'/confirm prompt). WORKER-SAFE. success = QUEUED, not finished: the close is applied on the next modal-loop tick; poll get_active_dialog (modal_active=false) to confirm. button_text clicks a SPECIFIC button by its label (case-insensitive; exact then substring; check get_active_dialog 'buttons') — use this for dialogs whose default button is NOT the one you want (e.g. OkCancel confirms that default to Cancel). response=cancel (default) reliably destroys/closes the window; response=accept is BEST-EFFORT (focus + Enter = default action) and falls back to close if Enter does not dismiss it."),
 			{
 				FSmithUEToolParam(TEXT("response"), TEXT("string"), TEXT("How to respond: 'cancel' (default, reliably closes) or 'accept' (best-effort default action). Ignored when button_text is provided."), /*required*/ false, TEXT("cancel"))
-					.SetAllowedValues({ TEXT("cancel"), TEXT("accept") }),
+					.SetAllowedValues({ TEXT("cancel"), TEXT("accept"), TEXT("confirm") }),
 				FSmithUEToolParam(TEXT("button_text"), TEXT("string"), TEXT("Click the button whose label matches this text (case-insensitive; exact match preferred, then substring). See get_active_dialog 'buttons' for available labels."), /*required*/ false)
 			}),
 		&FSmithUEDialogCommands::HandleDismissActiveDialog);
@@ -38,7 +38,7 @@ void FSmithUEDialogCommands::RegisterTools(FSmithUEToolRegistry& Registry)
 			TEXT("Arm a persistent auto-responder so ANY modal dialog that opens is answered automatically (prevents automation from hanging on unexpected prompts). WORKER-SAFE — arm this BEFORE running tools that might pop a modal (e.g. level_save on an unsaved level). mode=off (default, disarmed) | cancel (reliably close every modal) | accept (best-effort default action, falls back to close)."),
 			{
 				FSmithUEToolParam(TEXT("mode"), TEXT("string"), TEXT("Auto-response mode: 'off' (disarm), 'cancel' (auto-close every modal), or 'accept' (best-effort default action)"), /*required*/ true)
-					.SetAllowedValues({ TEXT("off"), TEXT("cancel"), TEXT("accept") })
+					.SetAllowedValues({ TEXT("off"), TEXT("cancel"), TEXT("accept"), TEXT("confirm") })
 			}),
 		&FSmithUEDialogCommands::HandleSetDialogAutoResponse);
 }

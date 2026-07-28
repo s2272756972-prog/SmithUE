@@ -35,8 +35,9 @@ public:
 	enum class EResponse : int32
 	{
 		None = 0,
-		Cancel = 1, // reliably close/destroy the modal window (safe unblock)
-		Accept = 2, // best-effort: focus + synthesize Enter (default action)
+		Cancel = 1,  // reliably close/destroy the modal window (safe unblock)
+		Accept = 2,  // best-effort: focus + synthesize Enter (default action)
+		Confirm = 3, // click the affirmative button (OK/Yes/Continue/确定/是/继续...) - for OkCancel-style prompts whose default is Cancel
 	};
 
 	static FSmithUEDialogWatcher& Get();

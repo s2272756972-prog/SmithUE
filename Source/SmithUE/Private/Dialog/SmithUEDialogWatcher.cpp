@@ -82,6 +82,31 @@ namespace
 			}
 		}
 	}
+
+	/** True if a button label is an affirmative/confirm action (locale-tolerant). */
+	bool IsConfirmLabel(const FString& Label)
+	{
+		if (Label.IsEmpty())
+		{
+			return false;
+		}
+		static const TCHAR* Words[] = {
+			TEXT("OK"), TEXT("Ok"), TEXT("Yes"), TEXT("Continue"), TEXT("Confirm"), TEXT("Apply"),
+			TEXT("\u786e\u5b9a"),  // 确定
+			TEXT("\u662f"),        // 是
+			TEXT("\u7ee7\u7eed"),  // 继续
+			TEXT("\u786e\u8ba4"),  // 确认
+			TEXT("\u5e94\u7528"),  // 应用
+		};
+		for (const TCHAR* W : Words)
+		{
+			if (Label.Equals(W, ESearchCase::IgnoreCase) || Label.Contains(W, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 }
 
 FSmithUEDialogWatcher& FSmithUEDialogWatcher::Get()
@@ -250,6 +275,35 @@ void FSmithUEDialogWatcher::OnModalLoopTick(float /*DeltaTime*/)
 
 	const bool bAlreadyTried = HandledWindow.IsValid() && HandledWindow.Pin() == Win;
 
+	if (static_cast<EResponse>(Resp) == EResponse::Confirm)
+	{
+		// Click the affirmative button (OK/Yes/Continue/确定...). Needed for
+		// OkCancel prompts whose default (Enter) is Cancel, e.g. the RenameAssets
+		// CDO-reference confirmation raised during batch asset migration.
+		for (const TPair<TSharedRef<SButton>, FString>& Pair : Buttons)
+		{
+			if (IsConfirmLabel(Pair.Value))
+			{
+				UE_LOG(LogSmithUE, Log, TEXT("Dialog watcher: auto-confirm clicking '%s' on modal '%s'."), *Pair.Value, *Win->GetTitle().ToString());
+				Pair.Key->SimulateClick();
+				if (!bAlreadyTried)
+				{
+					DismissedCounter.Increment();
+				}
+				HandledWindow = Win;
+				return;
+			}
+		}
+		// No affirmative button found: leave the modal for a human rather than
+		// destroying it (destroying could mean "cancel" and abort the operation).
+		if (!bAlreadyTried)
+		{
+			UE_LOG(LogSmithUE, Warning, TEXT("Dialog watcher: confirm mode found no affirmative button on modal '%s' (buttons: %d)."), *Win->GetTitle().ToString(), Buttons.Num());
+			HandledWindow = Win;
+		}
+		return;
+	}
+
 	if (static_cast<EResponse>(Resp) == EResponse::Accept && !bAlreadyTried)
 	{
 		// First attempt: try to trigger the dialog's default action.
@@ -288,9 +342,10 @@ const TCHAR* FSmithUEDialogWatcher::ResponseToString(EResponse R)
 {
 	switch (R)
 	{
-	case EResponse::Cancel: return TEXT("cancel");
-	case EResponse::Accept: return TEXT("accept");
-	default:                return TEXT("off");
+	case EResponse::Cancel:  return TEXT("cancel");
+	case EResponse::Accept:  return TEXT("accept");
+	case EResponse::Confirm: return TEXT("confirm");
+	default:                 return TEXT("off");
 	}
 }
 
@@ -301,7 +356,12 @@ FSmithUEDialogWatcher::EResponse FSmithUEDialogWatcher::ResponseFromString(const
 	{
 		return EResponse::Cancel;
 	}
-	if (S.Equals(TEXT("accept"), ESearchCase::IgnoreCase) || S.Equals(TEXT("ok"), ESearchCase::IgnoreCase) || S.Equals(TEXT("confirm"), ESearchCase::IgnoreCase))
+	// "confirm" = click the affirmative button; distinct from "accept" (Enter/default action).
+	if (S.Equals(TEXT("confirm"), ESearchCase::IgnoreCase) || S.Equals(TEXT("yes"), ESearchCase::IgnoreCase))
+	{
+		return EResponse::Confirm;
+	}
+	if (S.Equals(TEXT("accept"), ESearchCase::IgnoreCase) || S.Equals(TEXT("ok"), ESearchCase::IgnoreCase))
 	{
 		return EResponse::Accept;
 	}
