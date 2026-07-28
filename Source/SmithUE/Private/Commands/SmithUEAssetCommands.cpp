@@ -14,6 +14,7 @@
 #include "IContentBrowserSingleton.h"
 #include "Misc/PackageName.h"
 #include "UObject/ObjectRedirector.h"
+#include "Dialog/SmithUEDialogWatcher.h"
 #include "ObjectTools.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "FileHelpers.h"
@@ -414,9 +415,10 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
         FSmithUEToolSchema(
             TEXT("fixup_redirectors"),
             TEXT("Asset"),
-            TEXT("Find all ObjectRedirectors under a folder (recursive) and fix up their referencers, then delete the redirectors (same as Content Browser 'Fix Up Redirectors')."),
+            TEXT("Clean up ObjectRedirectors under a folder (recursive). SAFE DEFAULT: only deletes redirectors that have NO external referencers (the normal state after a folder migration, since references were already rewritten) - this avoids AssetTools::FixupReferencers, which ASSERTS/crashes on World & Blueprint-class/CDO redirectors left by migrated .umap packages. Redirectors that still have referencers are reported (not touched) unless force_fixup=true."),
             {
-                FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to scan for redirectors (e.g. /Game)"), true)
+                FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to scan for redirectors (e.g. /Game)"), true),
+                FSmithUEToolParam(TEXT("force_fixup"), TEXT("boolean"), TEXT("Run AssetTools::FixupReferencers over still-referenced redirectors (rewrites+saves referencers). Default false. UNSAFE for World/Blueprint redirectors - can crash the editor."))
             }),
         &HandleFixupRedirectors);
 
@@ -1101,7 +1103,18 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleFixupRedirectors(const TSha
     Params->TryGetStringField(TEXT("folder_path"), FolderPath);
     while (FolderPath.EndsWith(TEXT("/"))) { FolderPath.LeftChopInline(1); }
 
+    // force_fixup=true routes still-referenced redirectors through
+    // AssetTools::FixupReferencers (rewrites + saves referencers). Default false:
+    // we ONLY delete redirectors that have no external referencers. This is the
+    // safe path for post-migration cleanup, and critically it AVOIDS running
+    // FixupReferencers over World / Blueprint-class / CDO redirectors (e.g. a
+    // migrated .umap leaves World + _C + Default__*_C redirectors), which asserts
+    // deep inside the engine (Optional.h GetValue on an unset TOptional).
+    bool bForceFixup = false;
+    Params->TryGetBoolField(TEXT("force_fixup"), bForceFixup);
+
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
     FARFilter Filter;
     Filter.PackagePaths.Add(FName(*FolderPath));
@@ -1109,37 +1122,86 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleFixupRedirectors(const TSha
     Filter.ClassPaths.Add(UObjectRedirector::StaticClass()->GetClassPathName());
 
     TArray<FAssetData> RedirectorAssets;
-    AssetRegistryModule.Get().GetAssets(Filter, RedirectorAssets);
+    AssetRegistry.GetAssets(Filter, RedirectorAssets);
 
-    TArray<UObjectRedirector*> Redirectors;
-    TArray<TSharedPtr<FJsonValue>> FixedArray;
+    TArray<UObject*> SafeToDelete;                     // redirectors with no external referencers
+    TArray<UObjectRedirector*> ReferencedRedirectors;  // still referenced -> need real fixup
+    TArray<TSharedPtr<FJsonValue>> DeletedList;
+    TArray<TSharedPtr<FJsonValue>> ReferencedList;
+    TSet<FName> CountedPackages;
+
     for (const FAssetData& Asset : RedirectorAssets)
     {
-        if (UObjectRedirector* Redirector = Cast<UObjectRedirector>(Asset.GetAsset()))
+        UObjectRedirector* Redirector = Cast<UObjectRedirector>(Asset.GetAsset());
+        if (!Redirector)
         {
-            Redirectors.Add(Redirector);
-            if (FixedArray.Num() < 100)
+            continue;
+        }
+
+        const FName PkgName = Asset.PackageName;
+        TArray<FName> Referencers;
+        AssetRegistry.GetReferencers(PkgName, Referencers);
+        Referencers.RemoveAll([&PkgName](const FName& R) { return R == PkgName; });
+
+        if (Referencers.Num() == 0)
+        {
+            SafeToDelete.Add(Redirector);
+            if (DeletedList.Num() < 100 && !CountedPackages.Contains(PkgName))
             {
-                FixedArray.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString()));
+                DeletedList.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString()));
             }
         }
+        else
+        {
+            ReferencedRedirectors.Add(Redirector);
+            if (ReferencedList.Num() < 100)
+            {
+                ReferencedList.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString()));
+            }
+        }
+        CountedPackages.Add(PkgName);
+    }
+
+    int32 DeletedCount = 0;
+    if (SafeToDelete.Num() > 0)
+    {
+        // bShowConfirmation=false; these have no referencers so no force-delete prompt.
+        DeletedCount = ObjectTools::DeleteObjects(SafeToDelete, /*bShowConfirmation*/ false);
+    }
+
+    int32 FixedUpCount = 0;
+    if (bForceFixup && ReferencedRedirectors.Num() > 0)
+    {
+        // Only reachable when the caller explicitly opts in. Arm the DialogWatcher
+        // to auto-close the fixup report modal (runs inside the nested modal loop),
+        // instead of forcing GIsRunningUnattendedScript (which corrupts AssetTools'
+        // save path). NOTE: still unsafe for World/Blueprint-class redirectors.
+        FSmithUEDialogWatcher& Watcher = FSmithUEDialogWatcher::Get();
+        const FSmithUEDialogWatcher::EResponse PrevMode = Watcher.GetAutoResponse();
+        Watcher.SetAutoResponse(FSmithUEDialogWatcher::EResponse::Accept);
+
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+        AssetToolsModule.Get().FixupReferencers(ReferencedRedirectors, /*bCheckoutDialogPrompt*/ false, ERedirectFixupMode::DeleteFixedUpRedirectors);
+
+        Watcher.SetAutoResponse(PrevMode);
+        FixedUpCount = ReferencedRedirectors.Num();
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("folder_path"), FolderPath);
-    Data->SetNumberField(TEXT("redirectors_found"), Redirectors.Num());
-    Data->SetArrayField(TEXT("redirectors"), FixedArray);
-
-    if (Redirectors.Num() > 0)
+    Data->SetNumberField(TEXT("redirectors_found"), RedirectorAssets.Num());
+    Data->SetNumberField(TEXT("deleted_unreferenced"), DeletedCount);
+    Data->SetArrayField(TEXT("deleted"), DeletedList);
+    Data->SetNumberField(TEXT("still_referenced"), ReferencedRedirectors.Num());
+    Data->SetArrayField(TEXT("still_referenced_list"), ReferencedList);
+    Data->SetNumberField(TEXT("force_fixed_up"), FixedUpCount);
+    if (ReferencedRedirectors.Num() > 0 && !bForceFixup)
     {
-        // Suppress the blocking "redirector fixup report" dialog and any other
-        // report-style UI the fixup may raise (it has no meaningful cancel semantics).
-        TGuardValue<bool> UnattendedGuard(GIsRunningUnattendedScript, true);
-        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
-        AssetToolsModule.Get().FixupReferencers(Redirectors, /*bCheckoutDialogPrompt*/ false, ERedirectFixupMode::DeleteFixedUpRedirectors);
+        Data->SetStringField(TEXT("note"), TEXT("Some redirectors still have external referencers and were left in place. Migrate/rewrite those referencers, or re-run with force_fixup=true (unsafe for World/Blueprint redirectors)."));
     }
 
-    UE_LOG(LogSmithUE, Log, TEXT("fixup_redirectors: %s (%d redirectors)"), *FolderPath, Redirectors.Num());
+    UE_LOG(LogSmithUE, Log, TEXT("fixup_redirectors: %s (found=%d, deleted=%d, still_referenced=%d, force_fixed=%d)"),
+        *FolderPath, RedirectorAssets.Num(), DeletedCount, ReferencedRedirectors.Num(), FixedUpCount);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
