@@ -163,6 +163,10 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > Full history in [CHANGELOG.md](CHANGELOG.md).
 
+### v1.16.1 (UE5.8, 2026-07-28)
+- Sync with published smithue-cli **0.14.0**: bump `kRecommendedCliVersion` → 0.14.0 (old-CLI machines get the Outdated prompt; SKILL drift self-heals).
+- Docs: PITFALLS #7 (consumer-side param passing via `--params-file` / `smithue.ps1`, CJK), #12 (CI auto-publish, bypass-2fa deprecation → OIDC); test report footnote on CLI 0.14.0. Constants + docs only, no tool changes.
+
 ### v1.16.0 (UE5.8, 2026-07-22)
 - **Upgraded to Unreal Engine 5.8**: API compatibility (material `CountInputs`/`GetMaterialResource(EShaderPlatform)`, `StructUtils/UserDefinedStruct.h`, JSON key `TSharedString`, AnimGraph binding via reflection, scoped `EAutomationTestFlags`, `.uplugin` `PlatformAllowList`, ...), zero deprecation warnings. See [docs/UE5.8-UPGRADE-TEST-REPORT.md](docs/UE5.8-UPGRADE-TEST-REPORT.md).
 - **New AI domain (10 tools)**: Blackboard (create/add-key/read), Behavior Tree (create/link-blackboard/read), EQS (create/read), State Tree (create with ComponentSchema + compile / read).

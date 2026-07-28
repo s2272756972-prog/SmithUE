@@ -183,6 +183,10 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
+### v1.16.1（UE5.8，2026-07-28）
+- 同步已发布 smithue-cli **0.14.0**：`kRecommendedCliVersion` → 0.14.0（旧 CLI 在面板提示升级、SKILL 漂移自愈）。
+- 文档：PITFALLS #7（消费端 `--params-file` / `smithue.ps1` 传参、CJK）、#12（CI 自动发布、bypass-2fa 废弃 → OIDC）；测试报告加 CLI 0.14.0 脚注。仅常量 + 文档，无工具变更。
+
 ### v1.16.0（UE5.8，2026-07-22）
 - **升级到 Unreal Engine 5.8**：API 兼容适配（材质表达式 `CountInputs`/`GetMaterialResource(EShaderPlatform)`、`StructUtils/UserDefinedStruct.h`、JSON key `TSharedString`、AnimGraph 绑定反射、`EAutomationTestFlags` scoped、`.uplugin` `PlatformAllowList` 等），弃用告警清零。详见 [docs/UE5.8-UPGRADE-TEST-REPORT.md](docs/UE5.8-UPGRADE-TEST-REPORT.md)。
 - **新增 AI 域（10 工具）**：黑板（建/加键/读）、行为树（建/链黑板/读）、EQS（建/读）、状态树（建+ComponentSchema+编译/读）。

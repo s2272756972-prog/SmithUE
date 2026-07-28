@@ -1,5 +1,12 @@
 # SmithUE Changelog
 
+## v1.16.1（UE5.8，2026-07-28）
+
+### CLI 同步与文档（无工具增减、无引擎 API 改动）
+- **`kRecommendedCliVersion` 0.13.4 → 0.14.0**（`SmithUECliChecker.cpp`）：跟随已发布的 smithue-cli 0.14.0（SKILL 重构）。旧 CLI 机器将在「Status & Updates」面板显示 *Outdated → 升级*，升级即触发 CLI `postinstall` 重新部署最新 SKILL —— 保持 SKILL 漂移自愈。
+- `docs/spec/PITFALLS.md`：#7 补充消费端 JSON 传参官方解法（`--params-file` 首选 → skill 自带 `scripts/smithue.ps1` → `smithue-exec.mjs`；CJK 关联 CLI 0.14.0 的 `charset=utf-8` 修复）；#12 更新 npm 发布现状（CI 自动发布 / `NPM_TOKEN` secret / email-OTP vs TOTP / bypass-2fa token 废弃 → Trusted Publishing OIDC）。
+- `docs/UE5.8-UPGRADE-TEST-REPORT.md`：脚注说明 CLI 已独立升至 0.14.0（与引擎升级无关），历史结论保留。
+
 ## v1.16.0（UE5.8，2026-07-22）
 
 ### 升级到 Unreal Engine 5.8
