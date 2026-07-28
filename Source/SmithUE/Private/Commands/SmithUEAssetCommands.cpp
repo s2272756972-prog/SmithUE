@@ -5,6 +5,7 @@
 #include "Utils/SmithUECommonUtils.h"
 #include "SmithUEModule.h"
 #include "Utils/SmithUEAssetPropertyUtils.h"
+#include "Utils/SmithUEProgress.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "EditorAssetLibrary.h"
@@ -17,6 +18,9 @@
 #include "UObject/SavePackage.h"
 #include "Serialization/ArchiveReplaceObjectRef.h"
 #include "Engine/Blueprint.h"
+#include "Engine/World.h"
+#include "HAL/FileManager.h"
+#include "Misc/DateTime.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Dialog/SmithUEDialogWatcher.h"
 #include "ObjectTools.h"
@@ -34,6 +38,10 @@
 
 namespace
 {
+    // Forward decl; defined later. True if a redirector's target is a World or
+    // Blueprint(-class/CDO) — ConsolidateObjects crashes on these in UE5.8.
+    bool IsPoisonRedirector(class UObjectRedirector* Redirector, const struct FAssetData& Asset);
+
     struct FAssetPropertyPathSegment
     {
         FString Name;
@@ -460,6 +468,7 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
             {
                 FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to scan for redirectors (e.g. /Game)"), true),
                 FSmithUEToolParam(TEXT("max_resolve"), TEXT("number"), TEXT("Optional cap on how many redirectors to resolve this call (for batching very large sets; default: all)")),
+                FSmithUEToolParam(TEXT("skip_poison"), TEXT("boolean"), TEXT("Skip redirectors whose target is a World/level or Blueprint-generated class/CDO (ConsolidateObjects crashes on these in UE5.8). Default TRUE — they are reported in 'skipped_poison' instead of crashing the editor; use redirect_references + resave_packages for those.")),
                 FSmithUEToolParam(TEXT("save"), TEXT("boolean"), TEXT("Save modified packages after resolving (default true)"))
             }),
         &HandleResolveRedirectors);
@@ -502,6 +511,48 @@ void FSmithUEAssetCommands::RegisterTools(FSmithUEToolRegistry& Registry)
                 FSmithUEToolParam(TEXT("max_list"), TEXT("number"), TEXT("Cap on sample lists returned (counts are exact; default 50)"))
             }),
         &HandlePlanMigration);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("list_redirectors"),
+            TEXT("Asset"),
+            TEXT("Diagnose ObjectRedirectors under a folder: classifies each by referencer origin (none = safe to delete; plugin/game refs = need resave_packages/redirect_references to固化 first) and by kind (asset / World / Blueprint-class / CDO — the last two are ConsolidateObjects 'poison'). Read-only. Use to pick the right cleanup path before touching anything."),
+            {
+                FSmithUEToolParam(TEXT("folder_path"), TEXT("string"), TEXT("Content folder to scan (e.g. /MyPlugin)"), true),
+                FSmithUEToolParam(TEXT("max_list"), TEXT("number"), TEXT("Cap on per-bucket sample lists (counts are exact; default 30)"))
+            }),
+        &HandleListRedirectors);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("move_folders"),
+            TEXT("Asset"),
+            TEXT("Batch several folder moves in ONE call (each {source, dest}), instead of calling move_folder N times. Uses a single batched IAssetTools::RenameAssets across all mappings so cross-folder references between the moved sets are fixed up together (fewer leftover redirectors than sequential move_folder). Supports dry_run."),
+            {
+                FSmithUEToolParam(TEXT("mappings"), TEXT("array"), TEXT("Array of {\"source\":\"/P/A\",\"dest\":\"/P/Shared/A\"} objects"), true),
+                FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("Preview only (default false)")),
+                FSmithUEToolParam(TEXT("save"), TEXT("boolean"), TEXT("Save dirty packages afterwards (default true)"))
+            }),
+        &HandleMoveFolders);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("delete_empty_folders"),
+            TEXT("Asset"),
+            TEXT("Delete empty content folders (no assets in the folder or any subfolder) on disk under a root, recursively bottom-up. Safe: empty folders hold nothing and break nothing. Use to tidy up the source tree left behind after migrating assets out."),
+            {
+                FSmithUEToolParam(TEXT("root"), TEXT("string"), TEXT("Content root to clean (e.g. /Game or /MyPlugin)"), true),
+                FSmithUEToolParam(TEXT("dry_run"), TEXT("boolean"), TEXT("List what would be deleted without deleting (default false)"))
+            }),
+        &HandleDeleteEmptyFolders);
+
+    Registry.Register(
+        FSmithUEToolSchema(
+            TEXT("get_job_status"),
+            TEXT("Asset"),
+            TEXT("Report live progress of the current long-running batch command (resave_packages / move_folder(s) / fixup_redirectors / resolve_redirectors). WORKER-SAFE: responds even while the game thread is busy inside the batch, so you can poll真实进度 instead of grepping the log. Returns active/operation/processed/total/percent/current_item/elapsed_seconds."),
+            {}),
+        &HandleGetJobStatus);
 
     Registry.Register(
         FSmithUEToolSchema(
@@ -1543,6 +1594,7 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResolveRedirectors(const TS
     { double Tmp; if (Params->TryGetNumberField(TEXT("max_resolve"), Tmp)) { MaxResolve = FMath::Max(1, (int32)Tmp); } }
 
     bool bSave = true; Params->TryGetBoolField(TEXT("save"), bSave);
+    bool bSkipPoison = true; Params->TryGetBoolField(TEXT("skip_poison"), bSkipPoison);
 
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 
@@ -1554,11 +1606,14 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResolveRedirectors(const TS
     TArray<FAssetData> RedirectorAssets;
     AssetRegistryModule.Get().GetAssets(Filter, RedirectorAssets);
 
-    int32 Resolved = 0, NoDestination = 0, LoadFailed = 0;
+    int32 Resolved = 0, NoDestination = 0, LoadFailed = 0, SkippedPoison = 0;
     TArray<TSharedPtr<FJsonValue>> ResolvedList;
+    TArray<TSharedPtr<FJsonValue>> PoisonList;
+    FSmithUEProgressScope ProgressScope(TEXT("resolve_redirectors"), RedirectorAssets.Num());
 
     for (const FAssetData& Asset : RedirectorAssets)
     {
+        FSmithUEProgress::Get().Tick(Asset.PackageName.ToString());
         if (Resolved >= MaxResolve)
         {
             break;
@@ -1568,6 +1623,15 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResolveRedirectors(const TS
         if (!Redirector)
         {
             ++LoadFailed;
+            continue;
+        }
+
+        // Poison guard: World/Blueprint/CDO redirectors crash ConsolidateObjects
+        // (access violation). Skip and report them; use redirect_references instead.
+        if (bSkipPoison && IsPoisonRedirector(Redirector, Asset))
+        {
+            ++SkippedPoison;
+            if (PoisonList.Num() < 100) { PoisonList.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString())); }
             continue;
         }
 
@@ -1626,11 +1690,17 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResolveRedirectors(const TS
     Data->SetNumberField(TEXT("resolved"), Resolved);
     Data->SetNumberField(TEXT("no_destination"), NoDestination);
     Data->SetNumberField(TEXT("load_failed"), LoadFailed);
+    Data->SetNumberField(TEXT("skipped_poison"), SkippedPoison);
     Data->SetNumberField(TEXT("saved_dirty_packages"), SavedCount);
     Data->SetArrayField(TEXT("resolved_sample"), ResolvedList);
+    Data->SetArrayField(TEXT("poison_sample"), PoisonList);
+    if (SkippedPoison > 0)
+    {
+        Data->SetStringField(TEXT("note"), TEXT("skipped_poison redirectors target World/Blueprint/CDO — resolve via redirect_references + resave_packages, not here."));
+    }
 
-    UE_LOG(LogSmithUE, Log, TEXT("resolve_redirectors: %s (found=%d, resolved=%d, no_dest=%d, load_failed=%d)"),
-        *FolderPath, RedirectorAssets.Num(), Resolved, NoDestination, LoadFailed);
+    UE_LOG(LogSmithUE, Log, TEXT("resolve_redirectors: %s (found=%d, resolved=%d, no_dest=%d, load_failed=%d, poison=%d)"),
+        *FolderPath, RedirectorAssets.Num(), Resolved, NoDestination, LoadFailed, SkippedPoison);
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 
@@ -1674,8 +1744,12 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResavePackages(const TShare
 
     TArray<UPackage*> ToSave;
     int32 Loaded = 0, SkippedMaps = 0, LoadFailed = 0;
+    // Progress covers the whole op; the LOAD phase is the slow part (disk IO),
+    // so poll it via get_job_status instead of guessing from the log.
+    FSmithUEProgress::Get().Begin(TEXT("resave_packages (load)"), PackageNames.Num());
     for (const FName& PkgName : PackageNames)
     {
+        FSmithUEProgress::Get().Tick(PkgName.ToString());
         if (ToSave.Num() >= MaxCount) { break; }
 
         const FString PkgStr = PkgName.ToString();
@@ -1701,8 +1775,10 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResavePackages(const TShare
 
     int32 Saved = 0;
     TArray<TSharedPtr<FJsonValue>> FailedList;
+    FSmithUEProgress::Get().Begin(TEXT("resave_packages (save)"), ToSave.Num());
     for (UPackage* Package : ToSave)
     {
+        FSmithUEProgress::Get().Tick(Package->GetName());
         const FString PkgStr = Package->GetName();
         FString Filename;
         if (!FPackageName::TryConvertLongPackageNameToFilename(
@@ -1720,6 +1796,8 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleResavePackages(const TShare
         if (bOk) { ++Saved; }
         else if (FailedList.Num() < 100) { FailedList.Add(MakeShared<FJsonValueString>(PkgStr)); }
     }
+
+    FSmithUEProgress::Get().End();
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetNumberField(TEXT("targeted_packages"), PackageNames.Num());
@@ -1979,6 +2057,315 @@ TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandlePlanMigration(const TShared
 
     UE_LOG(LogSmithUE, Log, TEXT("plan_migration: %s -> %s movers=%d redirectors=%d stubborn(W=%d,BP=%d) shared=%d"),
         *SourceFolder, *DestRoot, TotalMovers, WithReferencers, StubbornWorld, StubbornBlueprint, SharedOutside);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: classify a redirector as ConsolidateObjects "poison" (World/BP/CDO)
+// ---------------------------------------------------------------------------
+namespace
+{
+    bool IsPoisonRedirector(UObjectRedirector* Redirector, const FAssetData& Asset)
+    {
+        if (!Redirector) { return false; }
+        // CDO / generated-class redirector object names.
+        const FString AssetName = Asset.AssetName.ToString();
+        if (AssetName.StartsWith(TEXT("Default__")) || AssetName.EndsWith(TEXT("_C")))
+        {
+            return true;
+        }
+        UObject* Dest = Redirector->DestinationObject;
+        int32 Guard = 0;
+        while (UObjectRedirector* DR = Cast<UObjectRedirector>(Dest))
+        {
+            if (++Guard > 16) { break; }
+            Dest = DR->DestinationObject;
+        }
+        if (!Dest) { return false; }
+        return Dest->IsA<UWorld>() || Dest->IsA<UBlueprint>() || Dest->IsA<UClass>();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command: list_redirectors
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleListRedirectors(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("folder_path")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+    FString FolderPath;
+    Params->TryGetStringField(TEXT("folder_path"), FolderPath);
+    while (FolderPath.EndsWith(TEXT("/"))) { FolderPath.LeftChopInline(1); }
+
+    int32 MaxList = 30;
+    { double Tmp; if (Params->TryGetNumberField(TEXT("max_list"), Tmp)) { MaxList = FMath::Max(1, (int32)Tmp); } }
+
+    FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AR = ARM.Get();
+
+    FARFilter Filter;
+    Filter.PackagePaths.Add(FName(*FolderPath));
+    Filter.bRecursivePaths = true;
+    Filter.ClassPaths.Add(UObjectRedirector::StaticClass()->GetClassPathName());
+    TArray<FAssetData> Redirectors;
+    AR.GetAssets(Filter, Redirectors);
+
+    int32 Unreferenced = 0, NeedsFixup = 0, Poison = 0;
+    TArray<TSharedPtr<FJsonValue>> UnrefList, FixupList, PoisonList;
+
+    for (const FAssetData& Asset : Redirectors)
+    {
+        TArray<FName> Refs;
+        AR.GetReferencers(Asset.PackageName, Refs, UE::AssetRegistry::EDependencyCategory::Package);
+        Refs.RemoveAll([&Asset](const FName& R) { return R == Asset.PackageName; });
+
+        UObjectRedirector* Redir = Cast<UObjectRedirector>(Asset.GetAsset());
+        const bool bPoison = IsPoisonRedirector(Redir, Asset);
+
+        if (bPoison)
+        {
+            ++Poison;
+            if (PoisonList.Num() < MaxList) { PoisonList.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString())); }
+        }
+        else if (Refs.Num() == 0)
+        {
+            ++Unreferenced;
+            if (UnrefList.Num() < MaxList) { UnrefList.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString())); }
+        }
+        else
+        {
+            ++NeedsFixup;
+            if (FixupList.Num() < MaxList) { FixupList.Add(MakeShared<FJsonValueString>(Asset.GetObjectPathString())); }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("folder_path"), FolderPath);
+    Data->SetNumberField(TEXT("total"), Redirectors.Num());
+    Data->SetNumberField(TEXT("unreferenced_deletable"), Unreferenced);
+    Data->SetNumberField(TEXT("needs_fixup"), NeedsFixup);
+    Data->SetNumberField(TEXT("poison_world_bp_cdo"), Poison);
+    Data->SetArrayField(TEXT("unreferenced_sample"), UnrefList);
+    Data->SetArrayField(TEXT("needs_fixup_sample"), FixupList);
+    Data->SetArrayField(TEXT("poison_sample"), PoisonList);
+    Data->SetStringField(TEXT("advice"),
+        TEXT("unreferenced -> fixup_redirectors (safe delete). needs_fixup -> resave_packages the referencers, then fixup_redirectors. poison (World/BP/CDO) -> redirect_references (do NOT use resolve_redirectors/ConsolidateObjects on these)."));
+
+    UE_LOG(LogSmithUE, Log, TEXT("list_redirectors: %s total=%d unref=%d needs_fixup=%d poison=%d"),
+        *FolderPath, Redirectors.Num(), Unreferenced, NeedsFixup, Poison);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: move_folders (batch of folder mappings in one RenameAssets)
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleMoveFolders(const TSharedPtr<FJsonObject>& Params)
+{
+    const TArray<TSharedPtr<FJsonValue>>* Mappings = nullptr;
+    if (!Params->TryGetArrayField(TEXT("mappings"), Mappings) || !Mappings || Mappings->Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("mappings must be a non-empty array of {source,dest}"));
+    }
+    bool bDryRun = false; Params->TryGetBoolField(TEXT("dry_run"), bDryRun);
+    bool bSave = true;     Params->TryGetBoolField(TEXT("save"), bSave);
+
+    FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AR = ARM.Get();
+
+    // Build a combined rename list across all mappings.
+    struct FPair { FString Src; FString Dst; };
+    TArray<FPair> Pairs;
+    for (const TSharedPtr<FJsonValue>& V : *Mappings)
+    {
+        const TSharedPtr<FJsonObject>* Obj = nullptr;
+        if (V->TryGetObject(Obj) && Obj)
+        {
+            FString S, D;
+            (*Obj)->TryGetStringField(TEXT("source"), S);
+            (*Obj)->TryGetStringField(TEXT("dest"), D);
+            while (S.EndsWith(TEXT("/"))) { S.LeftChopInline(1); }
+            while (D.EndsWith(TEXT("/"))) { D.LeftChopInline(1); }
+            if (!S.IsEmpty() && !D.IsEmpty()) { Pairs.Add({ S, D }); }
+        }
+    }
+    if (Pairs.Num() == 0)
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(TEXT("no valid {source,dest} mappings"));
+    }
+
+    TArray<FAssetRenameData> RenameData;
+    TArray<TSharedPtr<FJsonValue>> PlanSample;
+    int32 TotalAssets = 0, SkippedExisting = 0;
+
+    FSmithUEProgress::Get().Begin(TEXT("move_folders"), 0);
+    for (const FPair& P : Pairs)
+    {
+        AR.ScanPathsSynchronous({ P.Src }, /*bForceRescan*/ false);
+        TArray<FAssetData> Assets;
+        AR.GetAssetsByPath(FName(*P.Src), Assets, /*bRecursive*/ true, /*bIncludeOnlyOnDiskAssets*/ false);
+        for (const FAssetData& A : Assets)
+        {
+            ++TotalAssets;
+            const FString OldPkg = A.PackageName.ToString();
+            if (!OldPkg.StartsWith(P.Src)) { continue; }
+            const FString NewPkg = P.Dst + OldPkg.Mid(P.Src.Len());
+            const FString NewPkgPath = FPackageName::GetLongPackagePath(NewPkg);
+            const FString AssetName = A.AssetName.ToString();
+            if (UEditorAssetLibrary::DoesAssetExist(NewPkg + TEXT(".") + AssetName)) { ++SkippedExisting; continue; }
+            if (bDryRun)
+            {
+                if (PlanSample.Num() < 50)
+                {
+                    TSharedPtr<FJsonObject> It = MakeShared<FJsonObject>();
+                    It->SetStringField(TEXT("from"), OldPkg);
+                    It->SetStringField(TEXT("to"), NewPkg);
+                    PlanSample.Add(MakeShared<FJsonValueObject>(It));
+                }
+                continue;
+            }
+            if (UObject* Obj = A.GetAsset())
+            {
+                bool bDirtyUnused = false;
+                CloseEditorsForAsset(Obj, bDirtyUnused);
+                RenameData.Add(FAssetRenameData(Obj, NewPkgPath, AssetName));
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetNumberField(TEXT("mappings"), Pairs.Num());
+    Data->SetNumberField(TEXT("total_assets"), TotalAssets);
+    Data->SetNumberField(TEXT("skipped_existing"), SkippedExisting);
+
+    if (bDryRun)
+    {
+        FSmithUEProgress::Get().End();
+        Data->SetBoolField(TEXT("dry_run"), true);
+        Data->SetArrayField(TEXT("plan_sample"), PlanSample);
+        return FSmithUECommonUtils::CreateSuccessResponse(Data);
+    }
+
+    FSmithUEProgress::Get().Update(0, TEXT("RenameAssets"));
+    FSmithUEProgress::Get().Begin(TEXT("move_folders"), RenameData.Num());
+    FAssetToolsModule& ATM = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+    const bool bOk = ATM.Get().RenameAssets(RenameData);
+    FSmithUEProgress::Get().Update(RenameData.Num());
+
+    int32 Saved = 0;
+    if (bSave)
+    {
+        TArray<UPackage*> Dirty;
+        FEditorFileUtils::GetDirtyContentPackages(Dirty);
+        FEditorFileUtils::GetDirtyWorldPackages(Dirty);
+        Saved = Dirty.Num();
+        FEditorFileUtils::SaveDirtyPackages(false, true, true);
+    }
+    FSmithUEProgress::Get().End();
+
+    Data->SetBoolField(TEXT("rename_succeeded"), bOk);
+    Data->SetNumberField(TEXT("moved"), RenameData.Num());
+    Data->SetNumberField(TEXT("saved_dirty_packages"), Saved);
+    UE_LOG(LogSmithUE, Log, TEXT("move_folders: %d mappings, moved=%d ok=%s"), Pairs.Num(), RenameData.Num(), bOk ? TEXT("true") : TEXT("false"));
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: delete_empty_folders
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleDeleteEmptyFolders(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    if (!FSmithUECommonUtils::ValidateRequiredParams(Params, {TEXT("root")}, Error))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(Error);
+    }
+    FString Root;
+    Params->TryGetStringField(TEXT("root"), Root);
+    while (Root.EndsWith(TEXT("/"))) { Root.LeftChopInline(1); }
+    bool bDryRun = false; Params->TryGetBoolField(TEXT("dry_run"), bDryRun);
+
+    // Convert to a disk directory and walk bottom-up removing empty dirs.
+    FString DiskDir;
+    if (!FPackageName::TryConvertLongPackageNameToFilename(Root + TEXT("/"), DiskDir))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Cannot resolve disk path for %s"), *Root));
+    }
+    IFileManager& FM = IFileManager::Get();
+    if (!FM.DirectoryExists(*DiskDir))
+    {
+        return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Directory does not exist: %s"), *DiskDir));
+    }
+
+    // Collect all subdirectories.
+    TArray<FString> AllDirs;
+    FM.IterateDirectoryRecursively(*DiskDir, [&AllDirs](const TCHAR* Path, bool bIsDir) -> bool
+    {
+        if (bIsDir) { AllDirs.Add(Path); }
+        return true;
+    });
+    // Deepest first so parents become empty after children are removed.
+    AllDirs.Sort([](const FString& A, const FString& B) { return A.Len() > B.Len(); });
+
+    auto HasAnyFile = [&FM](const FString& Dir) -> bool
+    {
+        bool bFound = false;
+        FM.IterateDirectoryRecursively(*Dir, [&bFound](const TCHAR* /*Path*/, bool bIsDir) -> bool
+        {
+            if (!bIsDir) { bFound = true; return false; }
+            return true;
+        });
+        return bFound;
+    };
+
+    int32 Deleted = 0;
+    TArray<TSharedPtr<FJsonValue>> DeletedList;
+    for (const FString& Dir : AllDirs)
+    {
+        if (!FM.DirectoryExists(*Dir)) { continue; }
+        if (HasAnyFile(Dir)) { continue; }
+        if (!bDryRun) { FM.DeleteDirectory(*Dir, /*RequireExists*/ false, /*Tree*/ true); }
+        ++Deleted;
+        if (DeletedList.Num() < 200) { DeletedList.Add(MakeShared<FJsonValueString>(Dir)); }
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("root"), Root);
+    Data->SetBoolField(TEXT("dry_run"), bDryRun);
+    Data->SetNumberField(TEXT("empty_folders"), Deleted);
+    Data->SetArrayField(TEXT("folders"), DeletedList);
+    UE_LOG(LogSmithUE, Log, TEXT("delete_empty_folders: %s (%s %d empty dirs)"),
+        *Root, bDryRun ? TEXT("would delete") : TEXT("deleted"), Deleted);
+    return FSmithUECommonUtils::CreateSuccessResponse(Data);
+}
+
+// ---------------------------------------------------------------------------
+// Command: get_job_status (WORKER-SAFE)
+// ---------------------------------------------------------------------------
+
+TSharedPtr<FJsonObject> FSmithUEAssetCommands::HandleGetJobStatus(const TSharedPtr<FJsonObject>& /*Params*/)
+{
+    FSmithUEProgress& P = FSmithUEProgress::Get();
+    const bool bActive = P.IsActive();
+    const int32 Processed = P.GetProcessed();
+    const int32 Total = P.GetTotal();
+    const int64 Now = FDateTime::UtcNow().ToUnixTimestamp();
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("active"), bActive);
+    Data->SetNumberField(TEXT("job_id"), (double)P.GetJobId());
+    Data->SetStringField(TEXT("operation"), P.GetOperation());
+    Data->SetNumberField(TEXT("processed"), Processed);
+    Data->SetNumberField(TEXT("total"), Total);
+    Data->SetNumberField(TEXT("percent"), Total > 0 ? FMath::RoundToInt(100.0 * Processed / Total) : 0);
+    Data->SetStringField(TEXT("current_item"), P.GetCurrentItem());
+    Data->SetNumberField(TEXT("elapsed_seconds"), (double)(Now - P.GetStartUnixSeconds()));
+    Data->SetNumberField(TEXT("seconds_since_update"), (double)(Now - P.GetLastUpdateUnixSeconds()));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

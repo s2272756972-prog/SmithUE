@@ -16,6 +16,8 @@
 #include "Utils/SmithUECommonUtils.h"
 #include "Utils/SmithUEDispatcher.h"
 #include "Commands/SmithUEDialogCommands.h"
+#include "Utils/SmithUEProgress.h"
+#include "Misc/DateTime.h"
 #include "Dialog/SmithUEDialogWatcher.h"
 
 namespace SmithUEHttpServer::Private
@@ -245,7 +247,8 @@ namespace SmithUEHttpServer::Private
 			CommandName.Equals(TEXT("get_protocol_info"), ESearchCase::IgnoreCase) ||
 			CommandName.Equals(TEXT("get_active_dialog"), ESearchCase::IgnoreCase) ||
 			CommandName.Equals(TEXT("dismiss_active_dialog"), ESearchCase::IgnoreCase) ||
-			CommandName.Equals(TEXT("set_dialog_auto_response"), ESearchCase::IgnoreCase);
+			CommandName.Equals(TEXT("set_dialog_auto_response"), ESearchCase::IgnoreCase) ||
+			CommandName.Equals(TEXT("get_job_status"), ESearchCase::IgnoreCase);
 	}
 
 	TSharedPtr<FJsonObject> DispatchWorkerSafeCommand(const FString& CommandName, const TSharedPtr<FJsonObject>& Params)
@@ -321,6 +324,30 @@ namespace SmithUEHttpServer::Private
 		if (CommandName.Equals(TEXT("set_dialog_auto_response"), ESearchCase::IgnoreCase))
 		{
 			return FSmithUEDialogCommands::HandleSetDialogAutoResponse(Params);
+		}
+
+		if (CommandName.Equals(TEXT("get_job_status"), ESearchCase::IgnoreCase))
+		{
+			// Worker-safe: read the progress beacon while the game thread is busy
+			// inside a long batch command. Pure atomic reads, no GEditor/UObject.
+			FSmithUEProgress& P = FSmithUEProgress::Get();
+			const int32 Processed = P.GetProcessed();
+			const int32 Total = P.GetTotal();
+			const int64 Now = FDateTime::UtcNow().ToUnixTimestamp();
+			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetStringField(TEXT("status"), TEXT("success"));
+			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+			Data->SetBoolField(TEXT("active"), P.IsActive());
+			Data->SetNumberField(TEXT("job_id"), (double)P.GetJobId());
+			Data->SetStringField(TEXT("operation"), P.GetOperation());
+			Data->SetNumberField(TEXT("processed"), Processed);
+			Data->SetNumberField(TEXT("total"), Total);
+			Data->SetNumberField(TEXT("percent"), Total > 0 ? FMath::RoundToInt(100.0 * Processed / Total) : 0);
+			Data->SetStringField(TEXT("current_item"), P.GetCurrentItem());
+			Data->SetNumberField(TEXT("elapsed_seconds"), (double)(Now - P.GetStartUnixSeconds()));
+			Data->SetNumberField(TEXT("seconds_since_update"), (double)(Now - P.GetLastUpdateUnixSeconds()));
+			Response->SetObjectField(TEXT("data"), Data);
+			return Response;
 		}
 
 		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown command: %s"), *CommandName));

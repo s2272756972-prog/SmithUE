@@ -24,6 +24,10 @@ private:
     static TSharedPtr<FJsonObject> HandleResavePackages(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleRedirectReferences(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandlePlanMigration(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleListRedirectors(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleMoveFolders(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleDeleteEmptyFolders(const TSharedPtr<FJsonObject>& Params);
+    static TSharedPtr<FJsonObject> HandleGetJobStatus(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleConsolidateAssets(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleAssetEditor(const TSharedPtr<FJsonObject>& Params);
     static TSharedPtr<FJsonObject> HandleSetAssetProperty(const TSharedPtr<FJsonObject>& Params);
