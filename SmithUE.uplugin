@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 14,
-	"VersionName": "1.16.1",
+	"Version": 15,
+	"VersionName": "1.16.2",
 	"FriendlyName": "SmithUE",
 	"Description": "Full-stack AI tool service plugin for Unreal Engine 5.8 - exposes 301 editor automation tools via HTTP JSON (incl. AI: blackboard/behavior-tree/EQS/state-tree authoring, PCG graph authoring + generation stats, static-mesh collision/Nanite/LOD build, Unreal Insights trace capture/analysis, modal-dialog detect/respond), with AI texture/audio generation (Pollinations.ai)",
 	"Category": "Editor",

@@ -4,6 +4,8 @@
 
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
+#include "GenericPlatform/GenericPlatformFile.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Async/Async.h"
@@ -478,9 +480,26 @@ ESkillState ComputeSkillState(const FString& NpmCliJs, FString& OutSourcePath)
         return ESkillState::NotDeployed;
     }
 
-    return BundleText.Equals(DeployedText, ESearchCase::CaseSensitive)
-        ? ESkillState::Synced
-        : ESkillState::Stale;
+    if (!BundleText.Equals(DeployedText, ESearchCase::CaseSensitive))
+    {
+        return ESkillState::Stale;
+    }
+
+    // SKILL.md matches — but a PARTIAL deploy (missing reference/ or scripts/) is still Stale,
+    // so the "重装 SKILL" button appears and ReinstallSkill re-copies the whole bundle.
+    // (Pre-0.14 deploys only wrote SKILL.md; this heals those machines.)
+    const FString BundleDir   = FPaths::GetPath(Bundle);   // .../smithue-cli/skill
+    const FString DeployedDir = FPaths::GetPath(Deployed); // .../smithue-control
+    for (const TCHAR* Sub : { TEXT("reference"), TEXT("scripts") })
+    {
+        if (IFileManager::Get().DirectoryExists(*(BundleDir / Sub))
+            && !IFileManager::Get().DirectoryExists(*(DeployedDir / Sub)))
+        {
+            return ESkillState::Stale;
+        }
+    }
+
+    return ESkillState::Synced;
 }
 
 } // anonymous namespace
@@ -786,26 +805,30 @@ void FSmithUECliChecker::ReinstallSkill()
         }
     }
 
+    // Copy the WHOLE bundle (SKILL.md + reference/ + scripts/), not just SKILL.md.
+    // SkillSourcePath points at the bundle's SKILL.md; its parent dir is the bundle root.
+    const FString SourceDir = FPaths::GetPath(Source);
+
     int32 OkCount = 0;
     for (const FString& SkillsRoot : SkillsRoots)
     {
-        const FString DestDir  = SkillsRoot / TEXT("smithue-control");
-        const FString DestFile = DestDir / TEXT("SKILL.md");
+        const FString DestDir = SkillsRoot / TEXT("smithue-control");
         IFileManager::Get().MakeDirectory(*DestDir, /*Tree*/true);
-        if (IFileManager::Get().Copy(*DestFile, *Source, /*bReplace*/true) == COPY_OK)
+        // CopyDirectoryTree (IPlatformFile) recurses SourceDir -> DestDir (SKILL.md + reference/ + scripts/).
+        if (FPlatformFileManager::Get().GetPlatformFile().CopyDirectoryTree(*DestDir, *SourceDir, /*bOverwriteAllExisting*/true))
         {
             ++OkCount;
         }
         else
         {
-            UE_LOG(LogSmithUE, Warning, TEXT("[SmithUE CLI] skill copy failed -> '%s'"), *DestFile);
+            UE_LOG(LogSmithUE, Warning, TEXT("[SmithUE CLI] skill bundle copy failed -> '%s'"), *DestDir);
         }
     }
 
     if (OkCount > 0)
     {
         ShowToast(FString::Printf(
-            TEXT("已重装 smithue-control SKILL 到 %d 个目录。请重载 AI 工具以生效。"), OkCount), 8.0f);
+            TEXT("已重装 smithue-control SKILL（含 reference/ 与 scripts/）到 %d 个目录。请重载 AI 工具以生效。"), OkCount), 8.0f);
         // Refresh state so the row flips to "已同步" and the button hides.
         FSmithUECliChecker::CheckCliEnvironment();
     }

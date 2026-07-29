@@ -1,5 +1,12 @@
 # SmithUE Changelog
 
+## v1.16.2（UE5.8，2026-07-28）
+
+### 修复：SKILL 部署只拷了 SKILL.md，漏掉 reference/ 与 scripts/
+- **`ReinstallSkill()`**：面板「重装 SKILL」按钮改用 `CopyDirectoryTree` 递归拷贝 CLI 自带的**整个** skill/ bundle（SKILL.md + reference/ + scripts/），不再只拷单个 SKILL.md。
+- **`ComputeSkillState()`**：SKILL.md 内容匹配后，额外检查已部署目录是否含 reference/ 与 scripts/；缺失则判为 *Stale*，让「重装 SKILL」按钮出现 —— 使 0.14 之前只部署了单文件的**存量机器能自愈**。
+- 配合 smithue-cli **0.14.1**（其 `postinstall` 与 `skill --install` 亦已改为部署完整 bundle）。
+
 ## v1.16.1（UE5.8，2026-07-28）
 
 ### CLI 同步与文档（无工具增减、无引擎 API 改动）

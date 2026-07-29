@@ -183,6 +183,9 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
+### v1.16.2（UE5.8，2026-07-28）
+- **修复 SKILL 部署漏文件**：面板「重装 SKILL」与 CLI 部署此前只拷 `SKILL.md`，漏掉 `reference/` 与 `scripts/`。`ReinstallSkill()` 改为递归拷整个 bundle；`ComputeSkillState()` 检测到缺 reference/scripts 即判 Stale（重装按钮出现），存量单文件机器可自愈。配合 smithue-cli 0.14.1。
+
 ### v1.16.1（UE5.8，2026-07-28）
 - 同步已发布 smithue-cli **0.14.0**：`kRecommendedCliVersion` → 0.14.0（旧 CLI 在面板提示升级、SKILL 漂移自愈）。
 - 文档：PITFALLS #7（消费端 `--params-file` / `smithue.ps1` 传参、CJK）、#12（CI 自动发布、bypass-2fa 废弃 → OIDC）；测试报告加 CLI 0.14.0 脚注。仅常量 + 文档，无工具变更。

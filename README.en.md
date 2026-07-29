@@ -163,6 +163,9 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 
 > Full history in [CHANGELOG.md](CHANGELOG.md).
 
+### v1.16.2 (UE5.8, 2026-07-28)
+- **Fix partial SKILL deploy**: the panel "重装 SKILL" button and CLI deploy previously copied only `SKILL.md`, missing `reference/` and `scripts/`. `ReinstallSkill()` now recursively copies the whole bundle; `ComputeSkillState()` flags missing `reference/`/`scripts/` as Stale (so the reinstall button appears), self-healing single-file machines. Pairs with smithue-cli 0.14.1.
+
 ### v1.16.1 (UE5.8, 2026-07-28)
 - Sync with published smithue-cli **0.14.0**: bump `kRecommendedCliVersion` → 0.14.0 (old-CLI machines get the Outdated prompt; SKILL drift self-heals).
 - Docs: PITFALLS #7 (consumer-side param passing via `--params-file` / `smithue.ps1`, CJK), #12 (CI auto-publish, bypass-2fa deprecation → OIDC); test report footnote on CLI 0.14.0. Constants + docs only, no tool changes.
