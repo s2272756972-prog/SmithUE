@@ -103,3 +103,9 @@
   - `dest_input_index` 描述补全 `7=WorldPositionOffset`（8+ 不支持）。
   - `set_expression_property` 描述列出按节点类型的合法键；失败错误改为**回显该节点的合法键**（`GetSettablePropertyKeys()` 助手按节点类型推出），如 `"Valid keys for this node: value (plus 'description')"`。
 - **通用规则**：任何"按子类型 / 索引才合法"的参数，合法集必须进 description；不匹配时错误回显合法集。**描述里写工具契约（索引、键名），不写 UE 版本特有的引擎 API**（如 HLSL intrinsic 名）——后者随引擎版本漂移会误导。
+
+## 16. UBT 编译:系统 dotnet 缺 .NET 10 → 用引擎自带 Build.bat
+
+- **现象**:直接 `dotnet "{EngineRoot}\...\UnrealBuildTool.dll" {Project}Editor ...` 报 `You must install or update .NET to run this application. ... 'Microsoft.NETCore.App', version '10.0.0'`,机器只装到 9.0。
+- **根因**:调用了 PATH 里的**系统** `dotnet`,而 UE 5.8 的 UBT 需要 .NET **10** runtime;系统未装 10 → 启动失败。
+- **正解**:用引擎封装的 **`{EngineRoot}\Engine\Build\BatchFiles\Build.bat {Project}Editor Win64 Development "{ProjectRoot}\{Project}.uproject" -WaitMutex`**——它自动选用引擎**内置**的 dotnet(带 .NET 10)。或直接调 `{EngineRoot}\Engine\Binaries\ThirdParty\DotNet\<ver>\win-x64\dotnet.exe`。**别用系统 `dotnet`。**(v1.16.1 重编时实测:Build.bat 增量编译单个 .cpp + 链接 DLL 仅 ~5 秒。)

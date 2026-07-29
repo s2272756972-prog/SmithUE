@@ -34,7 +34,8 @@
 Stop-Process -Name UnrealEditor -Force -EA SilentlyContinue; Start-Sleep -Seconds 3
 $ah = "{ProjectRoot}\Intermediate\Build\Win64\x64\{Project}Editor\Development\ActionHistory.bin"
 if (Test-Path $ah) { Remove-Item $ah -Force }
-dotnet "{EngineRoot}\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" `
+# 用引擎自带 Build.bat(内置 .NET 10 runtime;系统 dotnet 常缺 10.0.0,见 PITFALLS #16)
+& "{EngineRoot}\Engine\Build\BatchFiles\Build.bat" `
   {Project}Editor Win64 Development "{ProjectRoot}\{Project}.uproject" -WaitMutex
 # 退出码 0 才继续
 ```
