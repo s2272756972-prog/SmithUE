@@ -485,18 +485,28 @@ ESkillState ComputeSkillState(const FString& NpmCliJs, FString& OutSourcePath)
         return ESkillState::Stale;
     }
 
-    // SKILL.md matches — but a PARTIAL deploy (missing reference/ or scripts/) is still Stale,
+    // SKILL.md matches — but a PARTIAL deploy (missing references/ or scripts/) is still Stale,
     // so the "重装 SKILL" button appears and ReinstallSkill re-copies the whole bundle.
     // (Pre-0.14 deploys only wrote SKILL.md; this heals those machines.)
+    // NOTE: the bundle dir was renamed reference/ -> references/ in CLI 0.15; probe both
+    // names so this plugin stays correct against either an old or new installed CLI.
     const FString BundleDir   = FPaths::GetPath(Bundle);   // .../smithue-cli/skill
     const FString DeployedDir = FPaths::GetPath(Deployed); // .../smithue-control
-    for (const TCHAR* Sub : { TEXT("reference"), TEXT("scripts") })
+    for (const TCHAR* Sub : { TEXT("references"), TEXT("reference"), TEXT("scripts") })
     {
         if (IFileManager::Get().DirectoryExists(*(BundleDir / Sub))
             && !IFileManager::Get().DirectoryExists(*(DeployedDir / Sub)))
         {
             return ESkillState::Stale;
         }
+    }
+
+    // Legacy residue: bundle uses the new references/ layout but the deploy still has a
+    // stale reference/ dir (merge copies never delete). Flag Stale so reinstall cleans it.
+    if (IFileManager::Get().DirectoryExists(*(BundleDir / TEXT("references")))
+        && IFileManager::Get().DirectoryExists(*(DeployedDir / TEXT("reference"))))
+    {
+        return ESkillState::Stale;
     }
 
     return ESkillState::Synced;
@@ -805,7 +815,7 @@ void FSmithUECliChecker::ReinstallSkill()
         }
     }
 
-    // Copy the WHOLE bundle (SKILL.md + reference/ + scripts/), not just SKILL.md.
+    // Copy the WHOLE bundle (SKILL.md + references/ + scripts/), not just SKILL.md.
     // SkillSourcePath points at the bundle's SKILL.md; its parent dir is the bundle root.
     const FString SourceDir = FPaths::GetPath(Source);
 
@@ -814,9 +824,17 @@ void FSmithUECliChecker::ReinstallSkill()
     {
         const FString DestDir = SkillsRoot / TEXT("smithue-control");
         IFileManager::Get().MakeDirectory(*DestDir, /*Tree*/true);
-        // CopyDirectoryTree (IPlatformFile) recurses SourceDir -> DestDir (SKILL.md + reference/ + scripts/).
+        // CopyDirectoryTree (IPlatformFile) recurses SourceDir -> DestDir (SKILL.md + references/ + scripts/).
         if (FPlatformFileManager::Get().GetPlatformFile().CopyDirectoryTree(*DestDir, *SourceDir, /*bOverwriteAllExisting*/true))
         {
+            // Legacy cleanup: CopyDirectoryTree merges and never deletes, so a stale
+            // reference/ dir from pre-0.15 bundles would survive — remove it when the
+            // new references/ layout is what we just deployed.
+            if (IFileManager::Get().DirectoryExists(*(SourceDir / TEXT("references")))
+                && IFileManager::Get().DirectoryExists(*(DestDir / TEXT("reference"))))
+            {
+                IFileManager::Get().DeleteDirectory(*(DestDir / TEXT("reference")), /*RequireExists*/false, /*Tree*/true);
+            }
             ++OkCount;
         }
         else
@@ -828,7 +846,7 @@ void FSmithUECliChecker::ReinstallSkill()
     if (OkCount > 0)
     {
         ShowToast(FString::Printf(
-            TEXT("已重装 smithue-control SKILL（含 reference/ 与 scripts/）到 %d 个目录。请重载 AI 工具以生效。"), OkCount), 8.0f);
+            TEXT("已重装 smithue-control SKILL（含 references/ 与 scripts/）到 %d 个目录。请重载 AI 工具以生效。"), OkCount), 8.0f);
         // Refresh state so the row flips to "已同步" and the button hides.
         FSmithUECliChecker::CheckCliEnvironment();
     }
