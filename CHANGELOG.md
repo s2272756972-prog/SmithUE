@@ -2,9 +2,31 @@
 
 ## v1.15.0-UE5.1（UE5.1 兼容分支，2026-08-30）
 
-- 移除 UE5.1 中不存在的 `MaterialDomain.h` 依赖，保留 `MaterialShared.h` 的材质域定义。
-- `/ready` 与端口文件新增 `engine_version`，便于同一版 CLI 区分 UE5.1 / UE5.5 编辑器实例。
-- 已通过 Unreal Engine 5.1 `BuildPlugin` Win64 构建验证。
+本分支从 `v1.15.0-UE5.2` 源码向后适配，目标是在不删减 v1.15 工具集合的前提下恢复 UE5.1 编译能力，并让 CLI 能明确识别实际运行的引擎版本。
+
+### UE5.1 API 兼容
+
+- **材质域头文件**：移除 UE5.1 中不存在的 `MaterialDomain.h`；`EMaterialDomain` 继续由已包含的 `MaterialShared.h` 提供，不改变材质命令行为。
+- **最小化回退范围**：其余 v1.15.0 源码保持原状，包括 AnimGraph / AnimGraphRuntime 模块依赖和状态机工具，避免为了通过旧引擎编译而静默删减能力。
+- **插件描述符**：版本标记为 `1.15.0-UE5.1`，安装文档、部署说明和示例分支同步改为 `UE5.1`；保留 UE5.1 可识别的描述符字段。
+
+### CLI / 实例识别
+
+- `/ready` 成功响应新增可选 `engine_version`，原有 `ready`、插件 `version` 与 `pie_active` 字段保持兼容。
+- `%LOCALAPPDATA%/.smithue/*.port` 端口文件同步记录 `engine_version`，同机运行不同 UE 版本时无需根据插件版本猜测引擎版本。
+- 引擎版本在服务器启动的游戏线程缓存，HTTP 工作线程只读取缓存值。
+
+### 验证
+
+- 使用本机 Unreal Engine 5.1 AutomationTool 执行 `BuildPlugin -Rocket -TargetPlatforms=Win64`，结果为 `BUILD SUCCESSFUL`。
+- 产物生成 `Binaries/Win64/UnrealEditor-SmithUE.dll`；编译仅保留原项目已有的 `Json.h` 单体头警告。
+- 对应 `smithue-cli` 兼容分支已通过 TypeScript 类型检查、构建以及 191 项测试。
+
+### 已知边界
+
+- 当前验证覆盖 **UE5.1 / Win64 的插件构建与打包**；尚未在具体业务项目中完成编辑器启动、AnimGraph 写入、资产修改和 PIE 全链路验收。
+- “能够编译”不等同于所有 v1.15 新工具在 UE5.1 上均已完成运行时验收，尤其是 AnimGraph 状态机相关路径。
+- `Mac`、`Linux` 未验证；本条记录也不代表已创建 GitHub Release 或发布新的 npm CLI。
 
 ## v1.15.0（UE5.2，2026-07-03）
 
