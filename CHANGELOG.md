@@ -1,5 +1,12 @@
 # SmithUE Changelog
 
+## v1.15.0-UE5.5（UE5.5 兼容分支，2026-08-30）
+
+- 适配 UE5.5 的自动化测试标志、AnimGraph 属性绑定 API、材质输入遍历 API 与严格 IWYU 检查。
+- 更新已弃用的后处理材质 Blendable Location 枚举。
+- `/ready` 与端口文件新增 `engine_version`，便于同一版 CLI 区分 UE5.1 / UE5.5 编辑器实例。
+- 已通过 Unreal Engine 5.5 `BuildPlugin` Win64 构建验证。
+
 ## v1.15.0（UE5.2，2026-07-03）
 
 ### 新增：AnimGraph Phase 2 状态机编写工具

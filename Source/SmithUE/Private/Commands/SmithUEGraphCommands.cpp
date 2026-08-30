@@ -123,9 +123,10 @@ namespace
             if (!Expr) continue;
 
             // Get all inputs of this expression
-            const TArray<FExpressionInput*> Inputs = Expr->GetInputs();
-            for (FExpressionInput* Input : Inputs)
+            const int32 NumInputsE = Expr->CountInputs();
+            for (int32 j = 0; j < NumInputsE; ++j)
             {
+                FExpressionInput* Input = Expr->GetInput(j);
                 if (Input && Input->Expression)
                 {
                     int32* PredIdx = ExprToIndex.Find(Input->Expression);

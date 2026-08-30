@@ -14,6 +14,8 @@
 
 一款高性能虚幻引擎编辑器插件，通过命令协议公开编辑器的全部功能，将重复的手动操作转变为可脚本化、AI 驱动的工作流。
 
+> `UE5.5` 兼容分支：基于 SmithUE v1.15.0 适配，并通过 Unreal Engine 5.5 BuildPlugin 验证。
+
 ---
 
 ## For AI Agents
@@ -50,13 +52,13 @@ npx smithue-cli list
 
 ## 快速入门
 
-1. 将仓库克隆到项目的 `Plugins/` 目录，并切换到 `UE5.2` 分支：
+1. 将仓库克隆到项目的 `Plugins/` 目录，并切换到 `UE5.5` 分支：
    ```bash
    cd {YourProject}/Plugins
-   git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+   git clone -b UE5.5 https://github.com/s2272756972-prog/SmithUE.git
    ```
 
-2. 使用虚幻引擎 5.2 构建项目（首次编译约 50 秒）。
+2. 使用虚幻引擎 5.5 构建项目（首次编译约 50 秒）。
 
 3. 启动编辑器。SmithUE 将自动启动 HTTP 服务器并分配动态端口。
 
@@ -109,7 +111,7 @@ AI 工具 (OpenCode / Claude Code / Cline / GitHub Copilot)
      ↕ smithue-cli (npx smithue-cli exec/list/search/status)
 SmithUE UE5 插件 (HTTP :动态端口)
      ↕ UE 反射 API
-虚幻引擎 5.2 编辑器
+虚幻引擎 5.5 编辑器
 ```
 
 ---

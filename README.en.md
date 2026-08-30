@@ -14,6 +14,8 @@
 
 A high-performance Unreal Engine editor plugin that exposes the editor's full capabilities through a command protocol, turning repetitive manual operations into scriptable, AI-driven workflows.
 
+> `UE5.5` compatibility branch: adapted from SmithUE v1.15.0 and verified with Unreal Engine 5.5 BuildPlugin.
+
 ---
 
 ## For AI Agents
@@ -50,13 +52,13 @@ npx smithue-cli list
 
 ## Quick Start
 
-1. Clone into `{YourProject}/Plugins/` on branch `UE5.2`:
+1. Clone into `{YourProject}/Plugins/` on branch `UE5.5`:
    ```bash
    cd {YourProject}/Plugins
-   git clone -b UE5.2 https://github.com/123dx-svg/SmithUE.git
+   git clone -b UE5.5 https://github.com/s2272756972-prog/SmithUE.git
    ```
 
-2. Build your project with Unreal Engine 5.2.
+2. Build your project with Unreal Engine 5.5.
 
 3. Launch the editor. SmithUE automatically starts the HTTP server and assigns a dynamic port.
 
@@ -86,7 +88,7 @@ AI Tool (OpenCode / Claude Code / Cline / GitHub Copilot)
      ↕ smithue-cli (npx smithue-cli exec/list/search/status)
 SmithUE UE5 Plugin (HTTP :dynamic port)
      ↕ UE Reflection API
-Unreal Engine 5.2 Editor
+Unreal Engine 5.5 Editor
 ```
 
 ---

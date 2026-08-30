@@ -940,9 +940,9 @@ TSharedPtr<FJsonObject> FSmithUEMaterialCommands::HandleSetMaterialProperty(cons
     FString BlendableLoc;
     if (Params->TryGetStringField(TEXT("blendable_location"), BlendableLoc) && !BlendableLoc.IsEmpty())
     {
-        if (BlendableLoc == TEXT("before_tonemapping"))      { Material->BlendableLocation = BL_BeforeTonemapping; }
-        else if (BlendableLoc == TEXT("after_tonemapping"))  { Material->BlendableLocation = BL_AfterTonemapping; }
-        else if (BlendableLoc == TEXT("before_translucency")) { Material->BlendableLocation = BL_BeforeTranslucency; }
+        if (BlendableLoc == TEXT("before_tonemapping"))      { Material->BlendableLocation = BL_SceneColorAfterDOF; }
+        else if (BlendableLoc == TEXT("after_tonemapping"))  { Material->BlendableLocation = BL_SceneColorAfterTonemapping; }
+        else if (BlendableLoc == TEXT("before_translucency")) { Material->BlendableLocation = BL_SceneColorBeforeDOF; }
         else if (BlendableLoc == TEXT("replacing_tonemapper")) { Material->BlendableLocation = BL_ReplacingTonemapper; }
         else if (BlendableLoc == TEXT("ssr_input"))          { Material->BlendableLocation = BL_SSRInput; }
         else

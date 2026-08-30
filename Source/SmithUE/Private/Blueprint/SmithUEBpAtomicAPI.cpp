@@ -587,6 +587,39 @@ namespace
 		return INDEX_NONE;
 	}
 
+	/**
+	 * UE 5.5 stores anim graph property bindings on an instanced binding
+	 * subobject whose concrete class is declared in an engine-private header.
+	 * Access the reflected UPROPERTY map instead of depending on that private API.
+	 */
+	TMap<FName, FAnimGraphNodePropertyBinding>* GetAnimNodePropertyBindings(UAnimGraphNode_Base* AnimNode)
+	{
+		if (!AnimNode)
+		{
+			return nullptr;
+		}
+
+		FObjectProperty* BindingProp = CastField<FObjectProperty>(AnimNode->GetClass()->FindPropertyByName(TEXT("Binding")));
+		if (!BindingProp)
+		{
+			return nullptr;
+		}
+
+		UObject* BindingObject = BindingProp->GetObjectPropertyValue_InContainer(AnimNode);
+		if (!BindingObject)
+		{
+			return nullptr;
+		}
+
+		FMapProperty* MapProp = CastField<FMapProperty>(BindingObject->GetClass()->FindPropertyByName(TEXT("PropertyBindings")));
+		if (!MapProp)
+		{
+			return nullptr;
+		}
+
+		return reinterpret_cast<TMap<FName, FAnimGraphNodePropertyBinding>*>(MapProp->ContainerPtrToValuePtr<void>(BindingObject));
+	}
+
 	TArray<FString> GetOptionalAnimPinNames(UAnimGraphNode_Base* AnimNode)
 	{
 		TArray<FString> Names;
@@ -2310,7 +2343,8 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBindAnimProperty(const TSha
 
 	if (VariableName.IsEmpty())
 	{
-		const bool bRemoved = AnimNode->PropertyBindings.Remove(BindingName) > 0;
+		TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode);
+		const bool bRemoved = Bindings ? (Bindings->Remove(BindingName) > 0) : false;
 		AnimNode->ReconstructNode();
 		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -2337,7 +2371,12 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBindAnimProperty(const TSha
 	Binding.PathAsText = FText::FromString(VariableName);
 	Binding.Type = EAnimGraphNodePropertyBindingType::Property;
 	Binding.bIsBound = true;
-	AnimNode->PropertyBindings.Add(BindingName, Binding);
+	TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode);
+	if (!Bindings)
+	{
+		return FSmithUECommonUtils::CreateErrorResponse(TEXT("This anim node has no binding container. Reopen the AnimBlueprint or reconstruct the node, then retry bp_bind_anim_property."));
+	}
+	Bindings->Add(BindingName, Binding);
 	AnimNode->ReconstructNode();
 	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 
@@ -2399,7 +2438,9 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpReadAnimNode(const TSharedP
 	}
 
 	TArray<TSharedPtr<FJsonValue>> BindingsArray;
-	for (const TPair<FName, FAnimGraphNodePropertyBinding>& BindingPair : AnimNode->PropertyBindings)
+	static const TMap<FName, FAnimGraphNodePropertyBinding> EmptyAnimBindings;
+	const TMap<FName, FAnimGraphNodePropertyBinding>* NodeBindings = GetAnimNodePropertyBindings(AnimNode);
+	for (const TPair<FName, FAnimGraphNodePropertyBinding>& BindingPair : (NodeBindings ? *NodeBindings : EmptyAnimBindings))
 	{
 		TSharedPtr<FJsonObject> BindingObj = MakeShared<FJsonObject>();
 		BindingObj->SetStringField(TEXT("property"), BindingPair.Key.ToString());

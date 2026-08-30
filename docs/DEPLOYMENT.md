@@ -7,8 +7,8 @@
 
 ## 任意项目部署 / Deploy to Any UE Project
 
-SmithUE 可以部署到任意 UE 5.2 项目，无需绑定特定项目目录。
-SmithUE can be deployed into any UE 5.2 project. It is not tied to a specific project directory.
+SmithUE 的 `UE5.5` 分支可以部署到任意 UE 5.5 项目，无需绑定特定项目目录。
+The SmithUE `UE5.5` branch can be deployed into any UE 5.5 project. It is not tied to a specific project directory.
 
 ### 安装方式 / Installation Methods
 

@@ -441,10 +441,12 @@ namespace SmithUEHttpServer::Private
 			}
 
 			const FString Version = InServer ? InServer->PluginVersion : TEXT("unknown");
+			const FString EngineVersion = InServer ? InServer->EngineVersion : TEXT("unknown");
 			const bool bPIE = InServer ? static_cast<bool>(InServer->bPIEActive) : false;
 			Result.Body = FString::Printf(
-				TEXT("{\"ready\":true,\"version\":\"%s\",\"pie_active\":%s}"),
+				TEXT("{\"ready\":true,\"version\":\"%s\",\"engine_version\":\"%s\",\"pie_active\":%s}"),
 				*Version,
+				*EngineVersion,
 				bPIE ? TEXT("true") : TEXT("false"));
 			return Result;
 		}
