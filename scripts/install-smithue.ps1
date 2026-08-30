@@ -155,6 +155,7 @@ Write-Host "  Target : $target"
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1. Open your Unreal Engine project — UE will detect and compile SmithUE automatically."
-Write-Host "  2. Once the editor loads, verify with: npx smithue-cli status"
+Write-Host '  2. Install the compatibility CLI: npm i -g "https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz"'
+Write-Host "  3. Once the editor loads, verify with: smithue-cli status"
 Write-Host ""
 exit 0

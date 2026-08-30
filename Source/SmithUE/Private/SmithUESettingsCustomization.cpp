@@ -117,11 +117,11 @@ void FSmithUESettingsCustomization::CustomizeDetails(IDetailLayoutBuilder& Detai
 			+ SHorizontalBox::Slot().AutoWidth()
 			[
 				SNew(SHyperlink)
-				.Text(FText::FromString(TEXT("GitHub Releases")))
-				.ToolTipText(FText::FromString(TEXT("Open SmithUE releases page")))
+				.Text(FText::FromString(TEXT("GitHub UE5.1 Branch")))
+				.ToolTipText(FText::FromString(TEXT("Open the maintained SmithUE UE5.1 compatibility branch")))
 				.OnNavigate_Lambda([](){
 					FPlatformProcess::LaunchURL(
-						TEXT("https://github.com/123dx-svg/SmithUE/releases"),
+						TEXT("https://github.com/s2272756972-prog/SmithUE/tree/UE5.1"),
 						nullptr, nullptr);
 				})
 			]
@@ -223,7 +223,7 @@ void FSmithUESettingsCustomization::CustomizeDetails(IDetailLayoutBuilder& Detai
 					{
 						case ECliState::Ready:  return FText::FromString(TEXT("smithue-cli is up to date \u2014 no action needed"));
 						case ECliState::NoNode: return FText::FromString(TEXT("Install Node.js first (see the link below)"));
-						default:                return FText::FromString(TEXT("Run: npm i -g smithue-cli@latest"));
+						default:                return FText::FromString(TEXT("Run: npm i -g https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz"));
 					}
 				})
 				.IsEnabled_Lambda([]() -> bool {

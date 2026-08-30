@@ -475,8 +475,8 @@ TSharedPtr<FJsonObject> FSmithUELevelCommands::HandleLevelCreateLandscape(const 
 {
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("created"), false);
-    Data->SetStringField(TEXT("message"), TEXT("Landscape creation is not supported by this SmithUE UE 5.2 command. Use the editor Landscape tool, then manage material/info through SmithUE."));
-    Data->SetStringField(TEXT("reason"), TEXT("UE 5.2 landscape creation requires editor-mode/import setup that is unsafe to invoke as a generic MCP command."));
+    Data->SetStringField(TEXT("message"), TEXT("Landscape creation is not supported by this SmithUE command. Use the editor Landscape tool, then manage material/info through SmithUE."));
+    Data->SetStringField(TEXT("reason"), TEXT("Landscape creation requires editor-mode/import setup that is unsafe to invoke as a generic automation command."));
     return FSmithUECommonUtils::CreateSuccessResponse(Data);
 }
 

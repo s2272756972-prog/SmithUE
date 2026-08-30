@@ -72,8 +72,8 @@ Installs into `<UE_Engine>\Engine\Plugins\Marketplace`, making the plugin availa
 | 3 | Invalid source (`SmithUE.uplugin` not found under `-Source`) |
 | 4 | Post-install verification failed (`SmithUE.uplugin` missing at target) |
 
-安装成功后，打开项目即可，UE 会自动检测并编译插件。编辑器加载完成后用 `npx smithue-cli status` 验证连接。
-After a successful install, just open your project. UE detects and compiles the plugin automatically. Once the editor loads, verify with `npx smithue-cli status`.
+安装成功后，先运行 `npm i -g "https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz"` 安装兼容 CLI，再打开项目。编辑器加载完成后用 `smithue-cli status` 验证连接。
+After installation, run `npm i -g "https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz"` for the compatibility CLI, then open the project. Once the editor loads, verify with `smithue-cli status`.
 
 ---
 

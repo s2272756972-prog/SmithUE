@@ -50,4 +50,4 @@ server 未就绪时返回 503；就绪后返回 200。CLI 在调用工具前轮�
 
 ## 参考实现
 
-SmithUE UE5.2 C++ 插件：`Source/SmithUE/Private/Transport/SmithUEHttpServer.cpp`
+SmithUE UE5 C++ 插件：`Source/SmithUE/Private/Transport/SmithUEHttpServer.cpp`

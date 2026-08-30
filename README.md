@@ -23,15 +23,16 @@
 ### 快速部署（Windows）
 ```bash
 # 确认编辑器已启动并启用 SmithUE 插件
-npx smithue-cli status
-npx smithue-cli exec ping '{}'
-npx smithue-cli list
+npm install -g "https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz"
+smithue-cli status
+smithue-cli exec ping '{}'
+smithue-cli list
 ```
 
 ### 故障树
 1. 编辑器未运行 → 启动虚幻引擎编辑器并等待完全加载
-2. 多实例 → 使用 `npx smithue-cli status --pid <pid>` 指定实例
-3. 端口文件已过期 → 运行 `npx smithue-cli prune` 清理
+2. 多实例 → 使用 `smithue-cli status --pid <pid>` 指定实例
+3. 端口文件已过期 → 运行 `smithue-cli prune` 清理
 
 ---
 
@@ -64,7 +65,7 @@ npx smithue-cli list
 
 4. 验证安装：
    ```bash
-   npx smithue-cli status
+   smithue-cli status
    ```
 
 ### 安装成功的标志
@@ -72,8 +73,8 @@ npx smithue-cli list
 | 检查项 | 期望结果 |
 |--------|---------|
 | 编辑器右下角出现 🟢 绿色圆点 + "SmithUE" 文字 | 插件已加载且 HTTP 服务器就绪 |
-| `npx smithue-cli status` 返回 `"ready": true` | CLI 能连接到编辑器 |
-| `npx smithue-cli exec ping '{}'` 返回 `"message": "pong"` | 命令通道畅通 |
+| `smithue-cli status` 返回 `"ready": true` | CLI 能连接到编辑器 |
+| `smithue-cli exec ping '{}'` 返回 `"message": "pong"` | 命令通道畅通 |
 
 > 如果圆点为灰色或 CLI 报错 `No SmithUE portfiles found`，请等待编辑器完全加载后重试。
 
@@ -82,7 +83,7 @@ npx smithue-cli list
 插件启动后会在后台自检 **Node / npm / smithue-cli** 环境（不阻塞编辑器，每步写入 `LogSmithUE` 日志）。打开 **编辑器 → 项目设置 → 插件 → SmithUE → "Status & Updates"** 面板即可：
 
 - 查看 Node / npm / smithue-cli 的版本与状态；
-- 一键**安装 / 升级 smithue-cli**：按钮随状态自适应（未安装 → 安装 / 旧版 → 升级 / 已最新 → 灰显确认）。网络不佳时**自动 120s 超时、可随时取消**，失败给出分类提示与手动兜底命令；
+- 一键从我们的 GitHub 兼容分支 tarball **安装 / 升级 smithue-cli**：按钮随状态自适应（未安装 → 安装 / 旧版 → 升级 / 已最新 → 灰显确认）。需要 Node.js 18+ 和 GitHub HTTPS 访问，不需要本机安装 Git；网络不佳时**自动 120s 超时、可随时取消**，失败给出分类提示与手动兜底命令；
 - 查看插件更新提醒并跳转 GitHub Releases。
 
 > 即使没装 / 装不上 CLI，**插件本体的 HTTP 工具能力不受影响**——CLI 只是更顺手的消费端客户端。这对在受限网络的企业内网、旧机器上部署尤为友好。
@@ -108,7 +109,7 @@ SmithUE 不只是"操作蓝图的工具"，而是**企业级资产装配与合�
 
 ```
 AI 工具 (OpenCode / Claude Code / Cline / GitHub Copilot)
-     ↕ smithue-cli (npx smithue-cli exec/list/search/status)
+     ↕ smithue-cli (smithue-cli exec/list/search/status)
 SmithUE UE5 插件 (HTTP :动态端口)
      ↕ UE 反射 API
 虚幻引擎 5.1 编辑器
@@ -118,7 +119,7 @@ SmithUE UE5 插件 (HTTP :动态端口)
 
 ## 命令参考
 
-SmithUE 提供了分布在 **24 个功能域** 中的 **229 个工具**。命令集正在持续扩展。请使用 `npx smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
+SmithUE 提供了分布在 **24 个功能域** 中的 **229 个工具**。命令集正在持续扩展。请使用 `smithue-cli list` 查看最新可用命令，或参阅 [TOOLS.md](TOOLS.md) 获取完整参考。
 
 ### 功能域概览
 
@@ -176,7 +177,7 @@ SmithUE 在编辑器状态栏显示一个圆形指示器，实时反映连接状
 
 **使用示例：**
 ```bash
-npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
+smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
 ```
 
 ---
@@ -248,7 +249,7 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 - **场景纹理**：`SceneTextureId` 通过 FProperty 反射设置，以避免未导出引擎符号的链接错误。
 - **操作系统**：仅限 Windows Win64。
 - **CLI 为可选消费端**：`smithue-cli` 是便利客户端，其安装 / 升级依赖网络（已内置 120s 超时、可取消与手动兜底）；**插件本体不依赖它即可工作**。
-- **引擎版本**：当前主线针对 UE 5.2；其他版本需自行适配。
+- **引擎版本**：当前分支针对 UE 5.1；UE5.5 请使用 `UE5.5` 分支，其他版本需单独验证。
 
 ---
 
@@ -263,12 +264,12 @@ AI 编码助手（OpenCode、Claude Code、Cline 等）应读取仓库根目录�
 - **[AGENTS.md](AGENTS.md)** — 仓库边界、构建命令、测试、高频踩坑
 - **[docs/spec/](docs/spec/)** — 工具开发规范（TOOL_SPEC + NAMING + PITFALLS）
 
-运行时操作编辑器（非开发）的 `smithue-control` 技能随 [smithue-cli](https://www.npmjs.com/package/smithue-cli) 发布（`smithue-cli skill --install`）。
+运行时操作编辑器（非开发）的 `smithue-control` 技能随[我们的 smithue-cli 兼容分支](https://github.com/s2272756972-prog/smithue-cli/tree/ue5.1-ue5.5-compat)分发（`smithue-cli skill --install`）。
 
 ---
 
 ## 历史：MCP 服务已停用
-MCP 服务已在 v0.8.0 中移除，由 `smithue-cli` 替代。迁移指南请参见 [smithue-cli MIGRATION.md](https://github.com/123dx-svg/smithue-cli/blob/main/MIGRATION.md)。
+MCP 服务已在 v0.8.0 中移除，由 `smithue-cli` 替代。迁移指南请参见 [smithue-cli MIGRATION.md](https://github.com/s2272756972-prog/smithue-cli/blob/ue5.1-ue5.5-compat/MIGRATION.md)。
 
 ---
 
@@ -284,7 +285,7 @@ smithue-cli purge --dry-run
 smithue-cli purge -y
 ```
 
-`purge` 命令会在删除前进行存活检测，并在目录为符号链接时拒绝操作以保障安全。完整参数说明请参阅 [smithue-cli README — Uninstall](https://github.com/123dx-svg/smithue-cli#uninstall)。
+`purge` 命令会在删除前进行存活检测，并在目录为符号链接时拒绝操作以保障安全。完整参数说明请参阅 [smithue-cli README — Uninstall](https://github.com/s2272756972-prog/smithue-cli/tree/ue5.1-ue5.5-compat#uninstall)。
 
 清理完成后，再执行：
 ```bash
