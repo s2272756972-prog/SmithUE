@@ -2,13 +2,13 @@
 
 > 给维护者 / AI 代理。发 SmithUE 插件（GitHub Releases）前**必读**。把经过验证的发版流程固定下来，照着走即可，避免漏掉重编、打包剔除、TOOLS.md 重生成、分支等坑。
 >
-> 占位符同 [AGENTS.md](../../AGENTS.md)：`{EngineRoot}` = UE 5.2 安装根、`{ProjectRoot}` = 宿主工程根、`{Project}` = 宿主工程名（当前环境 `{Project}` = AIScript）。**勿把绝对路径写死。**
+> 占位符同 [AGENTS.md](../../AGENTS.md)：`{EngineRoot}` = UE 5.5 安装根、`{ProjectRoot}` = 宿主工程根、`{Project}` = 宿主工程名。**勿把绝对路径写死。**
 
 ## 0. 前提
 
-- 仓库 `123dx-svg/SmithUE`，**默认分支 `UE5.2`（不是 main）**。
+- 仓库 `s2272756972-prog/SmithUE`，兼容分支 `UE5.5`。
 - 与 `smithue-cli` 版本号**完全独立**，禁止比较 / 对齐。
-- Release tag 约定 **`vX.Y.Z-UE5.2`**；资产命名 **`SmithUE-vX.Y.Z-UE5.2-Win64.zip`**。
+- Release tag 约定 **`vX.Y.Z-UE5.5`**；资产命名 **`SmithUE-vX.Y.Z-UE5.5-Win64.zip`**。
 - 编译目标是 **`{Project}Editor`**（宿主 target，当前即 `AIScriptEditor`），不是 "SmithUE"。
 
 ## 1. 关键坑（必读）
@@ -44,7 +44,7 @@ dotnet "{EngineRoot}\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll"
 
 ### 3.3 bump 版本（3 处，CJK 用 Edit）
 - `SmithUE.uplugin`：`VersionName` + `Version`。
-- `CHANGELOG.md`：`## 未发布（当前 UE5.2 分支）` → `## vX.Y.Z（UE5.2，YYYY-MM-DD）`。
+- `CHANGELOG.md`：将当前 UE5.5 兼容条目更新为实际版本与日期。
 - `README.md` / `README.en.md`：变更日志区加 `### vX.Y.Z` 条目。
 
 > **CLI 有新版（尤其改了 SKILL）时，同步 bump `kRecommendedCliVersion`**（`Source/SmithUE/Private/Utils/SmithUECliChecker.cpp`，置为最新已发布 CLI 版本）。这样旧 CLI 机器会在「Status & Updates」面板显示 *Outdated → 升级*，而升级 CLI 会触发其 `postinstall` 重新部署最新 SKILL —— 这是 SKILL 漂移自愈的关键一环（面板同时本地比对 `~/.agents/.../SKILL.md` 与已装 CLI 自带 bundle，过期则提供「重装 SKILL」）。此常量与插件版本号无关，跟随 **CLI** 版本。
@@ -59,7 +59,7 @@ git diff -- TOOLS.md                # 校验只有预期工具块变化、计数
 ```powershell
 git add SmithUE.uplugin CHANGELOG.md README.md README.en.md TOOLS.md <改动的源码>
 git commit -F <msgfile>
-git push origin UE5.2
+git push origin UE5.5
 ```
 
 ### 3.6 打包到 Saved
@@ -77,22 +77,22 @@ robocopy "{ProjectRoot}\Plugins\SmithUE" $stage /E `
 ### 3.7 zip（根目录须为 SmithUE/）
 ```powershell
 Compress-Archive -Path "{ProjectRoot}\Saved\SmithUE" `
-  -DestinationPath "{ProjectRoot}\Saved\SmithUE-vX.Y.Z-UE5.2-Win64.zip" -CompressionLevel Optimal
+  -DestinationPath "{ProjectRoot}\Saved\SmithUE-vX.Y.Z-UE5.5-Win64.zip" -CompressionLevel Optimal
 ```
 zip 根应为 `SmithUE/`，用户可直接解压进宿主 `Plugins/`。
 
 ### 3.8 GitHub Release（notes 用 Write 写，CJK 安全）
 ```powershell
-gh release create vX.Y.Z-UE5.2 `
-  --repo 123dx-svg/SmithUE --target UE5.2 `
-  --title "SmithUE vX.Y.Z (UE 5.2)" `
+gh release create vX.Y.Z-UE5.5 `
+  --repo s2272756972-prog/SmithUE --target UE5.5 `
+  --title "SmithUE vX.Y.Z (UE 5.5)" `
   --notes-file <notes.md> --latest `
-  "{ProjectRoot}\Saved\SmithUE-vX.Y.Z-UE5.2-Win64.zip"
-gh release view vX.Y.Z-UE5.2 --repo 123dx-svg/SmithUE   # 核验 Latest + 资产
+  "{ProjectRoot}\Saved\SmithUE-vX.Y.Z-UE5.5-Win64.zip"
+gh release view vX.Y.Z-UE5.5 --repo s2272756972-prog/SmithUE   # 核验 Latest + 资产
 ```
 
 ## 4. 与 CLI 发版的区别（勿混淆）
 
 - 本流程**只管插件（GitHub Releases）**。
-- **smithue-cli（npm）**走另一套：`npm version` → `npm publish --registry https://registry.npmjs.org`。详见 [smithue-cli `docs/RELEASE.md`](https://github.com/123dx-svg/smithue-cli/blob/main/docs/RELEASE.md)。
+- **smithue-cli** 通过 fork 的 GitHub 兼容分支分发。详见 [smithue-cli `docs/RELEASE.md`](https://github.com/s2272756972-prog/smithue-cli/blob/ue5.1-ue5.5-compat/docs/RELEASE.md)。
 - 两者**版本号独立递增**，发版时机互不依赖。

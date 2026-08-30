@@ -23,15 +23,16 @@ A high-performance Unreal Engine editor plugin that exposes the editor's full ca
 ### Quick Deployment (Windows)
 ```bash
 # Verify editor is running and SmithUE plugin is enabled
-npx smithue-cli status
-npx smithue-cli exec ping '{}'
-npx smithue-cli list
+npm install -g "https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz"
+smithue-cli status
+smithue-cli exec ping '{}'
+smithue-cli list
 ```
 
 ### Troubleshooting Tree
 1. Editor not running → Start Unreal Engine Editor and wait for full load
-2. Multiple instances → Use `npx smithue-cli status --pid <pid>` to specify instance
-3. Stale portfiles → Run `npx smithue-cli prune` to clean up
+2. Multiple instances → Use `smithue-cli status --pid <pid>` to specify instance
+3. Stale portfiles → Run `smithue-cli prune` to clean up
 
 ---
 
@@ -64,7 +65,7 @@ npx smithue-cli list
 
 4. Verify the connection:
    ```bash
-   npx smithue-cli status
+   smithue-cli status
    ```
 
 ### Self-check & one-click CLI install (recommended)
@@ -72,7 +73,7 @@ npx smithue-cli list
 On startup the plugin detects your **Node / npm / smithue-cli** environment in the background (non-blocking; each probe is logged to `LogSmithUE`). Open **Editor → Project Settings → Plugins → SmithUE → "Status & Updates"** to:
 
 - See Node / npm / smithue-cli versions and status;
-- **Install / upgrade smithue-cli** with one click. The button adapts to state (Not installed → Install / Outdated → Upgrade / Ready → disabled confirmation). On a poor network it **auto-times-out after 120s and is cancellable**, with classified failure hints and a manual fallback;
+- **Install / upgrade smithue-cli from our GitHub compatibility-branch tarball** with one click. Node.js 18+ and HTTPS access to GitHub are required; a local Git installation is not. The button adapts to state (Not installed → Install / Outdated → Upgrade / Ready → disabled confirmation). On a poor network it **auto-times-out after 120s and is cancellable**, with classified failure hints and a manual fallback;
 - See plugin-update reminders with a link to GitHub Releases.
 
 > Even without the CLI installed, **the plugin's HTTP tool capabilities are unaffected** — the CLI is just a convenience consumer client. This is especially friendly for restricted enterprise intranets and legacy machines.
@@ -85,7 +86,7 @@ On startup the plugin detects your **Node / npm / smithue-cli** environment in t
 
 ```
 AI Tool (OpenCode / Claude Code / Cline / GitHub Copilot)
-     ↕ smithue-cli (npx smithue-cli exec/list/search/status)
+     ↕ smithue-cli (smithue-cli exec/list/search/status)
 SmithUE UE5 Plugin (HTTP :dynamic port)
      ↕ UE Reflection API
 Unreal Engine 5.5 Editor
@@ -95,7 +96,7 @@ Unreal Engine 5.5 Editor
 
 ## Command Reference
 
-SmithUE provides **229 tools** organized across **24 functional domains**. The command set is continuously growing. Use `npx smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
+SmithUE provides **229 tools** organized across **24 functional domains**. The command set is continuously growing. Use `smithue-cli list` to see the latest available commands, or refer to [TOOLS.md](TOOLS.md) for the full reference.
 
 ### Domain Overview
 
@@ -156,7 +157,7 @@ The `generate_texture` command bridges the editor with modern generative AI. It 
 
 **Example Usage:**
 ```bash
-npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
+smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized stone floor, hand-painted style, 4K","endpoint":"https://api.openai.com/v1/images/generations","api_key":"sk-...","model":"dall-e-3","save_path":"/Game/Textures","asset_name":"T_StoneFloor"}}'
 ```
 
 ---
@@ -229,7 +230,7 @@ npx smithue-cli exec generate_texture '{"params":{"prompt":"seamless stylized st
 - **SceneTexture**: `SceneTextureId` is set via FProperty reflection to avoid link errors with unexported engine symbols.
 - **OS**: Windows Win64 only.
 - **CLI is an optional consumer**: `smithue-cli` is a convenience client; its install / upgrade depends on the network (with a built-in 120s timeout, cancel, and manual fallback). **The plugin itself works without it.**
-- **Engine version**: mainline targets UE 5.2; other versions require adaptation.
+- **Engine version**: this branch targets UE 5.5; use the `UE5.1` branch for UE5.1 and validate other versions separately.
 
 ---
 
@@ -249,7 +250,7 @@ The runtime `smithue-control` skill (for operating the editor, not development) 
 ---
 
 ## Historical: MCP Server Deprecated
-The MCP Server was removed in v0.8.0 and replaced by `smithue-cli`. See [smithue-cli MIGRATION.md](https://github.com/123dx-svg/smithue-cli/blob/main/MIGRATION.md) for the migration guide.
+The MCP Server was removed in v0.8.0 and replaced by `smithue-cli`. See [smithue-cli MIGRATION.md](https://github.com/s2272756972-prog/smithue-cli/blob/ue5.1-ue5.5-compat/MIGRATION.md) for the migration guide.
 
 ---
 

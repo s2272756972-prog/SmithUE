@@ -6,14 +6,14 @@
 
 ### 核心原则
 
-- 每个 UE 主版本维护一条长期分支（UE5.2 / UE5.7 / UE6）
+- 每个已验证 UE 版本维护一条长期分支（当前为 UE5.1 / UE5.5）
 - HTTP `/api/v1/tools` 契约是唯一兼容边界——客户端只需适配契约，不感知引擎版本
 - 共享业务逻辑下沉到 version-agnostic 层（CLI / 宿主工程 spec），C++ 层仅承担引擎相关 API 差异
 
-### UE5.2 → UE5.7 迁移注意
+### UE 版本迁移注意
 
 - API 变化评估：蓝图 SCS/ICH 接口、AssetRegistry FARFilter、FProperty 遍历在 5.7 有调整
-- 迁移节奏：功能先在 UE5.2 分支验证稳定后，再 cherry-pick 到 UE5.7 分支
+- 迁移节奏：功能先在目标分支验证稳定后，再按 API 差异 cherry-pick 到其他 UE 分支
 - 当前状态：UE5.7 分支为**策略规划**，不在本计划执行
 
 ## 二、UE6 / Verse 定位

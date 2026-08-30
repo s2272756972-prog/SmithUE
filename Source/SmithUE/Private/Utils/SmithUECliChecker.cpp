@@ -22,7 +22,9 @@
 // Minimum smithue-cli version the plugin recommends. BUMP THIS ON EVERY CLI
 // RELEASE: a higher floor makes machines with an older CLI show "Outdated → 升级",
 // and upgrading the CLI re-runs its postinstall which re-deploys the latest SKILL.
-static constexpr TCHAR kRecommendedCliVersion[] = TEXT("0.13.4");
+static constexpr TCHAR kRecommendedCliVersion[] = TEXT("0.15.1");
+static constexpr TCHAR kCompatCliInstallSpec[] = TEXT("https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz");
+static constexpr TCHAR kCompatCliInstallCommand[] = TEXT("npm i -g \"https://github.com/s2272756972-prog/smithue-cli/archive/refs/heads/ue5.1-ue5.5-compat.tar.gz\"");
 
 /** Last known CLI environment state. Written only on the game thread. */
 static FCliInfo GCachedCliInfo;
@@ -639,8 +641,9 @@ void FSmithUECliChecker::ExecuteCliInstall()
         else
         {
             const FString Args = FString::Printf(
-                TEXT("\"%s\" i -g smithue-cli@latest --fetch-timeout=60000 --fetch-retries=1 --no-audit --no-fund"),
-                *NpmCli);
+                TEXT("\"%s\" i -g %s --fetch-timeout=60000 --fetch-retries=1 --no-audit --no-fund"),
+                *NpmCli,
+                kCompatCliInstallSpec);
             Run = RunBounded(TEXT("node.exe"), Args, kInstallTimeoutSeconds, bInstallCancelRequested, Combined);
         }
 
@@ -658,9 +661,9 @@ void FSmithUECliChecker::ExecuteCliInstall()
         }
         else if (Run.bTimedOut)
         {
-            ToastMsg = TEXT("smithue-cli install timed out (120s) and was aborted. "
-                            "Check your network / npm registry, or run 'npm i -g smithue-cli@latest' manually. "
-                            "The SmithUE plugin works fine without the CLI.");
+            ToastMsg = FString::Printf(
+                TEXT("smithue-cli install timed out (120s) and was aborted. Check GitHub HTTPS access, or run '%s' manually. The SmithUE plugin works fine without the CLI."),
+                kCompatCliInstallCommand);
         }
         else if (!bSuccess)
         {
@@ -680,14 +683,15 @@ void FSmithUECliChecker::ExecuteCliInstall()
                      || Combined.Contains(TEXT("fetch failed"), ESearchCase::IgnoreCase)
                      || Combined.Contains(TEXT("network"), ESearchCase::IgnoreCase))
             {
-                ToastMsg = TEXT("smithue-cli install failed: network error. "
-                                "Check your connection / npm registry, or try 'npx smithue-cli' (no install). "
-                                "The SmithUE plugin works fine without the CLI.");
+                ToastMsg = FString::Printf(
+                    TEXT("smithue-cli install failed: GitHub/network error. Check HTTPS access to GitHub, or run '%s' manually. The SmithUE plugin works fine without the CLI."),
+                    kCompatCliInstallCommand);
             }
             else
             {
-                ToastMsg = TEXT("smithue-cli install failed. "
-                                "Run 'npm i -g smithue-cli@latest' manually for details.");
+                ToastMsg = FString::Printf(
+                    TEXT("smithue-cli install failed. Run '%s' manually for details."),
+                    kCompatCliInstallCommand);
             }
         }
 
@@ -811,6 +815,6 @@ void FSmithUECliChecker::ReinstallSkill()
     }
     else
     {
-        ShowToast(TEXT("重装 SKILL 失败（权限 / 路径问题）。可手动运行：npm i -g smithue-cli@latest。"), 9.0f);
+        ShowToast(FString::Printf(TEXT("重装 SKILL 失败（权限 / 路径问题）。可手动运行：%s。"), kCompatCliInstallCommand), 9.0f);
     }
 }

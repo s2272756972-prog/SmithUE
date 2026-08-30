@@ -592,8 +592,15 @@ namespace
 	 * subobject whose concrete class is declared in an engine-private header.
 	 * Access the reflected UPROPERTY map instead of depending on that private API.
 	 */
-	TMap<FName, FAnimGraphNodePropertyBinding>* GetAnimNodePropertyBindings(UAnimGraphNode_Base* AnimNode)
+	TMap<FName, FAnimGraphNodePropertyBinding>* GetAnimNodePropertyBindings(
+		UAnimGraphNode_Base* AnimNode,
+		UObject** OutBindingObject = nullptr)
 	{
+		if (OutBindingObject)
+		{
+			*OutBindingObject = nullptr;
+		}
+
 		if (!AnimNode)
 		{
 			return nullptr;
@@ -615,6 +622,17 @@ namespace
 		if (!MapProp)
 		{
 			return nullptr;
+		}
+		const FNameProperty* KeyProp = CastField<FNameProperty>(MapProp->KeyProp);
+		const FStructProperty* ValueProp = CastField<FStructProperty>(MapProp->ValueProp);
+		if (!KeyProp || !ValueProp || ValueProp->Struct != FAnimGraphNodePropertyBinding::StaticStruct())
+		{
+			return nullptr;
+		}
+
+		if (OutBindingObject)
+		{
+			*OutBindingObject = BindingObject;
 		}
 
 		return reinterpret_cast<TMap<FName, FAnimGraphNodePropertyBinding>*>(MapProp->ContainerPtrToValuePtr<void>(BindingObject));
@@ -2343,7 +2361,12 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBindAnimProperty(const TSha
 
 	if (VariableName.IsEmpty())
 	{
-		TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode);
+		UObject* BindingObject = nullptr;
+		TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode, &BindingObject);
+		if (BindingObject)
+		{
+			BindingObject->Modify();
+		}
 		const bool bRemoved = Bindings ? (Bindings->Remove(BindingName) > 0) : false;
 		AnimNode->ReconstructNode();
 		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
@@ -2359,22 +2382,23 @@ TSharedPtr<FJsonObject> FSmithUEBpAtomicAPI::HandleBpBindAnimProperty(const TSha
 		return FSmithUECommonUtils::CreateErrorResponse(FString::Printf(TEXT("Member variable '%s' not found on this AnimBlueprint. bp_bind_anim_property only supports member variables (not wires/functions/external paths). Available member variables: %s."), *VariableName, *JoinPropertyNames(GetBlueprintMemberVariableNames(Blueprint))));
 	}
 
-	AnimNode->SetPinVisibility(true, OptionalPinIndex);
-	if (UEdGraphPin* Pin = AnimNode->FindPin(BindingName))
-	{
-		Pin->BreakAllPinLinks();
-	}
-
 	FAnimGraphNodePropertyBinding Binding;
 	Binding.PropertyName = BindingName;
 	Binding.PropertyPath.Add(VariableName);
 	Binding.PathAsText = FText::FromString(VariableName);
 	Binding.Type = EAnimGraphNodePropertyBindingType::Property;
 	Binding.bIsBound = true;
-	TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode);
-	if (!Bindings)
+	UObject* BindingObject = nullptr;
+	TMap<FName, FAnimGraphNodePropertyBinding>* Bindings = GetAnimNodePropertyBindings(AnimNode, &BindingObject);
+	if (!Bindings || !BindingObject)
 	{
 		return FSmithUECommonUtils::CreateErrorResponse(TEXT("This anim node has no binding container. Reopen the AnimBlueprint or reconstruct the node, then retry bp_bind_anim_property."));
+	}
+	BindingObject->Modify();
+	AnimNode->SetPinVisibility(true, OptionalPinIndex);
+	if (UEdGraphPin* Pin = AnimNode->FindPin(BindingName))
+	{
+		Pin->BreakAllPinLinks();
 	}
 	Bindings->Add(BindingName, Binding);
 	AnimNode->ReconstructNode();
