@@ -2,10 +2,34 @@
 
 ## v1.15.0-UE5.5（UE5.5 兼容分支，2026-08-30）
 
-- 适配 UE5.5 的自动化测试标志、AnimGraph 属性绑定 API、材质输入遍历 API 与严格 IWYU 检查。
-- 更新已弃用的后处理材质 Blendable Location 枚举。
-- `/ready` 与端口文件新增 `engine_version`，便于同一版 CLI 区分 UE5.1 / UE5.5 编辑器实例。
-- 已通过 Unreal Engine 5.5 `BuildPlugin` Win64 构建验证。
+本分支从 `v1.15.0-UE5.2` 源码适配而来，保留原有工具协议与资产工作流，目标是让同一套 SmithUE 能力在 UE5.5 编辑器中编译、加载并可被新版 CLI 正确识别。
+
+### UE5.5 API 兼容
+
+- **自动化测试上下文标志**：将 UE5.2 的 `EAutomationTestFlags::ApplicationContextMask` 改为 UE5.5 提供的全局 `EAutomationTestFlags_ApplicationContextMask`，覆盖 4 处 CLI 检查测试注册。
+- **AnimGraph 属性绑定**：UE5.5 不再允许直接访问 `UAnimGraphNode_Base::PropertyBindings`；新增反射兼容助手，从节点的 `Binding` 实例子对象读取内部 `PropertyBindings`，并让绑定、解绑和只读查询共用同一路径。
+- **材质输入遍历**：将已移除的 `UMaterialExpression::GetInputs()` 改为 `CountInputs()` + `GetInput()`，覆盖编辑器和图命令中的输入连接检查。
+- **后处理材质枚举**：把已弃用的 Before/After Tonemapping 枚举映射到 UE5.5 的 Scene Color Blendable Location 枚举，消除旧枚举兼容警告。
+- **严格 IWYU**：为工具注册表补充 `SmithUECommonUtils.h` 显式依赖，避免依赖传递头文件才能通过编译。
+- **插件描述符**：版本标记为 `1.15.0-UE5.5`，平台字段迁移为 `PlatformAllowList`，安装文档和示例分支同步改为 `UE5.5`。
+
+### CLI / 实例识别
+
+- `/ready` 成功响应新增 `engine_version`，与原有插件 `version`、`pie_active` 并列；旧字段保持不变。
+- `%LOCALAPPDATA%/.smithue/*.port` 端口文件新增 `engine_version`，多编辑器并存时可直接区分 UE5.1、UE5.5 等实例。
+- 引擎版本在游戏线程启动阶段缓存，HTTP 工作线程只读取不可变字符串，不新增 UObject 跨线程访问。
+
+### 验证
+
+- 使用本机 Unreal Engine 5.5 AutomationTool 执行 `BuildPlugin -Rocket -TargetPlatforms=Win64`，结果为 `BUILD SUCCESSFUL`。
+- 产物生成 `Binaries/Win64/UnrealEditor-SmithUE.dll`；编译仅保留原项目已有的 `Json.h` 单体头警告。
+- 对应 `smithue-cli` 兼容分支已通过 TypeScript 类型检查、构建以及 191 项测试。
+
+### 已知边界
+
+- 当前验证覆盖 **UE5.5 / Win64 的插件构建与打包**；尚未在具体业务项目中完成编辑器启动、资产修改和 PIE 全链路验收。
+- `Mac`、`Linux` 以及从其他 UE 小版本升级的二进制兼容性未验证，应在目标平台重新编译。
+- 本条记录不代表已创建 GitHub Release，也不代表 CLI 已发布到 npm。
 
 ## v1.15.0（UE5.2，2026-07-03）
 
