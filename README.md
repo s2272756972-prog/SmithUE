@@ -96,7 +96,7 @@ mklink /D "{OtherProject}\Plugins\SmithUE" "{SourceProject}\Plugins\SmithUE"
 ```
 首次打开目标项目时会自动编译插件。
 
-**注意**：SmithUE 现在使用 `smithue-cli` 进行交互。详情请访问：https://github.com/123dx-svg/smithue-cli
+**注意**：SmithUE 现在使用 `smithue-cli` 进行交互。详情请访问：[s2272756972-prog/smithue-cli（UE5.1 / UE5.5 兼容分支）](https://github.com/s2272756972-prog/smithue-cli/tree/ue5.1-ue5.5-compat)
 
 ---
 
