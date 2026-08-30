@@ -1,5 +1,11 @@
 # SmithUE Changelog
 
+## v1.15.0-UE5.1（UE5.1 兼容分支，2026-08-30）
+
+- 移除 UE5.1 中不存在的 `MaterialDomain.h` 依赖，保留 `MaterialShared.h` 的材质域定义。
+- `/ready` 与端口文件新增 `engine_version`，便于同一版 CLI 区分 UE5.1 / UE5.5 编辑器实例。
+- 已通过 Unreal Engine 5.1 `BuildPlugin` Win64 构建验证。
+
 ## v1.15.0（UE5.2，2026-07-03）
 
 ### 新增：AnimGraph Phase 2 状态机编写工具

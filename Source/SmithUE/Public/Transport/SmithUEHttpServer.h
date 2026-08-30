@@ -44,6 +44,10 @@ public:
 	 *  Immutable after init — safe to read from the HTTP worker thread. */
 	FString PluginVersion = TEXT("unknown");
 
+	/** Unreal Engine version cached at StartServer.
+	 *  Immutable after init — safe to read from the HTTP worker thread. */
+	FString EngineVersion = TEXT("unknown");
+
 private:
 	TSharedPtr<FSocket> ListenerSocket;
 	FSmithUEHttpServerRunnable* Runnable;

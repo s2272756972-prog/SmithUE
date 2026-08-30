@@ -12,6 +12,7 @@
 #include "Interfaces/IPv4/IPv4Endpoint.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/App.h"
+#include "Misc/EngineVersion.h"
 #include "Misc/CommandLine.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/DateTime.h"
@@ -357,6 +358,7 @@ void USmithUEHttpServer::StartServer()
 	{
 		PluginVersion = Plugin->GetDescriptor().VersionName;
 	}
+	EngineVersion = FEngineVersion::Current().ToString();
 
 	// Track PIE state on the game thread so the worker-thread /ready handler can
 	// report pie_active without touching GEditor/UObjects.
@@ -493,13 +495,14 @@ void USmithUEHttpServer::EnsurePortFileWritten(bool bForce)
 	ProjectPath.ReplaceInline(TEXT("\\"), TEXT("/"));
 
 	const FString JsonContent = FString::Printf(
-		TEXT("{\"port\":%d,\"pid\":%u,\"project\":\"%s\",\"project_name\":\"%s\",\"started_at\":\"%s\",\"plugin_version\":\"%s\"}"),
+		TEXT("{\"port\":%d,\"pid\":%u,\"project\":\"%s\",\"project_name\":\"%s\",\"started_at\":\"%s\",\"plugin_version\":\"%s\",\"engine_version\":\"%s\"}"),
 		static_cast<int32>(BoundPort),
 		FPlatformProcess::GetCurrentProcessId(),
 		*ProjectPath,
 		FApp::GetProjectName(),
 		*FDateTime::UtcNow().ToIso8601(),
-		*PluginVersion
+		*PluginVersion,
+		*EngineVersion
 	);
 
 	SmithUE_WritePortFileAtomic(PortFilePath, JsonContent);

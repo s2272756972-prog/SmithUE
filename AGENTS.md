@@ -6,7 +6,7 @@
 
 ## 这是什么 / 仓库边界(最易踩错)
 
-- 本目录是 **SmithUE 插件**(C++,UE 5.2)的**独立 git 仓库**:remote `123dx-svg/SmithUE`,**默认分支 `UE5.2`(不是 main)**。
+- 本目录是 **SmithUE 插件**（C++，UE 5.1 兼容分支）的独立 git 仓库：fork remote `s2272756972-prog/SmithUE`，当前适配分支 `UE5.1`。
 - 插件嵌在宿主工程内:`{ProjectRoot}\Plugins\SmithUE`;宿主工程为 `{ProjectRoot}\{Project}.uproject`。
 - **消费端 `smithue-cli` 是另一个独立仓库**(单独 clone):remote `123dx-svg/smithue-cli`,分支 `main`,TypeScript/npm,**已发布 npm 包 <https://www.npmjs.com/package/smithue-cli>**。改 CLI 去那个仓库,别在这里找。
 - 插件 ↔ CLI 走 HTTP JSON,**动态端口**(端口文件 `%LOCALAPPDATA%\.smithue\<pid>.port`,**不是固定 13721**——CONTRIBUTING 里的 13721 仅为示例)。两者**独立版本号,禁止互相比较**。
