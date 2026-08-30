@@ -77,7 +77,7 @@ On startup the plugin detects your **Node / npm / smithue-cli** environment in t
 
 > Even without the CLI installed, **the plugin's HTTP tool capabilities are unaffected** — the CLI is just a convenience consumer client. This is especially friendly for restricted enterprise intranets and legacy machines.
 
-**Note**: SmithUE now uses `smithue-cli` for interaction. Details at: https://github.com/123dx-svg/smithue-cli
+**Note**: SmithUE now uses `smithue-cli` for interaction. See [s2272756972-prog/smithue-cli (UE5.1 / UE5.5 compatibility branch)](https://github.com/s2272756972-prog/smithue-cli/tree/ue5.1-ue5.5-compat).
 
 ---
 
